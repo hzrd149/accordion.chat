@@ -618,11 +618,18 @@ textarea {
   margin-top: 8px;
 }
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 10px 18px;
   border-radius: 4px;
   font-weight: 500;
   background: var(--accent);
   color: white;
+}
+.btn svg {
+  flex-shrink: 0;
 }
 .btn:hover {
   background: var(--accent-hover);

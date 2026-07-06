@@ -263,11 +263,11 @@ function RemoteSignerLogin({
           onKeyDown={(e) => e.key === "Enter" && connectBunker()}
         />
       </div>
-      <button className="btn full secondary" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
+      <button className="btn full ghost" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
         {bunkerBusy ? "Connecting…" : "Connect with bunker URI"}
       </button>
 
-      <button className="btn full ghost" style={{ marginTop: 8 }} onClick={onBack}>
+      <button className="btn full secondary" style={{ marginTop: 8 }} onClick={onBack}>
         <ArrowLeft size={16} /> Back
       </button>
     </div>
