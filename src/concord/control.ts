@@ -17,12 +17,18 @@ import type {
   Role,
 } from "./types";
 import { canActOn, hasPerm, resolveStanding } from "./permissions";
+import { editionHash } from "./crypto";
+import { fromHex, utf8 } from "../lib/bytes";
+
+const HEX64 = /^[0-9a-f]{64}$/i;
 
 interface Edition {
   vsk: number;
   eid: string;
   version: number;
   prev?: string;
+  /** edition_hash of THIS edition — what the next edition's `ep` must cite. */
+  selfHash: string;
   content: string;
   author: string;
   rumorId: string;
@@ -34,13 +40,18 @@ function parseEdition(d: DecodedEvent): Edition | null {
   const get = (name: string) => r.tags.find((t) => t[0] === name)?.[1];
   const vsk = get("vsk");
   const eid = get("eid");
-  if (vsk === undefined || eid === undefined) return null;
+  if (vsk === undefined || eid === undefined || !HEX64.test(eid)) return null;
   const ev = get("ev");
+  const version = ev ? parseInt(ev, 10) : 1;
+  if (!Number.isInteger(version) || version < 1) return null;
+  const prev = get("ep");
+  if (prev !== undefined && !HEX64.test(prev)) return null;
   return {
     vsk: parseInt(vsk, 10),
     eid,
-    version: ev ? parseInt(ev, 10) : 1,
-    prev: get("ep"),
+    version,
+    prev,
+    selfHash: editionHash(fromHex(eid), version, prev ? fromHex(prev) : undefined, utf8(r.content)),
     content: r.content,
     author: d.author,
     rumorId: r.id,
@@ -48,13 +59,43 @@ function parseEdition(d: DecodedEvent): Edition | null {
   };
 }
 
-/** Order two editions of the same entity: higher version wins, then lower id. */
-function better(a: Edition, b: Edition): Edition {
-  if (a.version !== b.version) return a.version > b.version ? a : b;
-  return a.rumorId < b.rumorId ? a : b;
+/**
+ * Per-entity head candidates, matching armada's CORD-04 fold (`version.fold` +
+ * `headCandidates`): the chain-verified head first — the top of the CONTIGUOUS
+ * `prev`-linked chain walked up from the lowest present version, so a dangling
+ * `prev` holds the head at the last linked edition rather than jumping to a
+ * higher-versioned orphan — then the remaining per-version winners descending
+ * as authority-gated bootstrap fallbacks. The caller takes the first candidate
+ * that passes its authority gate.
+ */
+function headCandidates(editions: Edition[]): Edition[] {
+  if (editions.length === 0) return [];
+  // Per-version winner: equal version → lower rumor id (deterministic tiebreak).
+  const byVersion = new Map<number, Edition>();
+  for (const e of editions) {
+    const w = byVersion.get(e.version);
+    if (!w || e.rumorId < w.rumorId) byVersion.set(e.version, e);
+  }
+  const versions = [...byVersion.keys()].sort((a, b) => a - b);
+  // Walk the contiguous chain up from the lowest present version.
+  let headVersion = versions[0];
+  for (let k = 0; k + 1 < versions.length; k++) {
+    const cur = byVersion.get(versions[k])!;
+    const next = byVersion.get(versions[k + 1])!;
+    if (versions[k + 1] === versions[k] + 1 && next.prev === cur.selfHash) headVersion = versions[k + 1];
+    else break;
+  }
+  const ordered: Edition[] = [byVersion.get(headVersion)!];
+  const seen = new Set<number>([headVersion]);
+  for (const v of [...versions].sort((a, b) => b - a)) {
+    if (seen.has(v)) continue;
+    seen.add(v);
+    ordered.push(byVersion.get(v)!);
+  }
+  return ordered;
 }
 
-/** Group editions by eid and return, per eid, candidates sorted best-first. */
+/** Group editions by eid and return, per eid, the ordered head candidates. */
 function groupByEntity(editions: Edition[]): Map<string, Edition[]> {
   const byEid = new Map<string, Edition[]>();
   for (const e of editions) {
@@ -62,8 +103,9 @@ function groupByEntity(editions: Edition[]): Map<string, Edition[]> {
     arr.push(e);
     byEid.set(e.eid, arr);
   }
-  for (const arr of byEid.values()) arr.sort((a, b) => (better(a, b) === a ? -1 : 1));
-  return byEid;
+  const out = new Map<string, Edition[]>();
+  for (const [eid, arr] of byEid) out.set(eid, headCandidates(arr));
+  return out;
 }
 
 export function foldControl(events: DecodedEvent[], material: JoinMaterial): CommunityState {

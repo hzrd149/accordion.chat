@@ -82,16 +82,10 @@ import {
 } from "@/concord-v2/lib/communityList";
 
 let passed = 0;
-const drifts: string[] = [];
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error("FAIL: " + msg);
   passed++;
   console.log("ok -", msg);
-}
-/** Record a known cross-client divergence without failing the wire-compat suite. */
-function drift(msg: string) {
-  drifts.push(msg);
-  console.log("⚠  DRIFT -", msg);
 }
 function section(name: string) {
   console.log(`\n── ${name} ──`);
@@ -242,9 +236,10 @@ async function main() {
     "both clients agree on folded metadata (order-independent)",
   );
 
-  // Broken chain: a v2 whose `prev` cites nothing real. Armada refuses the
-  // downgrade-gap and holds v1 (fail closed); our fold takes the highest
-  // version regardless of chain contiguity. Characterize the divergence.
+  // Broken chain: a v2 whose `prev` cites nothing real. Both folds must refuse
+  // the downgrade-gap and hold v1 (fail closed) — a forged higher-versioned
+  // orphan must not suppress the legit head (CORD-04 §1). Regression guard for
+  // the chain-contiguity enforcement in our foldControl.
   const broken = await controlWraps([
     buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: metaV1 }),
     buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 2, prevHash: "ff".repeat(32), content: metaV2 }),
@@ -252,15 +247,22 @@ async function main() {
   const ourBroken = foldOurs(broken).metadata?.name;
   const armBroken = foldArm(broken).metadata?.name;
   console.log(`   broken-chain v2 → ours="${ourBroken}"  armada="${armBroken}"`);
-  if (ourBroken === armBroken) {
-    assert(true, "both folds agree on the broken-chain case");
-  } else {
-    drift(
-      `P3: on a broken prev-chain our fold jumps to v2 ("${ourBroken}") while armada holds v1 ("${armBroken}") — ` +
-        `our foldControl does not enforce chain contiguity / refuse-downgrade (control.ts). ` +
-        `Low practical risk (a real peer never emits a dangling prev), but a forged edition could suppress a legit head.`,
-    );
-  }
+  assert(ourBroken === "Interop", "our fold refuses a dangling-prev v2 and holds v1");
+  assert(ourBroken === armBroken, "both folds agree on the broken-chain case (hold v1)");
+
+  // Equal-version fork: a chained v1→v2 plus a competing forged v1. Both impls
+  // resolve the v1 slot by the same tiebreak (lower rumor id), which in turn
+  // decides whether v2's chain holds — so the required interop property is that
+  // the two folds AGREE on the outcome, not any particular winner.
+  const forked = await controlWraps([
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: metaV1 }),
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 2, prevHash: metaH1, content: metaV2 }),
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: JSON.stringify({ name: "FORK", relays: [] }) }),
+  ]);
+  assert(
+    foldOurs(forked).metadata?.name === foldArm(forked).metadata?.name,
+    "our fold and armada agree on an equal-version fork (identical rumor-id tiebreak)",
+  );
 
   // ═══ F. Guestbook plane cross-decode + fold (both directions) ═══
   section("F. guestbook plane (join) cross-decode + fold");
@@ -435,10 +437,6 @@ async function main() {
   void getPublicKey;
   void fromHex;
   console.log(`\n🎉 CROSS-CLIENT INTEROP VERIFIED — ${passed} assertions, both clients executed against each other.`);
-  if (drifts.length > 0) {
-    console.log(`\n⚠  ${drifts.length} known divergence(s) characterized (not wire-fatal):`);
-    for (const d of drifts) console.log(`   • ${d}`);
-  }
 }
 
 main().catch((e) => {
