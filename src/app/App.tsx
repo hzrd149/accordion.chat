@@ -31,6 +31,7 @@ import {
 } from "./modals";
 import { clockTime, colorFor, formatTime, groupMessages } from "./util";
 import { UserAvatar, UserName } from "./User";
+import { useDecryptedImage } from "./useDecryptedImage";
 import type { ChatMessage } from "../concord/client";
 import type { CommunityState } from "../concord/types";
 import { PERM } from "../concord/types";
@@ -95,17 +96,15 @@ function Shell() {
       {/* Community rail */}
       <div className="rail">
         {communities.map((c) => (
-          <button
+          <RailIcon
             key={c.material.community_id}
-            className={`rail-icon ${c.material.community_id === selectedCid ? "active" : ""}`}
-            title={c.metadata?.name ?? c.material.name}
+            state={c}
+            active={c.material.community_id === selectedCid}
             onClick={() => {
               setSelectedCid(c.material.community_id);
               setNavOpen(false);
             }}
-          >
-            {(c.metadata?.name ?? c.material.name).slice(0, 2).toUpperCase()}
-          </button>
+          />
         ))}
         <div className="rail-divider" />
         <button className="rail-icon add" title="Add a community" onClick={() => setModal("addMenu")}>
@@ -235,6 +234,20 @@ function Shell() {
   );
 }
 
+function RailIcon({ state, active, onClick }: { state: CommunityState; active: boolean; onClick: () => void }) {
+  const name = state.metadata?.name ?? state.material.name;
+  const iconUrl = useDecryptedImage(state.metadata?.icon);
+  return (
+    <button
+      className={`rail-icon ${active ? "active" : ""}${iconUrl ? " has-image" : ""}`}
+      title={name}
+      onClick={onClick}
+    >
+      {iconUrl ? <img src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+    </button>
+  );
+}
+
 function Sidebar({
   state,
   selectedChannel,
@@ -256,10 +269,12 @@ function Sidebar({
   const account = useActiveAccount();
   const canManageChannels = client.canDo(state.material.community_id, PERM.MANAGE_CHANNELS);
   const canInvite = client.canDo(state.material.community_id, PERM.CREATE_INVITE);
+  const bannerUrl = useDecryptedImage(state.metadata?.banner);
 
   return (
     <div className="sidebar">
-      <div className="sidebar-header">
+      {bannerUrl && <div className="sidebar-banner" style={{ backgroundImage: `url(${bannerUrl})` }} />}
+      <div className={`sidebar-header${bannerUrl ? " has-banner" : ""}`}>
         <span title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
         <div className="sidebar-header-actions">
           <button title="Community settings" onClick={onSettings}>

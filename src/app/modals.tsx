@@ -3,8 +3,10 @@ import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./context";
 import { UserAvatar, UserName } from "./User";
+import { useDecryptedImage } from "./useDecryptedImage";
+import { ImagePlus, Trash2 } from "lucide-react";
 import { PERM } from "../concord/types";
-import type { CommunityState, PermName } from "../concord/types";
+import type { BlobPointer, CommunityState, PermName } from "../concord/types";
 import { parsePermissions, resolveStanding } from "../concord/permissions";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
@@ -239,6 +241,7 @@ function OverviewTab({ cid, state, isOwner, onClose }: { cid: string; state: Com
   const [name, setName] = useState(state.metadata?.name ?? state.material.name);
   const [description, setDescription] = useState(state.metadata?.description ?? "");
   const [busy, setBusy] = useState(false);
+  const canManageMetadata = client.canDo(cid, PERM.MANAGE_METADATA);
 
   async function save() {
     setBusy(true);
@@ -248,6 +251,15 @@ function OverviewTab({ cid, state, isOwner, onClose }: { cid: string; state: Com
 
   return (
     <>
+      {canManageMetadata && (
+        <div className="field">
+          <label>Images</label>
+          <div className="image-fields">
+            <ImageField cid={cid} which="icon" pointer={state.metadata?.icon} disabled={state.dissolved} />
+            <ImageField cid={cid} which="banner" pointer={state.metadata?.banner} disabled={state.dissolved} />
+          </div>
+        </div>
+      )}
       <div className="field">
         <label>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
@@ -279,6 +291,77 @@ function OverviewTab({ cid, state, isOwner, onClose }: { cid: string; state: Com
         )}
       </div>
     </>
+  );
+}
+
+function ImageField({
+  cid,
+  which,
+  pointer,
+  disabled,
+}: {
+  cid: string;
+  which: "icon" | "banner";
+  pointer: BlobPointer | undefined;
+  disabled: boolean;
+}) {
+  const client = useConcord();
+  const url = useDecryptedImage(pointer);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onFile(file: File) {
+    setError(null);
+    setBusy(true);
+    try {
+      await client.setCommunityImage(cid, which, file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={`image-field ${which}`}>
+      <span className="image-field-label">{which === "icon" ? "Icon" : "Banner"}</span>
+      <div className="image-field-controls">
+        <button
+          type="button"
+          className={`image-preview ${which}`}
+          disabled={disabled || busy}
+          onClick={() => inputRef.current?.click()}
+          title={url ? "Replace" : "Upload"}
+        >
+          {url ? <img src={url} alt="" /> : busy ? <span className="spin-dot" /> : <ImagePlus size={20} />}
+        </button>
+        {pointer && !busy && (
+          <button
+            type="button"
+            className="icon-btn"
+            title={`Remove ${which}`}
+            disabled={disabled}
+            onClick={() => client.removeCommunityImage(cid, which)}
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onFile(file);
+        }}
+      />
+      {busy && <span className="sub">Encrypting & uploading…</span>}
+      {error && <span className="error-text">{error}</span>}
+    </div>
   );
 }
 

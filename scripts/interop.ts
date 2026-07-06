@@ -19,8 +19,13 @@ import { createCommunity, deriveKeys, channelKeyFor } from "../src/concord/commu
 import { createStreamEvent, decodeStreamEvent } from "../src/concord/stream";
 import { messageRumor, checkChatBinding } from "../src/concord/chat";
 import { foldControl } from "../src/concord/control";
-import { buildEdition, computeEditionHash } from "../src/concord/editions";
-import { VSK } from "../src/concord/types";
+import { foldMembers } from "../src/concord/guestbook";
+import { resolveStanding } from "../src/concord/permissions";
+import { buildEdition, computeEditionHash, dissolutionRumor } from "../src/concord/editions";
+import { dissolvedGroupKey as ourDissolvedGroupKey } from "../src/concord/crypto";
+import { PERM, VSK } from "../src/concord/types";
+import type { Role } from "../src/concord/types";
+import { randomBytes } from "../src/lib/bytes";
 import { isCommunityLive } from "../src/concord/community-list";
 import type { CommunityList as OurCommunityList } from "../src/concord/community-list";
 import {
@@ -35,9 +40,12 @@ import type { ChannelMetadata, InviteBundle } from "../src/concord/types";
 
 // ── ARMADA (concord-v2, via @ alias) ─────────────────────────────────────────
 import {
+  banlistLocator,
   bytesToHex,
   channelGroupKey as armChannelGroupKey,
   controlGroupKey as armControlGroupKey,
+  dissolvedGroupKey as armDissolvedGroupKey,
+  grantLocator,
   guestbookGroupKey as armGuestbookGroupKey,
   hex32,
 } from "@/concord-v2/lib/derive";
@@ -51,7 +59,13 @@ import {
 } from "@/concord-v2/lib/stream";
 import { KIND_MESSAGE, KIND_SEAL_ENCRYPTED } from "@/concord-v2/lib/kinds";
 import { parseEdition } from "@/concord-v2/lib/edition";
-import { foldControlState } from "@/concord-v2/lib/control";
+import { foldControlState, isDissolved as armIsDissolved, sealDissolved as armSealDissolved } from "@/concord-v2/lib/control";
+import {
+  coalesceGuestbook,
+  completeMemberlist,
+  buildJoinRumor as armBuildJoinRumor,
+  sealGuestbook as armSealGuestbook,
+} from "@/concord-v2/lib/guestbook";
 import {
   buildInviteUrl as armBuildInviteUrl,
   mintLinkSigner as armMintLinkSigner,
@@ -247,6 +261,88 @@ async function main() {
         `Low practical risk (a real peer never emits a dangling prev), but a forged edition could suppress a legit head.`,
     );
   }
+
+  // ═══ F. Guestbook plane cross-decode + fold (both directions) ═══
+  section("F. guestbook plane (join) cross-decode + fold");
+  // OUR Join → armada coalesces to a present member.
+  const { wrap: ourJoinWrap } = await createStreamEvent({
+    streamSk: ours.guestbook.sk,
+    convKey: ours.guestbook.convKey,
+    author: member,
+    rumor: { kind: 3306, content: "join", tags: [["ms", "7"]] },
+  });
+  const armCoalesced = coalesceGuestbook([openWrap(ourJoinWrap, armGuest)], { nowMs: Date.now(), canKick: () => false });
+  const armMembers = completeMemberlist(armCoalesced, new Map(), new Set());
+  assert(armMembers.has(memberPub), "armada folds our guestbook Join to a present member");
+
+  // ARMADA Join → our foldMembers reads it present.
+  const armJoinWrap = await armSealGuestbook(armBuildJoinRumor(memberPub, Date.now()), armGuest, member);
+  const ourGbDecoded = [decodeStreamEvent(armJoinWrap, ours.guestbook.convKey)].filter((d): d is NonNullable<typeof d> => d !== null);
+  const noRoles = new Map<string, Role>();
+  const ourMembers = foldMembers(ourGbDecoded, new Map(), new Set(), (m) => resolveStanding(m, ownerPub, noRoles, new Map()));
+  assert(ourMembers.has(memberPub), "our fold reads armada's Join as a present member");
+
+  // ═══ G. Roles / grants / banlist fold parity (CORD-04) ═══
+  section("G. roles / grants / banlist fold parity");
+  const roleId = toHex(randomBytes(32));
+  const adminPerms =
+    PERM.MANAGE_ROLES | PERM.MANAGE_CHANNELS | PERM.MANAGE_METADATA | PERM.KICK | PERM.BAN | PERM.MANAGE_MESSAGES | PERM.CREATE_INVITE;
+  const roleJson = JSON.stringify({ role_id: roleId, name: "Admin", position: 1, permissions: adminPerms.toString(), scope: { kind: "server" }, color: 0 });
+  const grantEid = bytesToHex(grantLocator(cid, hex32(memberPub)));
+  const grantJson = JSON.stringify({ member: memberPub, role_ids: [roleId] });
+  const outsider = getPublicKey(generateSecretKey());
+  const banEid = bytesToHex(banlistLocator(cid));
+  const rgbWraps = await controlWraps([
+    buildEdition({ vsk: VSK.ROLE, eid: roleId, version: 1, content: roleJson }),
+    buildEdition({ vsk: VSK.GRANT, eid: grantEid, version: 1, content: grantJson }),
+    buildEdition({ vsk: VSK.BANLIST, eid: banEid, version: 1, content: JSON.stringify([outsider]) }),
+  ]);
+  const ourRGB = foldOurs(rgbWraps);
+  const armRGB = foldArm(rgbWraps);
+  assert(ourRGB.roles.find((r) => r.role_id === roleId)?.name === "Admin", "our fold accepts owner-minted Admin role");
+  assert(armRGB.roster.roles.find((r) => r.roleId === roleId)?.name === "Admin", "armada fold accepts the same role");
+  assert(ourRGB.grants.get(memberPub)?.includes(roleId), "our fold applies the grant to the member");
+  assert(armRGB.roster.grants.find((g) => g.member === memberPub)?.roleIds.includes(roleId), "armada fold applies the same grant");
+  assert(ourRGB.banlist.has(outsider), "our fold reads the banlist entry");
+  assert(armRGB.banned.has(outsider), "armada fold reads the same banlist entry");
+
+  // ═══ H. Private channel chat cross-decode ═══
+  section("H. private channel chat cross-decode");
+  const privKey = toHex(randomBytes(32));
+  const privChId = toHex(randomBytes(32));
+  const privMeta = { channel_id: privChId, name: "secret", private: true, key: privKey, epoch: 1 } as ChannelMetadata;
+  const ourPriv = channelKeyFor(material, privMeta);
+  const armPriv = armChannelGroupKey(hex32(privKey), hex32(privChId), 1);
+  assert(ourPriv.pk === armPriv.pk, "private channel stream address matches (independent key)");
+  const { wrap: privWrap } = await createStreamEvent({
+    streamSk: ourPriv.sk,
+    convKey: ourPriv.convKey,
+    author: member,
+    rumor: messageRumor(privChId, 1, "private hello"),
+  });
+  const privOpened = openWrap(privWrap, armPriv);
+  checkChannelBinding(privOpened, privChId, 1n);
+  assert(privOpened.content === "private hello", "armada reads our private-channel message");
+
+  // ═══ I. Dissolution tombstone cross-detect ═══
+  section("I. dissolution tombstone cross-detect");
+  const ourDissKey = ourDissolvedGroupKey(hex32(material.community_id));
+  const armDissKey = armDissolvedGroupKey(cid);
+  assert(ourDissKey.pk === armDissKey.pk, "dissolved stream address matches");
+  const { wrap: ourDissWrap } = await createStreamEvent({
+    streamSk: ourDissKey.sk,
+    convKey: ourDissKey.convKey,
+    author: owner,
+    rumor: dissolutionRumor(),
+    plaintextSeal: true,
+  });
+  assert(armIsDissolved([ourDissWrap], cid, ownerPub), "armada detects our dissolution tombstone");
+  const armDissWrap = await armSealDissolved(cid, ownerPub, owner);
+  const ourDissDec = decodeStreamEvent(armDissWrap, ourDissKey.convKey);
+  assert(
+    ourDissDec?.author === ownerPub && ourDissDec.rumor.tags.some((t) => t[0] === "vsk" && t[1] === "10"),
+    "our client detects armada's dissolution tombstone",
+  );
 
   // ═══ D. Invite link + bundle cross-client ═══
   section("D. invite links & bundles");
