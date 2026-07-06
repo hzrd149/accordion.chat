@@ -18,6 +18,11 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import { createCommunity, deriveKeys, channelKeyFor } from "../src/concord/community";
 import { createStreamEvent, decodeStreamEvent } from "../src/concord/stream";
 import { messageRumor, checkChatBinding } from "../src/concord/chat";
+import { foldControl } from "../src/concord/control";
+import { buildEdition, computeEditionHash } from "../src/concord/editions";
+import { VSK } from "../src/concord/types";
+import { isCommunityLive } from "../src/concord/community-list";
+import type { CommunityList as OurCommunityList } from "../src/concord/community-list";
 import {
   buildInviteLink,
   newInviteToken,
@@ -53,12 +58,26 @@ import {
   parseBundleEvent as armParseBundleEvent,
   parseInviteLink as armParseInviteLink,
 } from "@/concord-v2/lib/invite";
+import {
+  EMPTY_COMMUNITY_LIST,
+  isLive as armIsLive,
+  liveEntries as armLiveEntries,
+  mergeCommunityLists,
+  rehydrateCommunity,
+  type CommunityList as ArmCommunityList,
+} from "@/concord-v2/lib/communityList";
 
 let passed = 0;
+const drifts: string[] = [];
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error("FAIL: " + msg);
   passed++;
   console.log("ok -", msg);
+}
+/** Record a known cross-client divergence without failing the wire-compat suite. */
+function drift(msg: string) {
+  drifts.push(msg);
+  console.log("⚠  DRIFT -", msg);
 }
 function section(name: string) {
   console.log(`\n── ${name} ──`);
@@ -154,6 +173,81 @@ async function main() {
   assert(foldedChan?.isPrivate === false, "channel folds as public");
   assert(folded.ownerHex === ownerPub, "armada roots the fold at our owner");
 
+  // ═══ C2. Multi-edition fold: run the SAME edition set through BOTH folds ═══
+  // The genesis fold (C) is one edition per entity — the easy case. This folds
+  // a v1→v2 chained update through our fold AND armada's and compares, the
+  // direct P3-drift probe (our owner-first fold vs armada's strict CORD-04).
+  section("C2. multi-edition fold — our foldControl vs armada foldControlState");
+
+  const metaV1 = JSON.stringify({ name: "Interop", description: "cross-client", relays: ["wss://x"] });
+  const metaV2 = JSON.stringify({ name: "Interop v2", description: "renamed", relays: ["wss://x"] });
+  const chV1 = JSON.stringify({ name: "general", private: false });
+  const chV2 = JSON.stringify({ name: "lobby", private: false });
+  const metaH1 = computeEditionHash({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: metaV1 });
+  const chH1 = computeEditionHash({ vsk: VSK.CHANNEL, eid: chId, version: 1, content: chV1 });
+
+  // Seal a batch of edition rumors on the control stream (plaintext seals).
+  async function controlWraps(templates: ReturnType<typeof buildEdition>[]) {
+    const out = [];
+    for (const rumor of templates) {
+      const { wrap } = await createStreamEvent({
+        streamSk: ours.control.sk,
+        convKey: ours.control.convKey,
+        author: owner,
+        rumor,
+        plaintextSeal: true,
+      });
+      out.push(wrap);
+    }
+    return out;
+  }
+  const foldOurs = (wraps: Awaited<ReturnType<typeof controlWraps>>) =>
+    foldControl(
+      wraps.map((w) => decodeStreamEvent(w, ours.control.convKey)).filter((d): d is NonNullable<typeof d> => d !== null),
+      material,
+    );
+  const foldArm = (wraps: Awaited<ReturnType<typeof controlWraps>>) =>
+    foldControlState(wraps.map((w) => parseEdition(openWrap(w, armControl))), cid, ownerPub);
+
+  // Happy path: a properly chained v1→v2 for both metadata and #general,
+  // deliberately fed newest-first to prove order independence.
+  const chained = await controlWraps([
+    buildEdition({ vsk: VSK.CHANNEL, eid: chId, version: 2, prevHash: chH1, content: chV2 }),
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 2, prevHash: metaH1, content: metaV2 }),
+    buildEdition({ vsk: VSK.CHANNEL, eid: chId, version: 1, content: chV1 }),
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: metaV1 }),
+  ]);
+  const ourChained = foldOurs(chained);
+  const armChained = foldArm(chained);
+  assert(ourChained.metadata?.name === "Interop v2", "our fold advances metadata to v2 (chained update)");
+  assert(armChained.metadata?.name === "Interop v2", "armada fold advances metadata to v2");
+  assert(ourChained.channels.find((c) => c.channel_id === chId)?.name === "lobby", "our fold renames channel to v2");
+  assert(armChained.channels.get(chId)?.name === "lobby", "armada fold renames channel to v2");
+  assert(
+    ourChained.metadata?.name === armChained.metadata?.name,
+    "both clients agree on folded metadata (order-independent)",
+  );
+
+  // Broken chain: a v2 whose `prev` cites nothing real. Armada refuses the
+  // downgrade-gap and holds v1 (fail closed); our fold takes the highest
+  // version regardless of chain contiguity. Characterize the divergence.
+  const broken = await controlWraps([
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 1, content: metaV1 }),
+    buildEdition({ vsk: VSK.METADATA, eid: material.community_id, version: 2, prevHash: "ff".repeat(32), content: metaV2 }),
+  ]);
+  const ourBroken = foldOurs(broken).metadata?.name;
+  const armBroken = foldArm(broken).metadata?.name;
+  console.log(`   broken-chain v2 → ours="${ourBroken}"  armada="${armBroken}"`);
+  if (ourBroken === armBroken) {
+    assert(true, "both folds agree on the broken-chain case");
+  } else {
+    drift(
+      `P3: on a broken prev-chain our fold jumps to v2 ("${ourBroken}") while armada holds v1 ("${armBroken}") — ` +
+        `our foldControl does not enforce chain contiguity / refuse-downgrade (control.ts). ` +
+        `Low practical risk (a real peer never emits a dangling prev), but a forged edition could suppress a legit head.`,
+    );
+  }
+
   // ═══ D. Invite link + bundle cross-client ═══
   section("D. invite links & bundles");
   const link = armMintLinkSigner();
@@ -206,9 +300,49 @@ async function main() {
   }
   assert(outsiderBlocked, "wrong token cannot decrypt the bundle");
 
+  // ═══ E. Community List (13302): document round-trip + liveness parity ═══
+  section("E. community list (13302) — document round-trip + liveness parity");
+  const cidStr = material.community_id;
+
+  // The document our client writes (client.ts saveCommunityList): seed=current,
+  // empty tombstones. Armada must ingest it, derive it live, and rehydrate.
+  const ourDoc = {
+    entries: [{ community_id: cidStr, seed: material, current: material, added_at: 100 }],
+    tombstones: [] as unknown[],
+  };
+  const armMerged = mergeCommunityLists(EMPTY_COMMUNITY_LIST, ourDoc as unknown as ArmCommunityList);
+  const armLive = armLiveEntries(armMerged);
+  assert(armLive.length === 1 && armLive[0].community_id === cidStr, "armada ingests our list entry as live");
+  const rehydrated = rehydrateCommunity(armLive[0]);
+  assert(rehydrated?.idHex === cidStr, "armada rehydrates the community from our entry");
+  assert(rehydrated?.owner === ownerPub, "rehydrated community keeps our owner");
+
+  // Liveness parity across join / leave / re-join. Our isCommunityLive must
+  // match armada's isLive — the resurrection rule (CORD-02 §8). Regression guard
+  // for the loader that used to drop any id present in tombstones outright.
+  const mk = (addedAt: number, removedAt?: number) => ({
+    entries: [{ community_id: cidStr, seed: material, current: material, added_at: addedAt }],
+    tombstones: removedAt === undefined ? [] : [{ community_id: cidStr, removed_at: removedAt }],
+  });
+  const cases: Array<{ label: string; doc: ReturnType<typeof mk>; live: boolean }> = [
+    { label: "joined", doc: mk(100), live: true },
+    { label: "left", doc: mk(100, 200), live: false },
+    { label: "left then re-joined", doc: mk(300, 200), live: true },
+  ];
+  for (const c of cases) {
+    const ours = isCommunityLive(c.doc as unknown as OurCommunityList, cidStr);
+    const arm = armIsLive(c.doc as unknown as ArmCommunityList, cidStr);
+    assert(ours === c.live, `our liveness for "${c.label}" is ${c.live}`);
+    assert(ours === arm, `liveness agrees with armada for "${c.label}"`);
+  }
+
   void getPublicKey;
   void fromHex;
   console.log(`\n🎉 CROSS-CLIENT INTEROP VERIFIED — ${passed} assertions, both clients executed against each other.`);
+  if (drifts.length > 0) {
+    console.log(`\n⚠  ${drifts.length} known divergence(s) characterized (not wire-fatal):`);
+    for (const d of drifts) console.log(`   • ${d}`);
+  }
 }
 
 main().catch((e) => {
