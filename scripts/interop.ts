@@ -26,7 +26,13 @@ import { dissolvedGroupKey as ourDissolvedGroupKey } from "../src/concord/crypto
 import { PERM, VSK } from "../src/concord/types";
 import type { Role } from "../src/concord/types";
 import { randomBytes } from "../src/lib/bytes";
-import { isCommunityLive } from "../src/concord/community-list";
+import {
+  isCommunityLive,
+  addToList as ourAddToList,
+  removeFromList as ourRemoveFromList,
+  mergeCommunityLists as ourMergeLists,
+  EMPTY_COMMUNITY_LIST as OUR_EMPTY_LIST,
+} from "../src/concord/community-list";
 import type { CommunityList as OurCommunityList } from "../src/concord/community-list";
 import {
   buildInviteLink,
@@ -433,6 +439,26 @@ async function main() {
     assert(ours === c.live, `our liveness for "${c.label}" is ${c.live}`);
     assert(ours === arm, `liveness agrees with armada for "${c.label}"`);
   }
+
+  // Write-side merge: build a join→leave→rejoin document with OUR merge ops and
+  // prove armada derives the same liveness (regression guard for the loader that
+  // clobbered instead of merging, and never wrote tombstones on leave).
+  let built = ourAddToList(OUR_EMPTY_LIST, { community_id: cidStr, seed: material, current: material, added_at: 100 });
+  built = ourRemoveFromList(built, cidStr, 200); // leave
+  built = ourAddToList(built, { community_id: cidStr, seed: material, current: material, added_at: 300 }); // re-join
+  assert(isCommunityLive(built, cidStr), "our merge ops: join→leave→rejoin resolves live");
+  const armIngest = armLiveEntries(mergeCommunityLists(EMPTY_COMMUNITY_LIST, built as unknown as ArmCommunityList));
+  assert(armIngest.some((e) => e.community_id === cidStr), "armada agrees our rebuilt rejoin document is live");
+
+  // Our merge and armada's merge agree on the same inputs (commutative + same rule).
+  const partA = { entries: [{ community_id: cidStr, seed: material, current: material, added_at: 100 }], tombstones: [] };
+  const partB = { entries: [] as unknown[], tombstones: [{ community_id: cidStr, removed_at: 50 }] };
+  const ourM = ourMergeLists(partA as unknown as OurCommunityList, partB as unknown as OurCommunityList);
+  const armM = mergeCommunityLists(partA as unknown as ArmCommunityList, partB as unknown as ArmCommunityList);
+  assert(
+    isCommunityLive(ourM, cidStr) === armIsLive(armM, cidStr),
+    "our merge and armada merge agree on liveness (add beats older tombstone)",
+  );
 
   void getPublicKey;
   void fromHex;

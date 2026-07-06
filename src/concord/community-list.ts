@@ -77,3 +77,103 @@ export function liveCommunityEntries(list: CommunityList): CommunityListEntry[] 
   }
   return [...live.values()];
 }
+
+// ── Merge + mutation (CORD-02 §8, mirrors armada communityList.ts) ───────────
+
+export const EMPTY_COMMUNITY_LIST: CommunityList = { entries: [], tombstones: [] };
+
+/** The NIP-44 plaintext cap the serialized list must fit under (CORD-02 §8). */
+export const LIST_MAX_BYTES = 65_535;
+
+/** JSON with recursively-sorted keys — a total order for equal-epoch tiebreaks. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
+}
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = sortKeys((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Higher root_epoch wins; tie → lexicographically-lowest canonical bytes. */
+function freshest(a: JoinMaterial, b: JoinMaterial): JoinMaterial {
+  if (a.root_epoch !== b.root_epoch) return a.root_epoch > b.root_epoch ? a : b;
+  return canonicalJson(a) <= canonicalJson(b) ? a : b;
+}
+/** Lower root_epoch wins; tie → lowest canonical bytes (the backfill anchor). */
+function earliest(a: JoinMaterial, b: JoinMaterial): JoinMaterial {
+  if (a.root_epoch !== b.root_epoch) return a.root_epoch < b.root_epoch ? a : b;
+  return canonicalJson(a) <= canonicalJson(b) ? a : b;
+}
+
+function mergeEntry(x: CommunityListEntry, y: CommunityListEntry): CommunityListEntry {
+  return {
+    ...x,
+    ...y,
+    community_id: x.community_id,
+    current: freshest(x.current, y.current),
+    seed: earliest(x.seed, y.seed),
+    added_at: Math.max(x.added_at, y.added_at),
+  };
+}
+
+/**
+ * Deterministically merge two Community Lists — commutative, idempotent, nothing
+ * deleted (liveness is derived). The token here is the community_id; a tombstone
+ * always stays in the document, and the newest add vs newest removal decides
+ * liveness (CORD-02 §8).
+ */
+export function mergeCommunityLists(a: CommunityList, b: CommunityList): CommunityList {
+  const entries = new Map<string, CommunityListEntry>();
+  for (const e of [...(a.entries ?? []), ...(b.entries ?? [])]) {
+    if (!e || typeof e.community_id !== "string") continue;
+    const prev = entries.get(e.community_id);
+    entries.set(e.community_id, prev ? mergeEntry(prev, e) : e);
+  }
+  const tombstones = new Map<string, CommunityTombstone>();
+  for (const t of [...(a.tombstones ?? []), ...(b.tombstones ?? [])]) {
+    if (!t || typeof t.community_id !== "string") continue;
+    const prev = tombstones.get(t.community_id);
+    if (!prev || t.removed_at > prev.removed_at) tombstones.set(t.community_id, t);
+  }
+  return {
+    ...a,
+    ...b,
+    entries: [...entries.values()].sort((x, y) => x.community_id.localeCompare(y.community_id)),
+    tombstones: [...tombstones.values()].sort((x, y) => x.community_id.localeCompare(y.community_id)),
+  };
+}
+
+/** Add/refresh a membership (pure). */
+export function addToList(list: CommunityList, entry: CommunityListEntry): CommunityList {
+  return mergeCommunityLists(list, { entries: [entry], tombstones: [] });
+}
+
+/** Tombstone a membership on leave/removal (pure). */
+export function removeFromList(list: CommunityList, communityId: string, removedAt: number): CommunityList {
+  return mergeCommunityLists(list, { entries: [], tombstones: [{ community_id: communityId, removed_at: removedAt }] });
+}
+
+/**
+ * Replace a membership's `current` snapshot in place (an authoritative local
+ * refresh — a caught-up rename or a channel-key addition). Bypasses the
+ * epoch-keyed `freshest` so a same-epoch update can't lose the canonical-bytes
+ * tiebreak (pure).
+ */
+export function refreshCurrent(list: CommunityList, current: JoinMaterial): CommunityList {
+  const idx = (list.entries ?? []).findIndex((e) => e.community_id === current.community_id);
+  if (idx === -1) return list;
+  const entries = list.entries.map((e, i) => (i === idx ? { ...e, current } : e));
+  return { ...list, entries };
+}
+
+/** Whether the serialized (JSON) list fits under the NIP-44 plaintext cap. */
+export function withinByteCap(list: CommunityList): boolean {
+  return new TextEncoder().encode(JSON.stringify(list)).length <= LIST_MAX_BYTES;
+}

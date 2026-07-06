@@ -17,8 +17,9 @@ import {
   unlockEncryptedContent,
 } from "applesauce-core/helpers";
 import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
+import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "../lib/image";
-import { mergeBlossomServers, parseBlossomServerList, uploadBlob } from "../lib/blossom";
+import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "../lib/blossom";
 import {
   banlistLocator,
   baseRekeyGroupKey,
@@ -33,7 +34,14 @@ import { autoAuthenticate } from "./relay-auth";
 import { registerStreamKeys } from "./stream-auth";
 import type { Signer } from "./stream";
 import { foldControl } from "./control";
-import { isCommunityLive } from "./community-list";
+import {
+  addToList,
+  isCommunityLive,
+  mergeCommunityLists,
+  refreshCurrent,
+  removeFromList,
+  withinByteCap,
+} from "./community-list";
 import type { CommunityList } from "./community-list";
 import { foldMembers } from "./guestbook";
 import { resolveStanding, canActOn } from "./permissions";
@@ -129,6 +137,8 @@ export class ConcordClient {
   readonly communities$ = new BehaviorSubject<CommunityState[]>([]);
   readonly status$ = new BehaviorSubject<string>("");
   private runtimes = new Map<string, Runtime>();
+  /** The authoritative 13302 document (CORD-02 §8): merged, never clobbered. */
+  private communityList: CommunityList = { entries: [], tombstones: [] };
 
   constructor(signer: Signer, pubkey: string) {
     this.signer = signer;
@@ -355,7 +365,7 @@ export class ConcordClient {
    */
   async setCommunityImage(cid: string, which: "icon" | "banner", file: File | Blob): Promise<void> {
     const { ciphertext, key, nonce, hash } = await encryptImageBlob(file);
-    const servers = await this.blossomServers();
+    const servers = await this.blossomServers(cid);
     const url = await uploadBlob(ciphertext, servers, this.signer);
     const pointer: BlobPointer = { url, key, nonce, hash };
     await this.editMetadata(cid, { [which]: pointer });
@@ -366,19 +376,24 @@ export class ConcordClient {
     await this.editMetadata(cid, { [which]: undefined });
   }
 
-  /** The user's Blossom servers (kind 10063) merged with the app defaults. */
-  private async blossomServers(): Promise<string[]> {
-    let userServers: string[] = [];
-    try {
-      const events = await firstValueFrom(
-        pool.request(DEFAULT_RELAYS, [{ kinds: [10063], authors: [this.pubkey] }]).pipe(toArray(), timeout(3000)),
-      ).catch(() => [] as NostrEvent[]);
-      const newest = events.sort((a, b) => b.created_at - a.created_at)[0];
-      if (newest) userServers = parseBlossomServerList(newest.tags);
-    } catch {
-      // No server list — use defaults.
-    }
-    return mergeBlossomServers(userServers);
+  /**
+   * Blossom servers to upload to: the community's own list if it defines one,
+   * otherwise the user's kind-10063 list (read reactively via applesauce's
+   * `User` cast), falling back to the app defaults only if neither exists.
+   */
+  private async blossomServers(cid: string): Promise<string[]> {
+    const communityServers = this.runtimes.get(cid)?.state$.value.metadata?.blossom_servers ?? [];
+    if (communityServers.length) return dedupeServers(communityServers);
+
+    // The `User` cast reads/loads the user's kind-10063 list (a loader is wired
+    // in nostr.ts, so this resolves even on a cold store).
+    const urls = await castUser(this.pubkey, eventStore)
+      .blossomServers$.$first(3000)
+      .catch(() => undefined as URL[] | undefined);
+    const userServers = (urls ?? []).map((u) => u.toString());
+    if (userServers.length) return dedupeServers(userServers);
+
+    return DEFAULT_BLOSSOM_SERVERS;
   }
 
   async createChannel(cid: string, name: string, isPrivate: boolean): Promise<void> {
@@ -478,6 +493,9 @@ export class ConcordClient {
     if (rt.persistTimer) clearTimeout(rt.persistTimer);
     clearCache(cid);
     this.runtimes.delete(cid);
+    // Tombstone the membership so the leave propagates across devices/clients
+    // (a bare omission would merge back as still-joined — CORD-02 §8).
+    this.communityList = removeFromList(this.communityList, cid, Date.now());
     this.saveMaterialsLocal();
     this.emitCommunities();
     await this.saveCommunityList();
@@ -863,14 +881,16 @@ export class ConcordClient {
       }
       const json = getEncryptedContent(latest);
       if (!json) return;
-      const list = JSON.parse(json) as CommunityList;
-      // Liveness is DERIVED, not "present in tombstones" (CORD-02 §8): a
-      // leave-then-rejoin (added_at > removed_at) legitimately resurrects, so a
-      // blanket tombstone drop would wrongly hide re-joined communities — and
-      // silently diverge from armada, which folds liveness by timestamp.
-      for (const entry of list.entries ?? []) {
+      const remote = JSON.parse(json) as CommunityList;
+      // Merge into our document rather than replace — preserves tombstones,
+      // other-device entries, and lowest-epoch seeds (CORD-02 §8).
+      this.communityList = mergeCommunityLists(this.communityList, remote);
+      // Liveness is DERIVED, not "present in tombstones": a leave-then-rejoin
+      // (added_at > removed_at) legitimately resurrects, so a blanket tombstone
+      // drop would wrongly hide re-joined communities and diverge from armada.
+      for (const entry of this.communityList.entries) {
         const m = entry.current;
-        if (!m?.community_id || !isCommunityLive(list, m.community_id)) continue;
+        if (!m?.community_id || !isCommunityLive(this.communityList, m.community_id)) continue;
         if (!this.runtimes.has(m.community_id)) this.addRuntime(m);
       }
     } catch (err) {
@@ -881,13 +901,32 @@ export class ConcordClient {
   private async saveCommunityList(): Promise<void> {
     if (!this.signer.nip44) return;
     try {
-      const entries = [...this.runtimes.values()].map((rt) => ({
-        community_id: rt.material.community_id,
-        seed: rt.material,
-        current: rt.material,
-        added_at: Date.now(),
-      }));
-      const plaintext = JSON.stringify({ entries, tombstones: [] });
+      // Reconcile the merged document with the live runtimes: add new joins,
+      // refresh the `current` snapshot for local material changes (a fresh
+      // channel key, a rename), and resurrect a re-joined tombstoned community
+      // by bumping its add past the removal. Tombstones + other-device entries
+      // are preserved (CORD-02 §8), never clobbered.
+      const nowMs = Date.now();
+      let list = this.communityList;
+      for (const rt of this.runtimes.values()) {
+        const cid = rt.material.community_id;
+        const existing = list.entries.find((e) => e.community_id === cid);
+        if (!existing) {
+          list = addToList(list, { community_id: cid, seed: rt.material, current: rt.material, added_at: nowMs });
+          continue;
+        }
+        list = refreshCurrent(list, rt.material);
+        const tomb = list.tombstones.find((t) => t.community_id === cid);
+        if (tomb && existing.added_at <= tomb.removed_at) {
+          list = addToList(list, { ...existing, current: rt.material, added_at: nowMs });
+        }
+      }
+      this.communityList = list;
+      if (!withinByteCap(list)) {
+        console.warn("community list exceeds the NIP-44 byte cap; not publishing");
+        return;
+      }
+      const plaintext = JSON.stringify(list);
       const content = await this.signer.nip44.encrypt(this.pubkey, plaintext);
       const signed = await this.signer.signEvent({
         kind: KIND.COMMUNITY_LIST,
