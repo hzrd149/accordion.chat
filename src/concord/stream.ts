@@ -102,6 +102,36 @@ export async function createStreamEvent(opts: {
   return { wrap, rumorId };
 }
 
+// A wrap's plaintext is derived with the plane's symmetric group key (NIP-44
+// self-ECDH under `convKey`), not the user's signer, so applesauce's built-in
+// EncryptedContentSymbol cache (which is signer + counterparty-pubkey based via
+// `unlockEncryptedContent`) can't hold it. We mirror applesauce's pattern with
+// our own symbol so a wrap re-served by a relay, echoed back after our own
+// publish, or delivered by an overlapping subscription is decrypted exactly
+// once — every later sighting is a symbol lookup, not another NIP-44 decrypt +
+// signature verify + JSON parse.
+const DecodedStreamSymbol = Symbol.for("concord-decoded-stream");
+
+/** The memoised decode for a wrap, if one has been attempted on this instance. */
+export function getDecodedStream(event: RawEvent): DecodedEvent | null | undefined {
+  return Reflect.get(event, DecodedStreamSymbol) as DecodedEvent | null | undefined;
+}
+
+/**
+ * Decode a wrap, memoising the result (success *or* the null failure) on the
+ * event instance's symbol. Pass the canonical instance returned by
+ * `eventStore.add(...)` so the cache is shared across every re-delivery of the
+ * same wrap. The stored `null` also short-circuits repeated decrypt attempts on
+ * undecryptable events.
+ */
+export function decodeStreamEventCached(event: RawEvent, convKey: Uint8Array): DecodedEvent | null {
+  const cached = Reflect.get(event, DecodedStreamSymbol) as DecodedEvent | null | undefined;
+  if (cached !== undefined) return cached;
+  const decoded = decodeStreamEvent(event, convKey);
+  Reflect.set(event, DecodedStreamSymbol, decoded);
+  return decoded;
+}
+
 /**
  * Decode a Stream wrap back to its rumor + verified real author.
  * Returns null when the event is malformed, the seal signature is invalid, or

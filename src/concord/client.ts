@@ -10,14 +10,25 @@ import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import type { NostrEvent } from "nostr-tools";
 
 import { eventStore, pool } from "../nostr";
+import {
+  getEncryptedContent,
+  isEncryptedContentUnlocked,
+  setEncryptedContentCache,
+  unlockEncryptedContent,
+} from "applesauce-core/helpers";
 import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
 import {
   banlistLocator,
+  baseRekeyGroupKey,
   dissolvedGroupKey,
   grantLocator,
   inviteLinksLocator,
 } from "./crypto";
-import { createStreamEvent, decodeStreamEvent } from "./stream";
+import { createStreamEvent, decodeStreamEventCached } from "./stream";
+import { clearCache, loadCache, saveCache, MAX_CHANNEL_CACHE } from "./cache";
+import type { CachedEntry } from "./cache";
+import { autoAuthenticate } from "./relay-auth";
+import { registerStreamKeys } from "./stream-auth";
 import type { Signer } from "./stream";
 import { foldControl } from "./control";
 import { foldMembers } from "./guestbook";
@@ -47,7 +58,6 @@ import {
   KIND,
   PERM,
   VSK,
-  type ChannelMetadata,
   type CommunityMetadata,
   type CommunityState,
   type DecodedEvent,
@@ -86,12 +96,18 @@ interface Runtime {
   observed: Map<string, number>;
   planeMap: Map<string, PlaneInfo>;
   dissolved: boolean;
-  sub?: Subscription;
+  /** stable subscription: control + guestbook + dissolved planes */
+  controlSub?: Subscription;
+  /** dynamic subscription: channel planes (reopened when the set changes) */
+  channelSub?: Subscription;
+  /** signature of the current channel author set, to avoid needless resubs */
+  channelAuthors: string;
   state$: BehaviorSubject<CommunityState>;
   messages$: Map<string, BehaviorSubject<ChatMessage[]>>;
   typing: Map<string, Map<string, number>>;
   typing$: Map<string, BehaviorSubject<string[]>>;
   refoldTimer?: ReturnType<typeof setTimeout>;
+  persistTimer?: ReturnType<typeof setTimeout>;
 }
 
 function emptyState(material: JoinMaterial): CommunityState {
@@ -120,12 +136,54 @@ export class ConcordClient {
 
   // ---- lifecycle ----------------------------------------------------------
 
+  private started = false;
+  private authSub?: Subscription;
+
   async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    // Answer NIP-42 challenges from community relays so they serve our events.
+    this.authSub = autoAuthenticate(this.signer);
+    // Restore memberships from the local mirror first (instant, offline-safe),
+    // then reconcile with the relay-published Community List (kind 13302).
+    for (const m of this.loadMaterialsLocal()) {
+      if (!this.runtimes.has(m.community_id)) this.addRuntime(m);
+    }
     await this.loadCommunityList();
   }
 
+  private materialsKey(): string {
+    return `concord:communities:${this.pubkey}`;
+  }
+
+  private loadMaterialsLocal(): JoinMaterial[] {
+    try {
+      const raw = localStorage.getItem(this.materialsKey());
+      return raw ? (JSON.parse(raw) as JoinMaterial[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private saveMaterialsLocal(): void {
+    try {
+      const mats = [...this.runtimes.values()].map((r) => r.material);
+      localStorage.setItem(this.materialsKey(), JSON.stringify(mats));
+    } catch (err) {
+      console.warn("failed to mirror communities locally", err);
+    }
+  }
+
   stop(): void {
-    for (const rt of this.runtimes.values()) rt.sub?.unsubscribe();
+    this.authSub?.unsubscribe();
+    for (const rt of this.runtimes.values()) {
+      rt.controlSub?.unsubscribe();
+      rt.channelSub?.unsubscribe();
+      if (rt.persistTimer) {
+        clearTimeout(rt.persistTimer);
+        this.persistCache(rt); // flush any pending cache write before teardown
+      }
+    }
     this.runtimes.clear();
     this.communities$.next([]);
   }
@@ -308,14 +366,16 @@ export class ConcordClient {
   async createChannel(cid: string, name: string, isPrivate: boolean): Promise<void> {
     const rt = this.runtimes.get(cid)!;
     const channelId = toHex(generateSecretKey());
-    const content: ChannelMetadata = { channel_id: channelId, name, private: isPrivate };
     if (isPrivate) {
       // A private channel mints its own key; grant-holders get it in invites.
       const key = toHex(generateSecretKey());
       rt.material.channels.push({ id: channelId, key, epoch: 1, name });
+      // Persist the key both locally and into our Community List (13302), or it
+      // is lost on reload.
+      this.saveMaterialsLocal();
+      await this.saveCommunityList();
     }
     await this.publishEdition(rt, VSK.CHANNEL, channelId, JSON.stringify({ name, private: isPrivate }));
-    void content;
   }
 
   async deleteChannel(cid: string, channelId: string): Promise<void> {
@@ -395,8 +455,12 @@ export class ConcordClient {
       { kind: KIND.JOIN_LEAVE, content: "leave", tags: [["ms", String(Date.now() % 1000)]] },
       {},
     );
-    rt.sub?.unsubscribe();
+    rt.controlSub?.unsubscribe();
+    rt.channelSub?.unsubscribe();
+    if (rt.persistTimer) clearTimeout(rt.persistTimer);
+    clearCache(cid);
     this.runtimes.delete(cid);
+    this.saveMaterialsLocal();
     this.emitCommunities();
     await this.saveCommunityList();
   }
@@ -457,53 +521,108 @@ export class ConcordClient {
       observed: new Map(),
       planeMap: new Map(),
       dissolved: false,
+      channelAuthors: "",
       state$: new BehaviorSubject<CommunityState>(emptyState(material)),
       messages$: new Map(),
       typing: new Map(),
       typing$: new Map(),
     };
     this.runtimes.set(material.community_id, rt);
-    this.resubscribe(rt);
+    // Rehydrate from the local cache first, so channels/members are visible
+    // immediately, then fold and open relay subscriptions to sync anything new.
+    this.hydrate(rt);
+    this.refold(rt);
+    this.openControlSub(rt);
+    this.reconcileChannelSub(rt);
+    this.saveMaterialsLocal();
     this.emitCommunities();
     return rt;
   }
 
-  private buildPlaneMap(rt: Runtime): Map<string, PlaneInfo> {
-    const map = new Map<string, PlaneInfo>();
-    map.set(rt.keys.control.pk, { type: "control", convKey: rt.keys.control.convKey });
-    map.set(rt.keys.guestbook.pk, { type: "guestbook", convKey: rt.keys.guestbook.convKey });
-    const dissolved = dissolvedGroupKey(fromHex(rt.material.community_id));
-    map.set(dissolved.pk, { type: "dissolved", convKey: dissolved.convKey });
-    for (const [channelId, key] of rt.keys.channels) {
-      map.set(key.pk, { type: "channel", convKey: key.convKey, channelId });
-    }
-    return map;
+  private relaysFor(rt: Runtime): string[] {
+    return rt.material.relays.length ? rt.material.relays : DEFAULT_RELAYS;
   }
 
-  private resubscribe(rt: Runtime): void {
-    const map = this.buildPlaneMap(rt);
-    const oldKeys = [...rt.planeMap.keys()].sort().join(",");
-    const newKeys = [...map.keys()].sort().join(",");
-    if (rt.sub && oldKeys === newKeys) return; // no change
-    rt.planeMap = map;
-    rt.sub?.unsubscribe();
-    const authors = [...map.keys()];
-    const relays = rt.material.relays.length ? rt.material.relays : DEFAULT_RELAYS;
-    rt.sub = pool
-      .subscription(relays, [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
+  /** The control/guestbook/dissolved planes never change address within an
+   * epoch, so this subscription is opened once and never torn down mid-sync. */
+  private openControlSub(rt: Runtime): void {
+    const control = rt.keys.control;
+    const guestbook = rt.keys.guestbook;
+    const dissolved = dissolvedGroupKey(fromHex(rt.material.community_id));
+    rt.planeMap.set(control.pk, { type: "control", convKey: control.convKey });
+    rt.planeMap.set(guestbook.pk, { type: "guestbook", convKey: guestbook.convKey });
+    rt.planeMap.set(dissolved.pk, { type: "dissolved", convKey: dissolved.convKey });
+    // Register the core stream keys so an auth-gating relay can be answered as
+    // these derived addresses (NIP-42) before the control REQ is served.
+    const nextBaseRekey = baseRekeyGroupKey(
+      fromHex(rt.material.community_root),
+      fromHex(rt.material.community_id),
+      rt.material.root_epoch + 1,
+    );
+    registerStreamKeys([control, guestbook, dissolved, nextBaseRekey]);
+    const authors = [control.pk, guestbook.pk, dissolved.pk];
+    rt.controlSub?.unsubscribe();
+    rt.controlSub = pool
+      .subscription(this.relaysFor(rt), [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
       .subscribe((event) => {
         if (typeof event === "string") return;
         this.ingest(rt, event as NostrEvent);
       });
   }
 
+  /** Reopen the channel subscription only when the set of channel addresses
+   * actually changes — so discovering a channel never disturbs the control
+   * subscription (which was the source of a mid-sync teardown race). */
+  private reconcileChannelSub(rt: Runtime): void {
+    for (const [channelId, key] of rt.keys.channels) {
+      rt.planeMap.set(key.pk, { type: "channel", convKey: key.convKey, channelId });
+    }
+    // Register channel stream keys so the channel REQ can pass an auth gate.
+    registerStreamKeys([...rt.keys.channels.values()]);
+    const authors = [...rt.keys.channels.values()].map((k) => k.pk).sort();
+    const sig = authors.join(",");
+    if (sig === rt.channelAuthors) return;
+    rt.channelAuthors = sig;
+    rt.channelSub?.unsubscribe();
+    if (authors.length === 0) return;
+    rt.channelSub = pool
+      .subscription(this.relaysFor(rt), [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
+      .subscribe((event) => {
+        if (typeof event === "string") return;
+        this.ingest(rt, event as NostrEvent);
+      });
+  }
+
+  /** True when this wrap has already been folded into the plane it belongs to,
+   * so a relay re-serving it (reload, reconnect, our own publish echoed back, an
+   * overlapping subscription) needn't be decrypted or folded again. Ephemeral
+   * typing wraps are intentionally excluded — they are transient pings, not
+   * stored, and reprocessed each time. */
+  private haveWrap(rt: Runtime, info: PlaneInfo, id: string): boolean {
+    switch (info.type) {
+      case "control":
+        return rt.controlEvents.has(id);
+      case "guestbook":
+        return rt.guestbookEvents.has(id);
+      case "channel":
+        return rt.channelEvents.get(info.channelId!)?.has(id) ?? false;
+      default:
+        return false; // dissolved: a tiny, one-shot plane — let it fall through
+    }
+  }
+
   private ingest(rt: Runtime, event: NostrEvent): void {
     const info = rt.planeMap.get(event.pubkey);
     if (!info) return;
-    if (rt.controlEvents.has(event.id) || rt.guestbookEvents.has(event.id)) return;
-    const decoded = decodeStreamEvent(event, info.convKey);
+    // Cross-plane dedup (previously only control/guestbook were guarded, so
+    // channel wraps were re-decrypted on every reload and every relay echo).
+    if (event.kind !== KIND.WRAP_EPHEMERAL && this.haveWrap(rt, info, event.id)) return;
+    // Add to the applesauce EventStore first: it dedups by id and hands back the
+    // canonical instance, and decodeStreamEventCached memoises the decode on that
+    // instance's symbol — so even paths that slip past haveWrap decrypt only once.
+    const canonical = (eventStore.add(event) as NostrEvent | null) ?? event;
+    const decoded = decodeStreamEventCached(canonical, info.convKey);
     if (!decoded) return;
-    eventStore.add(event);
 
     const prev = rt.observed.get(decoded.author) ?? 0;
     if (decoded.ms > prev) rt.observed.set(decoded.author, decoded.ms);
@@ -512,10 +631,12 @@ export class ConcordClient {
       case "control":
         rt.controlEvents.set(event.id, decoded);
         this.scheduleRefold(rt);
+        this.schedulePersist(rt);
         break;
       case "guestbook":
         rt.guestbookEvents.set(event.id, decoded);
         this.scheduleRefold(rt);
+        this.schedulePersist(rt);
         break;
       case "dissolved":
         if (decoded.author === rt.material.owner && decoded.rumor.tags.some((t) => t[0] === "vsk" && t[1] === "10")) {
@@ -540,9 +661,49 @@ export class ConcordClient {
         }
         ch.set(event.id, decoded);
         this.recomputeMessages(rt, channelId);
+        this.schedulePersist(rt);
         break;
       }
     }
+  }
+
+  // ---- local cache (survives reload independent of relay behaviour) --------
+
+  private hydrate(rt: Runtime): void {
+    for (const entry of loadCache(rt.material.community_id)) {
+      const d = entry.decoded;
+      if (entry.plane === "control") rt.controlEvents.set(d.wrapId, d);
+      else if (entry.plane === "guestbook") rt.guestbookEvents.set(d.wrapId, d);
+      else if (entry.plane === "channel" && entry.channelId) {
+        let ch = rt.channelEvents.get(entry.channelId);
+        if (!ch) {
+          ch = new Map();
+          rt.channelEvents.set(entry.channelId, ch);
+        }
+        ch.set(d.wrapId, d);
+      }
+      const prev = rt.observed.get(d.author) ?? 0;
+      if (d.ms > prev) rt.observed.set(d.author, d.ms);
+    }
+  }
+
+  private schedulePersist(rt: Runtime): void {
+    if (rt.persistTimer) return;
+    rt.persistTimer = setTimeout(() => {
+      rt.persistTimer = undefined;
+      this.persistCache(rt);
+    }, 800);
+  }
+
+  private persistCache(rt: Runtime): void {
+    const entries: CachedEntry[] = [];
+    for (const d of rt.controlEvents.values()) entries.push({ plane: "control", decoded: d });
+    for (const d of rt.guestbookEvents.values()) entries.push({ plane: "guestbook", decoded: d });
+    for (const [channelId, m] of rt.channelEvents) {
+      const recent = [...m.values()].sort((a, b) => a.ms - b.ms).slice(-MAX_CHANNEL_CACHE);
+      for (const d of recent) entries.push({ plane: "channel", channelId, decoded: d });
+    }
+    saveCache(rt.material.community_id, entries);
   }
 
   private scheduleRefold(rt: Runtime): void {
@@ -563,7 +724,7 @@ export class ConcordClient {
     state.dissolved = rt.dissolved;
 
     rt.state$.next(state);
-    this.resubscribe(rt); // pick up any newly-revealed channels
+    this.reconcileChannelSub(rt); // pick up any newly-revealed channels
     // Recompute any open channel views (channel keys may have changed epoch).
     for (const channelId of rt.messages$.keys()) this.recomputeMessages(rt, channelId);
     this.emitCommunities();
@@ -703,9 +864,18 @@ export class ConcordClient {
           .request(DEFAULT_RELAYS, [{ kinds: [KIND.COMMUNITY_LIST], authors: [this.pubkey] }])
           .pipe(toArray(), timeout(8000)),
       ).catch(() => [] as NostrEvent[]);
-      const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
-      if (!latest || !this.signer.nip44) return;
-      const json = await this.signer.nip44.decrypt(this.pubkey, latest.content);
+      const newest = events.sort((a, b) => b.created_at - a.created_at)[0];
+      if (!newest || !this.signer.nip44) return;
+      // Decrypt through applesauce's encrypted-content cache: the plaintext is
+      // memoised on the (deduped) stored event, so a re-fold, StrictMode double
+      // mount, or another client instance won't re-prompt the signer.
+      eventStore.add(newest);
+      const latest = eventStore.getReplaceable(KIND.COMMUNITY_LIST, this.pubkey) ?? newest;
+      if (!isEncryptedContentUnlocked(latest)) {
+        await unlockEncryptedContent(latest, this.pubkey, this.signer);
+      }
+      const json = getEncryptedContent(latest);
+      if (!json) return;
       const list = JSON.parse(json) as { entries: { current: JoinMaterial }[]; tombstones?: unknown[] };
       const tombstoned = new Set(
         (list.tombstones ?? []).map((t) => (t as { community_id: string }).community_id),
@@ -729,7 +899,8 @@ export class ConcordClient {
         current: rt.material,
         added_at: Date.now(),
       }));
-      const content = await this.signer.nip44.encrypt(this.pubkey, JSON.stringify({ entries, tombstones: [] }));
+      const plaintext = JSON.stringify({ entries, tombstones: [] });
+      const content = await this.signer.nip44.encrypt(this.pubkey, plaintext);
       const signed = await this.signer.signEvent({
         kind: KIND.COMMUNITY_LIST,
         content,
@@ -737,6 +908,10 @@ export class ConcordClient {
         created_at: Math.floor(Date.now() / 1000),
       });
       eventStore.add(signed);
+      const stored = eventStore.getReplaceable(KIND.COMMUNITY_LIST, this.pubkey) ?? signed;
+      // Seed the decryption cache with what we just encrypted, so re-reading our
+      // own freshly-published list never round-trips the signer again.
+      setEncryptedContentCache(stored, plaintext);
       pool.publish(DEFAULT_RELAYS, signed).catch((err) => console.warn("list publish failed", err));
     } catch (err) {
       console.warn("failed to save community list", err);

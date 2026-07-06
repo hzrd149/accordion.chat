@@ -1,43 +1,79 @@
 // Applesauce singletons — one EventStore and one RelayPool for the whole app.
 
 import { EventStore } from "applesauce-core";
+import { setEncryptedContentEncryptionMethod } from "applesauce-core/helpers";
 import { RelayPool } from "applesauce-relay";
+import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
-import { ExtensionAccount, PrivateKeyAccount, ReadonlyAccount } from "applesauce-accounts/accounts";
+import { registerCommonAccountTypes } from "applesauce-accounts/accounts";
+import { KIND } from "./concord/types";
 
 export const eventStore = new EventStore();
 export const pool = new RelayPool();
 
+// Indexer / lookup relays: aggregate kind 0 (profiles) and kind 10002 (relay
+// lists) for the whole network, so profile + relay-list discovery works for any
+// pubkey we have no relay hint for. Overridable via VITE_LOOKUP_RELAYS.
+export const LOOKUP_RELAYS = (
+	import.meta.env.VITE_LOOKUP_RELAYS?.split(",").map((r: string) => r.trim()).filter(Boolean) ?? [
+		"wss://purplepag.es",
+		"wss://index.hzrd149.com",
+	]
+);
+
+// Wire the EventStore's automatic loader. On a store miss, any cast graph-walk
+// (user.profile$, user.outboxes$, eventStore.event/replaceable/addressable)
+// triggers this loader, which fetches by ID or address — following relay hints
+// first, then falling back to the indexer relays above — and adds the result
+// back to the store so reactive queries resolve.
+createEventLoaderForStore(eventStore, pool, {
+	followRelayHints: true,
+	lookupRelays: LOOKUP_RELAYS,
+});
+
 export const accounts = new AccountManager();
-accounts.registerType(PrivateKeyAccount);
-accounts.registerType(ExtensionAccount);
-accounts.registerType(ReadonlyAccount);
+registerCommonAccountTypes(accounts);
+
+// The self-encrypted Community List / Invite List use NIP-44; register so the
+// applesauce encrypted-content cache (unlockEncryptedContent) knows the method.
+setEncryptedContentEncryptionMethod(KIND.COMMUNITY_LIST, "nip44");
+setEncryptedContentEncryptionMethod(KIND.INVITE_LIST, "nip44");
 
 // Persist accounts across reloads.
 const STORAGE_KEY = "concord:accounts";
 const ACTIVE_KEY = "concord:active";
 
+// Persistence must not run until the initial restore has happened — the
+// accounts$/active$ BehaviorSubjects emit synchronously on subscribe, which
+// would otherwise overwrite storage with the empty initial state before
+// loadAccounts() gets to read it.
+let persistReady = false;
+
 export function loadAccounts() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      accounts.fromJSON(JSON.parse(raw));
-      const active = localStorage.getItem(ACTIVE_KEY);
-      if (active && accounts.getAccount(active)) accounts.setActive(active);
-    }
-  } catch (err) {
-    console.warn("failed to load accounts", err);
-  }
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY);
+		if (raw) {
+			accounts.fromJSON(JSON.parse(raw));
+			const active = localStorage.getItem(ACTIVE_KEY);
+			if (active && accounts.getAccount(active)) accounts.setActive(active);
+		}
+	} catch (err) {
+		console.warn("failed to load accounts", err);
+	} finally {
+		persistReady = true;
+	}
 }
 
 export function persistAccounts() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts.toJSON()));
-    const active = accounts.active;
-    if (active) localStorage.setItem(ACTIVE_KEY, active.id);
-  } catch (err) {
-    console.warn("failed to persist accounts", err);
-  }
+	if (!persistReady) return;
+	try {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts.toJSON()));
+		const active = accounts.active;
+		if (active) localStorage.setItem(ACTIVE_KEY, active.id);
+		else localStorage.removeItem(ACTIVE_KEY);
+	} catch (err) {
+		console.warn("failed to persist accounts", err);
+	}
 }
 
 accounts.accounts$.subscribe(() => persistAccounts());
