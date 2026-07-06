@@ -4,39 +4,48 @@ Status snapshot and prioritized backlog of what our client (`src/concord/`) does
 yet implement against the frozen Concord spec (`refs/concord/`, CORD-01..06).
 
 Context: the client is functional and verified end-to-end for the CORD-01..05 *steady
-state* (create/join, chat, roles, invites over real relays). The gaps below are the
-CORD-06 half plus lifecycle/hardening details.
+state* (create/join, chat, roles, invites over real relays). **Wire interop with armada is now
+proven for all of CORD-01..06** — `scripts/interop.ts` executes both codebases against each other
+(73 assertions, zero divergences): derivation parity, chat, control fold (chain-intact), guestbook,
+roles/grants/banlist, private channels, dissolution, invites, community-list, and the CORD-06
+rekey/refounding codec — both directions. Remaining gaps are app-feature completeness, not wire
+compatibility.
 
 **Reference implementation:** `refs/armada/client/src/concord-v2/` is an independent,
-**wire-compatible** implementation of the same spec (verified: identical kinds, all 13
-`concord/*` HKDF labels, `vector-community/v1/edition` label, invite `FRAGMENT_VERSION = 4`,
-seal rules). It has already implemented most of what we're missing, so it's a working
-reference for each gap. See `refs/armada/client/src/concord-v2/` paths cited below.
+**wire-compatible** implementation of the same spec (verified by execution, above). It has already
+implemented most of what we're missing, so it's a working reference for each gap. See
+`refs/armada/client/src/concord-v2/` paths cited below.
 
 ---
 
 ## Priority 1 — CORD-06: Rekeys & Refoundings
 
-The single biggest gap and the current **interop ceiling**: an armada-initiated refounding
-rolls `community_root`/epoch and republishes the control plane under a new root — which our
-client would never pick up, making the community unreadable to us. Until this lands, "Ban"
-is a cooperative silence (banlist + role-strip), not a cryptographic severance.
+The former **interop ceiling**: an armada-initiated refounding rolls `community_root`/epoch and
+republishes the control plane under a new root. **Reading one now works** — the wire codec is
+implemented and cross-verified, and the client follows a refounding forward.
 
-- **3303 rekey blobs** — build/parse per-recipient `{locator, wrapped}` (72-byte
-  `scope_id||epoch_be||new_key` under the rotator↔recipient NIP-44 pairwise key), chunked
-  at 120 recipients/event.
-- **Rekey-address subscription** — precompute the *next* epoch's rekey pseudonyms
-  (`concord/rekey-pseudonym`, `concord/base-rekey-pseudonym`, already labelled in `crypto.ts`)
-  and subscribe so removed/retained members converge in real time. Continuity via `prevcommit`
-  / `epoch_key_commitment` (already in `crypto.ts`).
-- **Epoch bumping + key re-derivation** on rotation across control/channel/guestbook planes.
-- **Refounding** — roll `community_root`, republish a *compacted* control plane under the new
-  root, rekey affected private channels sealed under the prior root, seed the new guestbook
-  with a snapshot (see P2). Resumable/idempotent; races converge to lexicographically-lowest key.
-- **Single-channel rekey** for private-channel member removal / public↔private conversion.
-- Wire `ban()` to compose banlist → grant-strip → refounding (see `client.ts` `ban()` NOTE).
-- Reference: `refs/armada/client/src/concord-v2/lib/rekey.ts`.
-- Files: new `src/concord/rekey.ts`; `client.ts` (subscription + `ban()`); `community.ts`.
+- **DONE — 3303 rekey codec** (`src/concord/rekey.ts`): build/parse per-recipient
+  `{locator, wrapped}` (72-byte `scope_id||epoch_be||new_key` under the rotator↔recipient NIP-44
+  pairwise key, standard-base64 transport), chunked at 120/event; rotation grouping, continuity
+  via `epoch_key_commitment`, blob lookup, lowest-key race convergence. Cross-verified against
+  armada **both directions** in `scripts/interop.ts` §J (11 assertions): refounding read + adopted,
+  new root recovered exactly, excluded member severed, wrong-prior-root rejected as a fork.
+- **DONE — rekey-address subscription + adopt/remove** (`client.ts`): the control sub now also
+  watches the next epoch's `base-rekey-pseudonym`; a complete, authorized (owner/BAN),
+  continuity-checked root rotation carrying our blob → adopt the new root (retain prior in
+  `held_roots`, re-derive keys, re-open subs at the new epoch); a complete rotation with no blob
+  for us → tombstone the membership. `JoinMaterial` gained `held_roots`/`refounder` (armada-compatible).
+- **Still TODO (app-feature, not a wire gap):**
+  - **Refound WRITE path** — a client-initiated refounding: publish the rekey blobs (codec ready)
+    then **compact** the control plane by re-wrapping each entity's head plaintext seal into the
+    new epoch. Needs `decodeStreamEvent`/`foldControl` to retain the head editions' seal events
+    (currently discarded) so they can be `rewrapSeal`'d — see armada `useRefound2` + `rewrapSeal`.
+  - **Single-channel rekey** for private-channel member removal / public↔private conversion.
+  - Wire `ban()` to compose banlist → grant-strip → refounding.
+  - History across `held_roots`: `deriveKeys` currently derives only the current epoch; old-epoch
+    wraps stay decodable via retained `planeMap` entries in-session but aren't re-fetched.
+- Reference: `refs/armada/client/src/concord-v2/lib/rekey.ts`, `hooks/useRekey2.ts`.
+- Files: `src/concord/rekey.ts` (done); `client.ts` (read path done, write path TODO); `community.ts`.
 
 ## Priority 2 — Guestbook snapshot writing (3312)
 
@@ -98,8 +107,12 @@ Risk: bad round-trip against armada's version.
   leave-then-rejoin and diverging from armada. Verified in `scripts/interop.ts` §E: our document
   round-trips through armada's `mergeCommunityLists`/`rehydrateCommunity`, and liveness agrees
   across join/leave/re-join.
-- **Still TODO:** the write side — proper seed(lowest-epoch)/current(highest-epoch) merge across
-  devices + 65,535-byte NIP-44 cap enforcement (armada `mergeCommunityLists` + `assertListBounds`).
+- **DONE (write side):** `src/concord/community-list.ts` now has the full CORD-02 §8 merge
+  (`mergeCommunityLists`/`addToList`/`removeFromList`/`refreshCurrent`, seed=lowest-epoch /
+  current=highest-epoch) + `withinByteCap` (65,535-byte NIP-44 cap). The client keeps an
+  authoritative merged document: load merges remote in (no clobber of other-device entries /
+  tombstones), `leave()` tombstones the membership, save reconciles live runtimes + enforces the
+  cap. Verified in `scripts/interop.ts` §E (join→leave→rejoin agrees with armada).
 - Files: `src/concord/community-list.ts`, `client.ts`.
 
 ## Priority 7 — Media blobs (icon / banner)
