@@ -12,7 +12,7 @@
 //   && node /tmp/interop.cjs
 
 import { PrivateKeySigner } from "applesauce-signers";
-import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
+import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from "nostr-tools";
 
 // ── OURS (src/concord) ───────────────────────────────────────────────────────
 import { createCommunity, deriveKeys, channelKeyFor } from "../src/concord/community";
@@ -22,7 +22,24 @@ import { foldControl } from "../src/concord/control";
 import { foldMembers } from "../src/concord/guestbook";
 import { resolveStanding } from "../src/concord/permissions";
 import { buildEdition, computeEditionHash, dissolutionRumor } from "../src/concord/editions";
-import { dissolvedGroupKey as ourDissolvedGroupKey } from "../src/concord/crypto";
+import {
+  dissolvedGroupKey as ourDissolvedGroupKey,
+  baseRekeyGroupKey as ourBaseRekeyGroupKey,
+  epochKeyCommitment as ourEpochKeyCommitment,
+} from "../src/concord/crypto";
+import {
+  ROOT_SCOPE_HEX,
+  buildRekeyRumors as ourBuildRekeyRumors,
+  parseRekey as ourParseRekey,
+  groupRotations as ourGroupRotations,
+  checkContinuity as ourCheckContinuity,
+  findBlob as ourFindBlob,
+  encodeWrappedKey as ourEncodeWrappedKey,
+  decodeWrappedKey as ourDecodeWrappedKey,
+  bytesToBase64 as ourBytesToBase64,
+  base64ToBytes as ourBase64ToBytes,
+  rekeyLocator as ourRekeyLocator,
+} from "../src/concord/rekey";
 import { PERM, VSK } from "../src/concord/types";
 import type { Role } from "../src/concord/types";
 import { randomBytes } from "../src/lib/bytes";
@@ -72,6 +89,19 @@ import {
   buildJoinRumor as armBuildJoinRumor,
   sealGuestbook as armSealGuestbook,
 } from "@/concord-v2/lib/guestbook";
+import {
+  buildRekeyRumors as armBuildRekeyRumors,
+  parseRekey as armParseRekey,
+  groupRotations as armGroupRotations,
+  checkContinuity as armCheckContinuity,
+  findBlob as armFindBlob,
+  encodeWrappedKey as armEncodeWrappedKey,
+  decodeWrappedKey as armDecodeWrappedKey,
+  bytesToBase64 as armBytesToBase64,
+  base64ToBytes as armBase64ToBytes,
+  myLocator as armMyLocator,
+} from "@/concord-v2/lib/rekey";
+import { baseRekeyGroupKey as armBaseRekeyGroupKey } from "@/concord-v2/lib/derive";
 import {
   buildInviteUrl as armBuildInviteUrl,
   mintLinkSigner as armMintLinkSigner,
@@ -351,6 +381,81 @@ async function main() {
     ourDissDec?.author === ownerPub && ourDissDec.rumor.tags.some((t) => t[0] === "vsk" && t[1] === "10"),
     "our client detects armada's dissolution tombstone",
   );
+
+  // ═══ J. CORD-06 rekey / refounding cross-client (the interop ceiling) ═══
+  // A root rotation delivers the new community_root as per-recipient blobs at an
+  // address derived from the PRIOR root. Prove a refounding by either client is
+  // read, continuity-checked, and adopted by the other — and that an excluded
+  // member is cryptographically severed (finds no blob).
+  section("J. CORD-06 rekey / refounding cross-client");
+  const rootBytes = hex32(material.community_root);
+  const prevCommit = toHex(ourEpochKeyCommitment(0, rootBytes));
+  assert(
+    ourBaseRekeyGroupKey(rootBytes, cid, 1).pk === armBaseRekeyGroupKey(rootBytes, cid, 1n).pk,
+    "base-rekey address for next epoch matches",
+  );
+
+  // Rotator + a kept member + an excluded member (fresh keys so we hold the sks).
+  const rotSk = generateSecretKey();
+  const rotator = new PrivateKeySigner(rotSk);
+  const rotPub = await rotator.getPublicKey();
+  const keptSk = generateSecretKey();
+  const keptPub = getPublicKey(keptSk);
+  const removedPub = getPublicKey(generateSecretKey());
+
+  // --- OUR refounding → ARMADA (kept member) reads + adopts it ---
+  const ourNewRoot = randomBytes(32);
+  const ourAddr = ourBaseRekeyGroupKey(rootBytes, cid, 1);
+  const ourPlain = ourBytesToBase64(ourEncodeWrappedKey(new Uint8Array(32), 1n, ourNewRoot));
+  const ourBlob = {
+    locator: ourRekeyLocator(rotPub, keptPub, ROOT_SCOPE_HEX, 1n),
+    wrapped: nip44.encrypt(ourPlain, nip44.getConversationKey(rotSk, keptPub)),
+  };
+  const ourRekeyRumors = ourBuildRekeyRumors({ scope: { kind: "root" }, newEpoch: 1n, prevEpoch: 0n, prevCommit }, [ourBlob]);
+  const ourRekeyWraps = [];
+  for (const rumor of ourRekeyRumors) {
+    const { wrap } = await createStreamEvent({ streamSk: ourAddr.sk, convKey: ourAddr.convKey, author: rotator, rumor });
+    ourRekeyWraps.push(wrap);
+  }
+  const armSets = armGroupRotations(ourRekeyWraps.map((w) => armParseRekey(openWrap(w, armBaseRekeyGroupKey(rootBytes, cid, 1n)))));
+  assert(armSets.length === 1 && armSets[0].complete, "armada groups our rekey into one complete rotation");
+  assert(armCheckContinuity(armSets[0], 0n, rootBytes).ok, "armada continuity-checks our rotation against the prior root");
+  const armKeptBlob = armFindBlob(armSets[0], armMyLocator(rotPub, keptPub, ROOT_SCOPE_HEX, 1n));
+  assert(armKeptBlob !== undefined, "armada (kept member) finds its blob");
+  const armNewRoot = armDecodeWrappedKey(
+    armBase64ToBytes(nip44.decrypt(armKeptBlob!.wrapped, nip44.getConversationKey(keptSk, rotPub))),
+    new Uint8Array(32),
+    1n,
+  );
+  assert(bytesToHex(armNewRoot) === toHex(ourNewRoot), "armada recovers the exact new root from our blob");
+  assert(armFindBlob(armSets[0], armMyLocator(rotPub, removedPub, ROOT_SCOPE_HEX, 1n)) === undefined, "an excluded member finds no blob (severed)");
+
+  // --- ARMADA refounding → OUR client reads + adopts it ---
+  const armNewRoot2 = randomBytes(32);
+  const armPlain2 = armBytesToBase64(armEncodeWrappedKey(new Uint8Array(32), 1n, armNewRoot2));
+  const armBlob2 = {
+    locator: armMyLocator(rotPub, keptPub, ROOT_SCOPE_HEX, 1n),
+    wrapped: nip44.encrypt(armPlain2, nip44.getConversationKey(rotSk, keptPub)),
+  };
+  const armRekeyRumors = armBuildRekeyRumors(rotPub, { scope: { kind: "root" }, newEpoch: 1n, prevEpoch: 0n, prevCommit }, [armBlob2], Date.now());
+  const armRekeyWraps = [];
+  for (const rumor of armRekeyRumors) armRekeyWraps.push(armWrapSeal(await armSealRumor(rumor, KIND_SEAL_ENCRYPTED, ourAddr, rotator), ourAddr));
+  const ourSets = ourGroupRotations(
+    armRekeyWraps.map((w) => ourParseRekey(decodeStreamEvent(w, ourAddr.convKey)!)).filter((p): p is NonNullable<typeof p> => p !== null),
+  );
+  assert(ourSets.length === 1 && ourSets[0].complete, "our client groups armada's rekey into one complete rotation");
+  assert(ourCheckContinuity(ourSets[0], 0n, rootBytes).ok, "our continuity check passes against the prior root");
+  const ourKeptBlob = ourFindBlob(ourSets[0], ourRekeyLocator(rotPub, keptPub, ROOT_SCOPE_HEX, 1n));
+  assert(ourKeptBlob !== undefined, "our client (kept member) finds its blob");
+  const ourNewRoot2 = ourDecodeWrappedKey(
+    ourBase64ToBytes(nip44.decrypt(ourKeptBlob!.wrapped, nip44.getConversationKey(keptSk, rotPub))),
+    new Uint8Array(32),
+    1n,
+  );
+  assert(toHex(ourNewRoot2) === toHex(armNewRoot2), "our client recovers the exact new root from armada's blob");
+
+  // Continuity: a rotation whose prevcommit is over the WRONG root is rejected as a fork.
+  assert(ourCheckContinuity(ourSets[0], 0n, randomBytes(32)).ok === false, "our continuity check rejects a wrong-prior-root (fork)");
 
   // ═══ D. Invite link + bundle cross-client ═══
   section("D. invite links & bundles");
