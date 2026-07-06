@@ -17,6 +17,8 @@ import {
   unlockEncryptedContent,
 } from "applesauce-core/helpers";
 import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
+import { encryptImageBlob } from "../lib/image";
+import { mergeBlossomServers, parseBlossomServerList, uploadBlob } from "../lib/blossom";
 import {
   banlistLocator,
   baseRekeyGroupKey,
@@ -31,6 +33,8 @@ import { autoAuthenticate } from "./relay-auth";
 import { registerStreamKeys } from "./stream-auth";
 import type { Signer } from "./stream";
 import { foldControl } from "./control";
+import { isCommunityLive } from "./community-list";
+import type { CommunityList } from "./community-list";
 import { foldMembers } from "./guestbook";
 import { resolveStanding, canActOn } from "./permissions";
 import type { Standing } from "./permissions";
@@ -57,6 +61,7 @@ import {
   KIND,
   PERM,
   VSK,
+  type BlobPointer,
   type CommunityMetadata,
   type CommunityState,
   type DecodedEvent,
@@ -341,6 +346,39 @@ export class ConcordClient {
     const current = rt.state$.value.metadata ?? { name: rt.material.name, relays: rt.material.relays };
     const next: CommunityMetadata = { ...current, ...patch };
     await this.publishEdition(rt, VSK.METADATA, rt.material.community_id, JSON.stringify(next));
+  }
+
+  /**
+   * Encrypt an image, upload the ciphertext to the user's Blossom servers, and
+   * publish the resulting {@link BlobPointer} into the community metadata as the
+   * icon or banner (CORD-02 §6). The plaintext never leaves the device.
+   */
+  async setCommunityImage(cid: string, which: "icon" | "banner", file: File | Blob): Promise<void> {
+    const { ciphertext, key, nonce, hash } = await encryptImageBlob(file);
+    const servers = await this.blossomServers();
+    const url = await uploadBlob(ciphertext, servers, this.signer);
+    const pointer: BlobPointer = { url, key, nonce, hash };
+    await this.editMetadata(cid, { [which]: pointer });
+  }
+
+  /** Clear the community icon or banner. */
+  async removeCommunityImage(cid: string, which: "icon" | "banner"): Promise<void> {
+    await this.editMetadata(cid, { [which]: undefined });
+  }
+
+  /** The user's Blossom servers (kind 10063) merged with the app defaults. */
+  private async blossomServers(): Promise<string[]> {
+    let userServers: string[] = [];
+    try {
+      const events = await firstValueFrom(
+        pool.request(DEFAULT_RELAYS, [{ kinds: [10063], authors: [this.pubkey] }]).pipe(toArray(), timeout(3000)),
+      ).catch(() => [] as NostrEvent[]);
+      const newest = events.sort((a, b) => b.created_at - a.created_at)[0];
+      if (newest) userServers = parseBlossomServerList(newest.tags);
+    } catch {
+      // No server list — use defaults.
+    }
+    return mergeBlossomServers(userServers);
   }
 
   async createChannel(cid: string, name: string, isPrivate: boolean): Promise<void> {
@@ -825,13 +863,14 @@ export class ConcordClient {
       }
       const json = getEncryptedContent(latest);
       if (!json) return;
-      const list = JSON.parse(json) as { entries: { current: JoinMaterial }[]; tombstones?: unknown[] };
-      const tombstoned = new Set(
-        (list.tombstones ?? []).map((t) => (t as { community_id: string }).community_id),
-      );
+      const list = JSON.parse(json) as CommunityList;
+      // Liveness is DERIVED, not "present in tombstones" (CORD-02 §8): a
+      // leave-then-rejoin (added_at > removed_at) legitimately resurrects, so a
+      // blanket tombstone drop would wrongly hide re-joined communities — and
+      // silently diverge from armada, which folds liveness by timestamp.
       for (const entry of list.entries ?? []) {
         const m = entry.current;
-        if (!m?.community_id || tombstoned.has(m.community_id)) continue;
+        if (!m?.community_id || !isCommunityLive(list, m.community_id)) continue;
         if (!this.runtimes.has(m.community_id)) this.addRuntime(m);
       }
     } catch (err) {
