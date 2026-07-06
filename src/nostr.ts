@@ -16,18 +16,15 @@ export const pool = new RelayPool();
 // signer over relays. Wire the global fallbacks so every NostrConnectSigner —
 // including ones rehydrated by NostrConnectAccount.fromJSON on reload — uses our
 // single RelayPool without needing methods threaded through each constructor.
-NostrConnectSigner.subscriptionMethod = pool.subscription.bind(pool);
-NostrConnectSigner.publishMethod = pool.publish.bind(pool);
+NostrConnectSigner.pool = pool;
 
 // Default relays a fresh nostrconnect:// (QR) login listens on for the remote
 // signer's reply. The user can override these per-login in the UI, or globally
 // via VITE_NOSTR_CONNECT_RELAYS.
-export const NOSTR_CONNECT_RELAYS = (
-	import.meta.env.VITE_NOSTR_CONNECT_RELAYS?.split(",").map((r: string) => r.trim()).filter(Boolean) ?? [
-		"wss://bucket.coracle.social",
-		"wss://relay.nsec.app",
-	]
-);
+export const NOSTR_CONNECT_RELAYS =
+	import.meta.env.VITE_NOSTR_CONNECT_RELAYS?.split(",")
+		.map((r: string) => r.trim())
+		.filter(Boolean) ?? ["wss://bucket.coracle.social", "wss://relay.nsec.app"];
 
 // Permissions we request from a remote signer. The user's own key signs the
 // CORD-01 seals (SEAL_ENCRYPTED/PLAINTEXT), the self-encrypted Community/Invite
@@ -46,12 +43,9 @@ export const CONCORD_SIGNER_PERMISSIONS = [
 // Indexer / lookup relays: aggregate kind 0 (profiles) and kind 10002 (relay
 // lists) for the whole network, so profile + relay-list discovery works for any
 // pubkey we have no relay hint for. Overridable via VITE_LOOKUP_RELAYS.
-export const LOOKUP_RELAYS = (
-	import.meta.env.VITE_LOOKUP_RELAYS?.split(",").map((r: string) => r.trim()).filter(Boolean) ?? [
-		"wss://purplepag.es",
-		"wss://index.hzrd149.com",
-	]
-);
+export const LOOKUP_RELAYS = import.meta.env.VITE_LOOKUP_RELAYS?.split(",")
+	.map((r: string) => r.trim())
+	.filter(Boolean) ?? ["wss://purplepag.es", "wss://index.hzrd149.com"];
 
 // Wire the EventStore's automatic loader. On a store miss, any cast graph-walk
 // (user.profile$, user.outboxes$, eventStore.event/replaceable/addressable)
