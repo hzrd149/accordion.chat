@@ -35,24 +35,26 @@ implemented and cross-verified, and the client follows a refounding forward.
   continuity-checked root rotation carrying our blob → adopt the new root (retain prior in
   `held_roots`, re-derive keys, re-open subs at the new epoch); a complete rotation with no blob
   for us → tombstone the membership. `JoinMaterial` gained `held_roots`/`refounder` (armada-compatible).
+- **DONE — Refound WRITE path** (`client.ts` `refound(cid, {keep, exclude})`): publish the rekey
+  blobs, **compact** the control plane by re-wrapping each entity's head plaintext seal into the
+  new epoch (`stream.ts` `rewrapSeal`; `decodeStreamEvent` now retains the seal, `foldControl`
+  exposes `state.heads`), seed the new Guestbook with a snapshot, then follow forward. Requires
+  BAN/ownership + NIP-44. Compaction cross-verified in `interop.ts` §J (armada folds our re-wrapped
+  head under the new root, original author preserved); snapshot in §F.
 - **Still TODO (app-feature, not a wire gap):**
-  - **Refound WRITE path** — a client-initiated refounding: publish the rekey blobs (codec ready)
-    then **compact** the control plane by re-wrapping each entity's head plaintext seal into the
-    new epoch. Needs `decodeStreamEvent`/`foldControl` to retain the head editions' seal events
-    (currently discarded) so they can be `rewrapSeal`'d — see armada `useRefound2` + `rewrapSeal`.
   - **Single-channel rekey** for private-channel member removal / public↔private conversion.
-  - Wire `ban()` to compose banlist → grant-strip → refounding.
+  - Wire `ban()` to compose banlist → grant-strip → `refound()`; surface a Refound action in the UI.
   - History across `held_roots`: `deriveKeys` currently derives only the current epoch; old-epoch
     wraps stay decodable via retained `planeMap` entries in-session but aren't re-fetched.
 - Reference: `refs/armada/client/src/concord-v2/lib/rekey.ts`, `hooks/useRekey2.ts`.
-- Files: `src/concord/rekey.ts` (done); `client.ts` (read path done, write path TODO); `community.ts`.
+- Files: `src/concord/rekey.ts`, `stream.ts`, `control.ts`, `guestbook.ts`, `client.ts` (all done).
 
-## Priority 2 — Guestbook snapshot writing (3312)
+## Priority 2 — Guestbook snapshot writing (3312) — DONE
 
-We *read* kind 3312 snapshots but never *write* them. Needed to seed the guestbook on a
-refounding (P1) and to bound cold-start scan cost.
+`src/concord/guestbook.ts` `buildSnapshotRumors` chunks the memberlist at ≤400 members/event
+(refounder-signed); `client.ts` `refound()` seeds the new epoch's Guestbook with it. Cross-verified
+in `interop.ts` §F (our snapshot seeds armada's coalesce and vice-versa).
 
-- Chunk the memberlist at ≤400 members/event, refounder-signed.
 - Reference: `refs/armada/client/src/concord-v2/lib/guestbook.ts`.
 - Files: `src/concord/guestbook.ts`, `client.ts`.
 
