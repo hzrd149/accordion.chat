@@ -15,16 +15,25 @@ There is no test runner configured yet.
 
 ## Architecture
 
-This is a **React 19 + TypeScript + Vite** single-page app, currently the starter scaffold (`src/App.tsx` is the Vite/React welcome page). The entry point is `src/main.tsx`, which mounts `<App />` into `#root` under `<StrictMode>`. Static assets served from the web root live in `public/`; imported assets live in `src/assets/`.
+This is a **React 19 + TypeScript + Vite** single-page app implementing a **Concord** client — Discord-style, end-to-end-encrypted communities over Nostr (spec in `refs/concord/`, a git submodule). Nostr I/O goes through the **applesauce** SDK. The entry point is `src/main.tsx`, which wraps `<App />` in `EventStoreProvider` + `AccountsProvider`.
 
-### Nostr intent
+### Layout
 
-The project is pre-wired to build a **Nostr client**, even though no Nostr code exists yet. This is the key non-obvious fact about the repo:
+- `src/lib/bytes.ts` — hex/byte/base64url helpers.
+- `src/concord/` — the protocol core, UI-agnostic and unit-testable:
+  - `crypto.ts` — CORD-02 Appendix A derivations (HKDF, `group_key`, `scalar_normalize`, `community_id`, `edition_hash`, locators). Uses `@noble/hashes`/`@noble/curves` (v2 — import subpaths carry `.js`, e.g. `@noble/hashes/hkdf.js`).
+  - `stream.ts` — CORD-01 wrap/seal/rumor envelope (`createStreamEvent`/`decodeStreamEvent`), NIP-44 self-ECDH via `nostr-tools`.
+  - `control.ts` (edition folding + roster), `guestbook.ts` (membership), `permissions.ts`, `community.ts` (key derivation + genesis), `editions.ts`, `chat.ts`, `invite.ts` (CORD-05 link codec), `types.ts`.
+  - `client.ts` — `ConcordClient`, the reactive engine: subscribes planes via `pool.subscription`, decodes + folds into RxJS `BehaviorSubject`s, publishes optimistically (local echo first, relay in background). One instance per logged-in account.
+- `src/nostr.ts` — the single `EventStore`, `RelayPool`, and `AccountManager` (persisted to localStorage).
+- `src/app/` — React UI (Discord-style shell in `App.tsx`, `modals.tsx`, `Login.tsx`, `context.tsx`, `theme.css`).
+- `scripts/selftest.ts` — protocol round-trip/interop test. Run: `node_modules/.bin/esbuild scripts/selftest.ts --bundle --platform=node --format=cjs --outfile=/tmp/t.cjs && node /tmp/t.cjs`.
+- `scripts/drive.mjs` / `drive2.mjs` — puppeteer-core browser drivers (single-user flow; two-user E2E over real relays). Need a running `pnpm dev` and `/usr/bin/google-chrome`.
 
-- `.mcp.json` enables two MCP servers (both enabled in `.claude/settings.local.json`):
-  - **applesauce** (`https://mcp.applesauce.build/mcp`) — docs/examples for the applesauce reactive Nostr SDK (RxJS + a single in-memory EventStore).
-  - **nostr** (`@nostrbook/mcp`) — reference for Nostr protocol, NIPs, and event kinds.
-- When implementing Nostr features, use the **`applesauce` skill** and these MCP servers rather than guessing at NIP/event/relay APIs.
+### Nostr references
+
+- `.mcp.json` enables two MCP servers: **applesauce** (`https://mcp.applesauce.build/mcp`) and **nostr** (`@nostrbook/mcp`). Use the **`applesauce` skill** and these servers rather than guessing at NIP/event/relay APIs.
+- Relays must serve kind `1059` by author without enforcing NIP-59's `p`-tag guard (Concord reverses the wrap); `relay.damus.io` and `nos.lol` work.
 
 ### TypeScript project layout
 
