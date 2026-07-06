@@ -11,7 +11,11 @@ Package manager is **pnpm** (see `pnpm-lock.yaml`).
 - `pnpm lint` — run ESLint over the repo
 - `pnpm preview` — serve the production build locally
 
-There is no test runner configured yet.
+There is no test runner configured yet. The closest thing to a test is the protocol round-trip in `scripts/selftest.ts` (see below) — run it after touching anything in `src/concord/`.
+
+## Git workflow
+
+**Commit after every feature or self-contained change.** Once a feature works (built/linted, and — if it touches `src/concord/` — the self-test passes), make a focused git commit before moving on. Keep commits small and scoped to one feature so history stays reviewable; don't batch unrelated changes into one commit. Do not push unless asked.
 
 ## Architecture
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./context";
-import { displayName, colorFor, initials } from "./util";
+import { UserAvatar, UserName } from "./User";
 import { PERM } from "../concord/types";
 import type { CommunityState, PermName } from "../concord/types";
 import { parsePermissions, resolveStanding } from "../concord/permissions";
@@ -364,11 +364,11 @@ function MembersTab({ cid, state }: { cid: string; state: CommunityState }) {
         const banned = state.banlist.has(m);
         return (
           <div key={m} className="role-row" style={{ flexWrap: "wrap" }}>
-            <div className="avatar" style={{ background: colorFor(m) }}>
-              {initials(m)}
-            </div>
+            <UserAvatar pubkey={m} />
             <div>
-              <div className="m-name">{displayName(m)}</div>
+              <div className="m-name">
+                <UserName pubkey={m} />
+              </div>
               {standing.isOwner && <span className="badge owner">Owner</span>}
             </div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>

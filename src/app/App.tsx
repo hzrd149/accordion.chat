@@ -1,4 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  DoorOpen,
+  Hand,
+  Hash,
+  Lock,
+  LogOut,
+  MessageSquare,
+  Landmark,
+  Pencil,
+  Plus,
+  Reply,
+  Settings,
+  Trash2,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { accounts } from "../nostr";
 import { ConcordProvider, useConcord } from "./context";
@@ -11,7 +27,8 @@ import {
   JoinModal,
   Modal,
 } from "./modals";
-import { colorFor, displayName, formatTime, initials } from "./util";
+import { clockTime, colorFor, formatTime, groupMessages } from "./util";
+import { UserAvatar, UserName } from "./User";
 import type { ChatMessage } from "../concord/client";
 import type { CommunityState } from "../concord/types";
 import { PERM } from "../concord/types";
@@ -30,7 +47,10 @@ function Shell() {
   const status = use$(client.status$);
   const [selectedCid, setSelectedCid] = useState<string | null>(null);
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [modal, setModal] = useState<null | "create" | "join" | "channel" | "invite" | "admin" | "addMenu">(null);
+  const [modal, setModal] = useState<
+    null | "create" | "join" | "channel" | "invite" | "admin" | "addMenu" | "leave"
+  >(null);
+  const [leaving, setLeaving] = useState(false);
 
   // Auto-select a community and channel as they arrive.
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
@@ -66,7 +86,7 @@ function Shell() {
         ))}
         <div className="rail-divider" />
         <button className="rail-icon add" title="Add a community" onClick={() => setModal("addMenu")}>
-          +
+          <Plus size={24} />
         </button>
       </div>
 
@@ -79,13 +99,14 @@ function Shell() {
             onNewChannel={() => setModal("channel")}
             onInvite={() => setModal("invite")}
             onSettings={() => setModal("admin")}
+            onLeave={() => setModal("leave")}
           />
           {selectedChannel ? (
             <ChatView cid={activeState.material.community_id} channelId={selectedChannel} state={activeState} />
           ) : (
             <div className="main">
               <div className="empty">
-                <div className="big">💬</div>
+                <div className="big"><MessageSquare size={48} /></div>
                 <div>Select or create a channel to start chatting.</div>
               </div>
             </div>
@@ -95,7 +116,7 @@ function Shell() {
       ) : (
         <div className="main">
           <div className="empty">
-            <div className="big">🏛️</div>
+            <div className="big"><Landmark size={48} /></div>
             <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Concord</h2>
             <div>Create your own community or join one with an invite link.</div>
             <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
@@ -151,6 +172,37 @@ function Shell() {
       {modal === "admin" && activeState && (
         <AdminModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
       )}
+      {modal === "leave" && activeState && (
+        <Modal onClose={() => (leaving ? undefined : setModal(null))}>
+          <h2>Leave {activeState.metadata?.name ?? activeState.material.name}?</h2>
+          <p style={{ color: "var(--text-muted)" }}>
+            You'll be removed from this community and it will disappear from your list. You can
+            rejoin later with an invite link.
+          </p>
+          <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+            <button
+              className="btn danger"
+              disabled={leaving}
+              onClick={async () => {
+                const cid = activeState.material.community_id;
+                setLeaving(true);
+                try {
+                  await client.leave(cid);
+                  setSelectedChannel(null);
+                  setModal(null);
+                } finally {
+                  setLeaving(false);
+                }
+              }}
+            >
+              {leaving ? "Leaving…" : "Leave community"}
+            </button>
+            <button className="btn ghost" disabled={leaving} onClick={() => setModal(null)}>
+              Cancel
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {status && <div className="status-toast">{status}</div>}
     </div>
@@ -164,6 +216,7 @@ function Sidebar({
   onNewChannel,
   onInvite,
   onSettings,
+  onLeave,
 }: {
   state: CommunityState;
   selectedChannel: string | null;
@@ -171,6 +224,7 @@ function Sidebar({
   onNewChannel: () => void;
   onInvite: () => void;
   onSettings: () => void;
+  onLeave: () => void;
 }) {
   const client = useConcord();
   const account = useActiveAccount();
@@ -181,9 +235,14 @@ function Sidebar({
     <div className="sidebar">
       <div className="sidebar-header">
         <span title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
-        <button title="Community settings" onClick={onSettings}>
-          ⚙
-        </button>
+        <div className="sidebar-header-actions">
+          <button title="Community settings" onClick={onSettings}>
+            <Settings size={18} />
+          </button>
+          <button title="Leave community" onClick={onLeave}>
+            <DoorOpen size={18} />
+          </button>
+        </div>
       </div>
       {state.dissolved && (
         <div className="error" style={{ padding: 12 }}>
@@ -195,7 +254,7 @@ function Sidebar({
           <span>Channels</span>
           {canManageChannels && !state.dissolved && (
             <button title="Create channel" onClick={onNewChannel}>
-              +
+              <Plus size={16} />
             </button>
           )}
         </div>
@@ -205,22 +264,23 @@ function Sidebar({
             className={`channel ${ch.channel_id === selectedChannel ? "active" : ""}`}
             onClick={() => onSelectChannel(ch.channel_id)}
           >
-            <span className="hash">{ch.private ? "🔒" : "#"}</span>
+            <span className="hash">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
             <span>{ch.name}</span>
           </button>
         ))}
         {canInvite && !state.dissolved && (
           <button className="channel" style={{ marginTop: 12, color: "var(--success)" }} onClick={onInvite}>
-            <span>➕ Invite people</span>
+            <span className="hash"><UserPlus size={16} /></span>
+            <span>Invite people</span>
           </button>
         )}
       </div>
       <div className="account-bar">
-        <div className="avatar" style={{ background: colorFor(account?.pubkey ?? "") }}>
-          {initials(account?.pubkey ?? "")}
-        </div>
+        <UserAvatar pubkey={account?.pubkey ?? ""} />
         <div className="who">
-          <div className="name">{displayName(account?.pubkey ?? "")}</div>
+          <div className="name">
+            <UserName pubkey={account?.pubkey ?? ""} />
+          </div>
           <div className="sub">{account?.pubkey === state.material.owner ? "Owner" : "Member"}</div>
         </div>
         <button
@@ -230,7 +290,7 @@ function Sidebar({
             if (account) accounts.removeAccount(account);
           }}
         >
-          ⎋
+          <LogOut size={18} />
         </button>
       </div>
     </div>
@@ -240,14 +300,12 @@ function Sidebar({
 function ChatView({ cid, channelId, state }: { cid: string; channelId: string; state: CommunityState }) {
   const client = useConcord();
   const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? []) as ChatMessage[];
-  const typing = (use$(() => client.getTyping$(cid, channelId), [cid, channelId]) ?? []) as string[];
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [text, setText] = useState("");
   const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lastTyping = useRef(0);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -270,15 +328,6 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
     await client.sendMessage(cid, channelId, value, reply);
   }
 
-  function onInput(v: string) {
-    setText(v);
-    const now = Date.now();
-    if (now - lastTyping.current > 3000 && v) {
-      lastTyping.current = now;
-      void client.sendTyping(cid, channelId);
-    }
-  }
-
   async function saveEdit(id: string) {
     const value = editText.trim();
     setEditing(null);
@@ -286,12 +335,15 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   }
 
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  // Collapse consecutive messages from the same author (within 2 min) into one
+  // avatar group — Discord/Slack style. Replies always start a fresh header.
+  const groups = useMemo(() => groupMessages(messages), [messages]);
 
   return (
     <div className="main">
       <div className="main-header">
-        <span className="hash" style={{ fontSize: 20, color: "var(--text-muted)" }}>
-          {channel?.private ? "🔒" : "#"}
+        <span className="hash" style={{ color: "var(--text-muted)" }}>
+          {channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
         <span className="title">{channel?.name}</span>
         <span className="topic">{state.metadata?.description}</span>
@@ -302,24 +354,22 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
           <div className="filler" />
           {messages.length === 0 && (
             <div className="empty">
-              <div className="big">👋</div>
+              <div className="big"><Hand size={48} /></div>
               <div>This is the beginning of #{channel?.name}. Say hello!</div>
             </div>
           )}
           {messages.map((m) => (
             <div className="msg" key={m.id}>
-              <div className="avatar" style={{ background: colorFor(m.author) }}>
-                {initials(m.author)}
-              </div>
+              <UserAvatar pubkey={m.author} />
               <div className="msg-body">
                 {m.replyTo && (
                   <div className="msg-reply">
-                    ↩ {displayName(m.replyTo.author)}: {byId.get(m.replyTo.id)?.content ?? "message"}
+                    <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {byId.get(m.replyTo.id)?.content ?? "message"}
                   </div>
                 )}
                 <div className="msg-head">
                   <span className="name" style={{ color: colorFor(m.author) }}>
-                    {displayName(m.author)}
+                    <UserName pubkey={m.author} />
                   </span>
                   <span className="time">{formatTime(m.ms)}</span>
                   {m.author === state.material.owner && <span className="badge owner">Owner</span>}
@@ -366,7 +416,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                     </button>
                   ))}
                   <button title="Reply" onClick={() => setReplyTo({ id: m.id, author: m.author })}>
-                    ↩
+                    <Reply size={16} />
                   </button>
                   {m.author === client.pubkey && !m.deleted && (
                     <>
@@ -377,10 +427,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                           setEditText(m.edited ?? m.content);
                         }}
                       >
-                        ✎
+                        <Pencil size={16} />
                       </button>
                       <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
-                        🗑
+                        <Trash2 size={16} />
                       </button>
                     </>
                   )}
@@ -394,8 +444,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         <div className="composer">
           {replyTo && (
             <div className="reply-bar">
-              <span>Replying to {displayName(replyTo.author)}</span>
-              <button onClick={() => setReplyTo(null)}>✕</button>
+              <span>
+                Replying to <UserName pubkey={replyTo.author} />
+              </span>
+              <button onClick={() => setReplyTo(null)}><X size={16} /></button>
             </div>
           )}
           <div className="box">
@@ -403,7 +455,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
               rows={1}
               placeholder={`Message ${channel?.private ? "🔒" : "#"}${channel?.name ?? ""}`}
               value={text}
-              onChange={(e) => onInput(e.target.value)}
+              onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -414,13 +466,6 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
             <button className="send" onClick={send}>
               Send
             </button>
-          </div>
-          <div className="typing">
-            {typing.length > 0 && (
-              <span>
-                <b>{typing.map(displayName).join(", ")}</b> {typing.length === 1 ? "is" : "are"} typing…
-              </span>
-            )}
           </div>
         </div>
       )}
@@ -435,10 +480,10 @@ function MemberList({ state }: { state: CommunityState }) {
 
   const row = (m: string) => (
     <div className="member" key={m} title={m}>
-      <div className="avatar" style={{ background: colorFor(m) }}>
-        {initials(m)}
-      </div>
-      <span className="m-name">{displayName(m)}</span>
+      <UserAvatar pubkey={m} />
+      <span className="m-name">
+        <UserName pubkey={m} />
+      </span>
       {m === state.material.owner && <span className="badge owner">Owner</span>}
     </div>
   );

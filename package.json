@@ -19,6 +19,7 @@
     "applesauce-react": "^6.0.0",
     "applesauce-relay": "^6.2.1",
     "applesauce-signers": "^6.2.2",
+    "lucide-react": "^1.23.0",
     "nostr-tools": "^2.23.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

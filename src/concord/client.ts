@@ -42,7 +42,6 @@ import {
   reactionRumor,
   deleteRumor,
   editRumor,
-  typingRumor,
   checkChatBinding,
 } from "./chat";
 import {
@@ -67,7 +66,6 @@ import {
 } from "./types";
 
 const DEFAULT_RELAYS = STOCK_RELAYS;
-const TYPING_TTL = 6000;
 
 export interface ChatMessage {
   id: string;
@@ -104,8 +102,6 @@ interface Runtime {
   channelAuthors: string;
   state$: BehaviorSubject<CommunityState>;
   messages$: Map<string, BehaviorSubject<ChatMessage[]>>;
-  typing: Map<string, Map<string, number>>;
-  typing$: Map<string, BehaviorSubject<string[]>>;
   refoldTimer?: ReturnType<typeof setTimeout>;
   persistTimer?: ReturnType<typeof setTimeout>;
 }
@@ -199,16 +195,6 @@ export class ConcordClient {
       subj = new BehaviorSubject<ChatMessage[]>([]);
       rt.messages$.set(channelId, subj);
       this.recomputeMessages(rt, channelId);
-    }
-    return subj;
-  }
-
-  getTyping$(cid: string, channelId: string): BehaviorSubject<string[]> {
-    const rt = this.runtimes.get(cid)!;
-    let subj = rt.typing$.get(channelId);
-    if (!subj) {
-      subj = new BehaviorSubject<string[]>([]);
-      rt.typing$.set(channelId, subj);
     }
     return subj;
   }
@@ -315,12 +301,6 @@ export class ConcordClient {
     const rt = this.runtimes.get(cid)!;
     const epoch = this.channelEpoch(rt, channelId);
     await this.publishToPlane(rt, this.channelKey(rt, channelId), deleteRumor(channelId, epoch, targetId), {});
-  }
-
-  async sendTyping(cid: string, channelId: string): Promise<void> {
-    const rt = this.runtimes.get(cid)!;
-    const epoch = this.channelEpoch(rt, channelId);
-    await this.publishToPlane(rt, this.channelKey(rt, channelId), typingRumor(channelId, epoch), { ephemeral: true });
   }
 
   // ---- admin actions ------------------------------------------------------
@@ -524,8 +504,6 @@ export class ConcordClient {
       channelAuthors: "",
       state$: new BehaviorSubject<CommunityState>(emptyState(material)),
       messages$: new Map(),
-      typing: new Map(),
-      typing$: new Map(),
     };
     this.runtimes.set(material.community_id, rt);
     // Rehydrate from the local cache first, so channels/members are visible
@@ -595,9 +573,7 @@ export class ConcordClient {
 
   /** True when this wrap has already been folded into the plane it belongs to,
    * so a relay re-serving it (reload, reconnect, our own publish echoed back, an
-   * overlapping subscription) needn't be decrypted or folded again. Ephemeral
-   * typing wraps are intentionally excluded — they are transient pings, not
-   * stored, and reprocessed each time. */
+   * overlapping subscription) needn't be decrypted or folded again. */
   private haveWrap(rt: Runtime, info: PlaneInfo, id: string): boolean {
     switch (info.type) {
       case "control":
@@ -649,10 +625,6 @@ export class ConcordClient {
         if (!checkChatBinding(decoded.rumor.tags, channelId, info.epoch ?? this.channelEpoch(rt, channelId))) {
           // epoch may differ per held key; accept if channel matches at least
           if (decoded.rumor.tags.find((t) => t[0] === "channel")?.[1] !== channelId) return;
-        }
-        if (decoded.rumor.kind === KIND.TYPING) {
-          this.handleTyping(rt, channelId, decoded.author);
-          return;
         }
         let ch = rt.channelEvents.get(channelId);
         if (!ch) {
@@ -808,28 +780,6 @@ export class ConcordClient {
     subj.next([...byId.values()].sort((a, b) => a.ms - b.ms));
   }
 
-  private handleTyping(rt: Runtime, channelId: string, author: string): void {
-    if (author === this.pubkey) return;
-    let map = rt.typing.get(channelId);
-    if (!map) {
-      map = new Map();
-      rt.typing.set(channelId, map);
-    }
-    map.set(author, Date.now() + TYPING_TTL);
-    this.emitTyping(rt, channelId);
-    setTimeout(() => this.emitTyping(rt, channelId), TYPING_TTL + 100);
-  }
-
-  private emitTyping(rt: Runtime, channelId: string): void {
-    const subj = rt.typing$.get(channelId);
-    if (!subj) return;
-    const map = rt.typing.get(channelId);
-    const now = Date.now();
-    const active: string[] = [];
-    if (map) for (const [author, expiry] of map) if (expiry > now) active.push(author);
-    subj.next(active);
-  }
-
   // ---- publishing ---------------------------------------------------------
 
   private async publishToPlane(
@@ -849,7 +799,6 @@ export class ConcordClient {
     const relays = rt.material.relays.length ? rt.material.relays : DEFAULT_RELAYS;
     // Optimistic local echo first, so the UI updates even before relays ack.
     if (!opts.ephemeral) this.ingest(rt, wrap);
-    else this.handleTyping(rt, rumor.tags.find((t) => t[0] === "channel")?.[1] ?? "", this.pubkey);
     // Publish in the background — never block the UI on relay round-trips.
     pool.publish(relays, wrap).catch((err) => console.warn("publish failed", err));
     return rumorId;

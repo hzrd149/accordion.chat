@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Landmark } from "lucide-react";
 import { nip19 } from "nostr-tools";
 import { ExtensionAccount, PrivateKeyAccount } from "applesauce-accounts/accounts";
 import { accounts } from "../nostr";
@@ -48,7 +49,7 @@ export function Login() {
   return (
     <div className="login-screen">
       <div className="login-card">
-        <div className="logo">🏛️</div>
+        <div className="logo"><Landmark size={48} /></div>
         <h1>Concord</h1>
         <p>Discord-style communities on Nostr, end-to-end encrypted.</p>
 

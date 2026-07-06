@@ -47,10 +47,6 @@ export function editRumor(channelId: string, epoch: number, targetId: string, ne
   return { kind: KIND.EDIT, content: newText, tags };
 }
 
-export function typingRumor(channelId: string, epoch: number): RumorTemplate {
-  return { kind: KIND.TYPING, content: "", tags: base(channelId, epoch) };
-}
-
 /** Validate a decoded chat rumor's channel/epoch binding (CORD-03 §3). */
 export function checkChatBinding(tags: string[][], channelId: string, epoch: number): boolean {
   const ch = tags.find((t) => t[0] === "channel")?.[1];

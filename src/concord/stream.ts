@@ -52,7 +52,7 @@ export function rumorMs(rumor: Rumor): number {
  * Build a signed durable Stream event (kind 1059 wrap) at `streamPk`.
  *
  * @param plaintextSeal use kind 20014 (Control Plane); otherwise kind 20013.
- * @param ephemeral use the ephemeral wrap (kind 21059, e.g. typing indicators).
+ * @param ephemeral use the ephemeral wrap (kind 21059) for transient pings.
  */
 export async function createStreamEvent(opts: {
   streamSk: Uint8Array;

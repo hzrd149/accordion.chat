@@ -43,6 +43,22 @@ button {
   color: inherit;
 }
 
+/* lucide icons render as inline svgs; center them and drop baseline descender gap */
+button > svg {
+  display: block;
+}
+.hash {
+  display: inline-flex;
+  align-items: center;
+}
+.empty .big,
+.login-card .logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
 input,
 textarea {
   font-family: inherit;
@@ -135,6 +151,11 @@ textarea {
   font-weight: 600;
   color: var(--text-bright);
 }
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .sidebar-header button {
   background: none;
   color: var(--text-muted);
@@ -142,6 +163,9 @@ textarea {
 }
 .sidebar-header button:hover {
   color: var(--text-bright);
+}
+.sidebar-header-actions button[title="Leave community"]:hover {
+  color: var(--danger, #f04747);
 }
 .channel-list {
   flex: 1;
@@ -435,15 +459,6 @@ textarea {
 }
 .composer .send:hover {
   background: var(--accent-hover);
-}
-.typing {
-  height: 22px;
-  font-size: 13px;
-  color: var(--text-muted);
-  padding: 0 16px;
-}
-.typing b {
-  color: var(--text);
 }
 
 .reply-bar {

@@ -21,10 +21,6 @@ export function shortNpub(pubkey: string): string {
   }
 }
 
-export function displayName(pubkey: string): string {
-  return shortNpub(pubkey);
-}
-
 export function formatTime(ms: number): string {
   const d = new Date(ms);
   const today = new Date();
@@ -32,4 +28,29 @@ export function formatTime(ms: number): string {
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (sameDay) return `Today at ${time}`;
   return `${d.toLocaleDateString([], { month: "numeric", day: "numeric", year: "2-digit" })} ${time}`;
+}
+
+/** Bare clock time (e.g. "3:41 PM") — used for the hover timestamp on grouped messages. */
+export function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * Groups consecutive messages into avatar "bubbles" — Discord/Slack style. A new
+ * group starts when the author changes or the gap since the *previous* message
+ * exceeds `gapMs` (clock resets on each message, so an active thread stays one
+ * group). Messages must already be in chronological order.
+ */
+export function groupMessages<T extends { author: string; ms: number }>(
+  messages: T[],
+  gapMs = 2 * 60 * 1000,
+): T[][] {
+  const groups: T[][] = [];
+  for (const m of messages) {
+    const group = groups[groups.length - 1];
+    const prev = group?.[group.length - 1];
+    if (group && prev && prev.author === m.author && m.ms - prev.ms < gapMs) group.push(m);
+    else groups.push([m]);
+  }
+  return groups;
 }
