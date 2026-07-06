@@ -113,10 +113,29 @@ Encrypted-blob pointers `{url,key,nonce,hash}` are typed but never fetched/decry
 
 ## Cross-client interop test (do this first)
 
-Before/while closing gaps, prove real interop against the reference implementation:
-run our two-user driver against armada's concord-v2 on a shared relay and confirm
-join → chat → roles → invite round-trip. Extend `scripts/drive2.mjs` (or add
-`scripts/drive-interop.mjs`) with one identity on each client. This both validates the
-"wire-compatible" claim end-to-end and surfaces P3/P6 drift early.
+**Done at the library level** — `scripts/interop.ts` executes OUR `src/concord`
+core and armada's `concord-v2` reference against each other in-memory (29 assertions,
+all green). Because Concord is pure derived-address 1059 traffic, an in-memory
+round-trip is the definitive wire-compat proof — a relay only moves the same bytes.
+It covers, both directions where applicable:
+
+- **derivation parity** — control/guestbook/channel stream addresses and conversation
+  keys match byte-for-byte (the linchpin: else the two clients never meet on a relay);
+- **chat plane** — our message opens in armada and vice-versa, channel/epoch binding
+  enforced, rumor ids stable;
+- **control fold** — our owner-signed genesis editions fold under armada's *strict*
+  CORD-04 fold to the same metadata + `#general` (early evidence **against** P3 drift,
+  at least for the genesis case — the folder still needs the multi-edition / chain /
+  refuse-downgrade cases exercised);
+- **invites** — links, tokens, bootstrap relays, and encrypted bundles round-trip both
+  ways; wrong token rejected.
+
+Run: `node_modules/.bin/esbuild scripts/interop.ts --bundle --platform=node --format=cjs
+--alias:@=$PWD/refs/armada/client/src --outfile=/tmp/interop.cjs && node /tmp/interop.cjs`
+
+**Still worth doing:** (a) a *browser-level* two-client run (our app UI + armada's UI on
+a shared relay) to catch subscription/auth/timing drift the in-memory test can't; (b)
+extend `interop.ts` to fold **multi-edition** control sets (updates, `prev` chains,
+refuse-downgrade) and the **13302 community-list merge** to surface P3/P6 drift directly.
 
 Also keep `scripts/selftest.ts` (crypto interop assertions) green as each gap lands.
