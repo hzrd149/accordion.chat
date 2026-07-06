@@ -764,3 +764,118 @@ textarea {
   color: var(--text-bright);
   border-bottom-color: var(--accent);
 }
+
+/* ---- Mobile layout ---- */
+/* Drawer controls are desktop-hidden; the media query below turns them on. */
+.drawer-toggle,
+.drawer-backdrop {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .app {
+    height: 100dvh;
+  }
+
+  /* Rail + sidebar slide in together as a single left drawer. */
+  .rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 72px;
+    width: min(260px, calc(100vw - 72px - 48px));
+    z-index: 40;
+    transform: translateX(calc(-100% - 72px));
+    transition: transform 0.22s ease;
+  }
+  .app.nav-open .rail,
+  .app.nav-open .sidebar {
+    transform: translateX(0);
+  }
+
+  /* Member list slides in as a right drawer. */
+  .members {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: min(260px, 80vw);
+    z-index: 40;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+  }
+  .app.members-open .members {
+    transform: translateX(0);
+  }
+
+  /* Scrim behind an open drawer — tap to dismiss. */
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .app.nav-open .drawer-backdrop,
+  .app.members-open .drawer-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Floating drawer toggles. */
+  .drawer-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 8px;
+    z-index: 45;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--bg-sidebar);
+    color: var(--text-bright);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  }
+  .drawer-toggle.nav {
+    left: 8px;
+  }
+  .drawer-toggle.members {
+    right: 8px;
+  }
+
+  /* Keep the chat header clear of the floating toggles. */
+  .main-header {
+    padding-left: 56px;
+    padding-right: 56px;
+  }
+  .main-header .topic {
+    display: none;
+  }
+}
+
+/* On touch (no hover) the action toolbar can't reveal on hover and would
+   otherwise overlap the message — surface it on tap via :focus-within instead.
+   The .msg is tabIndex=-1 so a tap focuses it without entering the tab order. */
+@media (hover: none) {
+  .msg:focus,
+  .msg:focus-within {
+    outline: none;
+  }
+  .msg:focus .msg-actions,
+  .msg:focus-within .msg-actions {
+    display: flex;
+  }
+}

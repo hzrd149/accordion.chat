@@ -5,6 +5,7 @@ import {
   Hash,
   Lock,
   LogOut,
+  Menu,
   MessageSquare,
   Landmark,
   Pencil,
@@ -13,6 +14,7 @@ import {
   Settings,
   Trash2,
   UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
@@ -51,6 +53,13 @@ function Shell() {
     null | "create" | "join" | "channel" | "invite" | "admin" | "addMenu" | "leave"
   >(null);
   const [leaving, setLeaving] = useState(false);
+  // Mobile off-canvas drawers (ignored by CSS above the tablet breakpoint).
+  const [navOpen, setNavOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const closeDrawers = () => {
+    setNavOpen(false);
+    setMembersOpen(false);
+  };
 
   // Auto-select a community and channel as they arrive.
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
@@ -71,7 +80,18 @@ function Shell() {
   }, [activeState, selectedChannel]);
 
   return (
-    <div className="app">
+    <div className={`app${navOpen ? " nav-open" : ""}${membersOpen ? " members-open" : ""}`}>
+      {/* Mobile-only drawer controls (hidden by CSS on larger screens). */}
+      <button className="drawer-toggle nav" title="Menu" onClick={() => setNavOpen((v) => !v)}>
+        <Menu size={22} />
+      </button>
+      {activeState && (
+        <button className="drawer-toggle members" title="Members" onClick={() => setMembersOpen((v) => !v)}>
+          <Users size={22} />
+        </button>
+      )}
+      <div className="drawer-backdrop" onClick={closeDrawers} />
+
       {/* Community rail */}
       <div className="rail">
         {communities.map((c) => (
@@ -79,7 +99,10 @@ function Shell() {
             key={c.material.community_id}
             className={`rail-icon ${c.material.community_id === selectedCid ? "active" : ""}`}
             title={c.metadata?.name ?? c.material.name}
-            onClick={() => setSelectedCid(c.material.community_id)}
+            onClick={() => {
+              setSelectedCid(c.material.community_id);
+              setNavOpen(false);
+            }}
           >
             {(c.metadata?.name ?? c.material.name).slice(0, 2).toUpperCase()}
           </button>
@@ -95,7 +118,10 @@ function Shell() {
           <Sidebar
             state={activeState}
             selectedChannel={selectedChannel}
-            onSelectChannel={setSelectedChannel}
+            onSelectChannel={(id) => {
+              setSelectedChannel(id);
+              setNavOpen(false);
+            }}
             onNewChannel={() => setModal("channel")}
             onInvite={() => setModal("invite")}
             onSettings={() => setModal("admin")}
@@ -363,7 +389,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
               {group.map((m, i) => {
                 const showHeader = i === 0 || Boolean(m.replyTo);
                 return (
-                  <div className={`msg${showHeader ? "" : " continued"}`} key={m.id}>
+                  <div className={`msg${showHeader ? "" : " continued"}`} key={m.id} tabIndex={-1}>
                     {showHeader ? (
                       <UserAvatar pubkey={m.author} />
                     ) : (
