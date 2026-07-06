@@ -6,10 +6,40 @@ import { RelayPool } from "applesauce-relay";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
 import { registerCommonAccountTypes } from "applesauce-accounts/accounts";
+import { NostrConnectSigner } from "applesauce-signers";
 import { KIND } from "./concord/types";
 
 export const eventStore = new EventStore();
 export const pool = new RelayPool();
+
+// NIP-46 remote signers (bunker:// and nostrconnect://) talk to the remote
+// signer over relays. Wire the global fallbacks so every NostrConnectSigner —
+// including ones rehydrated by NostrConnectAccount.fromJSON on reload — uses our
+// single RelayPool without needing methods threaded through each constructor.
+NostrConnectSigner.subscriptionMethod = pool.subscription.bind(pool);
+NostrConnectSigner.publishMethod = pool.publish.bind(pool);
+
+// Relays a fresh nostrconnect:// (QR) login listens on for the remote signer's
+// reply. Overridable via VITE_NOSTR_CONNECT_RELAYS.
+export const NOSTR_CONNECT_RELAYS = (
+	import.meta.env.VITE_NOSTR_CONNECT_RELAYS?.split(",").map((r: string) => r.trim()).filter(Boolean) ?? [
+		"wss://relay.nsec.app",
+	]
+);
+
+// Permissions we request from a remote signer. The user's own key signs the
+// CORD-01 seals (SEAL_ENCRYPTED/PLAINTEXT), the self-encrypted Community/Invite
+// lists (13302/13303 use NIP-44), so we also need nip44 encrypt/decrypt.
+export const CONCORD_SIGNER_PERMISSIONS = [
+	...NostrConnectSigner.buildSigningPermissions([
+		KIND.SEAL_ENCRYPTED,
+		KIND.SEAL_PLAINTEXT,
+		KIND.COMMUNITY_LIST,
+		KIND.INVITE_LIST,
+	]),
+	"nip44_encrypt",
+	"nip44_decrypt",
+];
 
 // Indexer / lookup relays: aggregate kind 0 (profiles) and kind 10002 (relay
 // lists) for the whole network, so profile + relay-list discovery works for any
