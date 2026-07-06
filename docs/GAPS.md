@@ -58,6 +58,11 @@ Our fold is a pragmatic owner-first fixpoint, not the full spec algorithm. Likel
 - Enforce roster caps (100 roles, 64 roles/member), name byte-caps, banlist ~500 cap / re-heal.
 - Reference: `refs/armada/client/src/concord-v2/lib/control.ts`, `roles.ts`.
 - Files: `src/concord/control.ts`, `permissions.ts`.
+- **Interop status (`scripts/interop.ts` §C2):** a *chained* v1→v2 metadata+channel update folds
+  identically through our `foldControl` and armada's `foldControlState` (order-independent). The
+  gap is characterized: on a **broken `prev`-chain** our fold takes the highest version while
+  armada refuses the gap and holds v1 — our fold does not enforce chain contiguity. Low practical
+  risk (a real peer never dangles `prev`), but a forged edition could suppress a legit head.
 
 ## Priority 4 — Invite lifecycle (13303 Invite List)
 
@@ -88,8 +93,14 @@ that filter). Needed for interop with AUTH-enforcing relays and as a privacy/ant
 §8 seed(lowest-epoch)/current(highest-epoch)/tombstone merge, and no NIP-44 byte-cap check.
 Risk: bad round-trip against armada's version.
 
-- Implement the proper merge + 65,535-byte cap enforcement.
-- Files: `src/concord/` community-list logic, `client.ts`.
+- **DONE:** liveness now derived per CORD-02 §8 (`src/concord/community-list.ts`
+  `isCommunityLive`) — the loader used to drop any tombstoned id outright, wrongly hiding a
+  leave-then-rejoin and diverging from armada. Verified in `scripts/interop.ts` §E: our document
+  round-trips through armada's `mergeCommunityLists`/`rehydrateCommunity`, and liveness agrees
+  across join/leave/re-join.
+- **Still TODO:** the write side — proper seed(lowest-epoch)/current(highest-epoch) merge across
+  devices + 65,535-byte NIP-44 cap enforcement (armada `mergeCommunityLists` + `assertListBounds`).
+- Files: `src/concord/community-list.ts`, `client.ts`.
 
 ## Priority 7 — Media blobs (icon / banner)
 
