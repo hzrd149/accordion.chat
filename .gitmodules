@@ -1,0 +1,3 @@
+[submodule "concord"]
+	path = refs/concord
+	url = https://github.com/concord-protocol/concord
