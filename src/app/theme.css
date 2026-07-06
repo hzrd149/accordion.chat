@@ -337,6 +337,35 @@ textarea {
   height: 40px;
   margin-top: 2px;
 }
+/* Consecutive messages from the same author collapse under one avatar. */
+.msg-group {
+  margin-top: 14px;
+}
+.msg-group:first-of-type {
+  margin-top: 0;
+}
+.msg.continued {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+/* Empty gutter (avatar width + row gap) so continuation text stays aligned;
+   reveals a compact timestamp on hover. */
+.msg-gutter {
+  width: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.msg-gutter .time {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0;
+  white-space: nowrap;
+}
+.msg.continued:hover .msg-gutter .time {
+  opacity: 1;
+}
 .msg-body {
   min-width: 0;
   flex: 1;

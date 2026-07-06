@@ -358,84 +358,99 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
               <div>This is the beginning of #{channel?.name}. Say hello!</div>
             </div>
           )}
-          {messages.map((m) => (
-            <div className="msg" key={m.id}>
-              <UserAvatar pubkey={m.author} />
-              <div className="msg-body">
-                {m.replyTo && (
-                  <div className="msg-reply">
-                    <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {byId.get(m.replyTo.id)?.content ?? "message"}
+          {groups.map((group) => (
+            <div className="msg-group" key={group[0].id}>
+              {group.map((m, i) => {
+                const showHeader = i === 0 || Boolean(m.replyTo);
+                return (
+                  <div className={`msg${showHeader ? "" : " continued"}`} key={m.id}>
+                    {showHeader ? (
+                      <UserAvatar pubkey={m.author} />
+                    ) : (
+                      <div className="msg-gutter">
+                        <span className="time">{clockTime(m.ms)}</span>
+                      </div>
+                    )}
+                    <div className="msg-body">
+                      {m.replyTo && (
+                        <div className="msg-reply">
+                          <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {byId.get(m.replyTo.id)?.content ?? "message"}
+                        </div>
+                      )}
+                      {showHeader && (
+                      <div className="msg-head">
+                        <span className="name" style={{ color: colorFor(m.author) }}>
+                          <UserName pubkey={m.author} />
+                        </span>
+                        <span className="time">{formatTime(m.ms)}</span>
+                        {m.author === state.material.owner && <span className="badge owner">Owner</span>}
+                      </div>
+                      )}
+                      {editing === m.id ? (
+                        <input
+                          className="field"
+                          style={{ width: "100%" }}
+                          value={editText}
+                          autoFocus
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveEdit(m.id);
+                            if (e.key === "Escape") setEditing(null);
+                          }}
+                        />
+                      ) : m.deleted ? (
+                        <div className="msg-text deleted">(message deleted)</div>
+                      ) : (
+                        <div className="msg-text">
+                          {m.edited ?? m.content}
+                          {m.edited && <span className="time"> (edited)</span>}
+                        </div>
+                      )}
+                      {m.reactions.length > 0 && (
+                        <div className="reactions">
+                          {m.reactions.map((r) => (
+                            <button
+                              key={r.emoji}
+                              className={`reaction ${r.authors.includes(client.pubkey) ? "mine" : ""}`}
+                              onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, r.emoji)}
+                            >
+                              {r.emoji} {r.count}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {canWrite && (
+                      <div className="msg-actions">
+                        {EMOJIS.slice(0, 3).map((e) => (
+                          <button key={e} onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, e)}>
+                            {e}
+                          </button>
+                        ))}
+                        <button title="Reply" onClick={() => setReplyTo({ id: m.id, author: m.author })}>
+                          <Reply size={16} />
+                        </button>
+                        {m.author === client.pubkey && !m.deleted && (
+                          <>
+                            <button
+                              title="Edit"
+                              onClick={() => {
+                                setEditing(m.id);
+                                setEditText(m.edited ?? m.content);
+                              }}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
+                              <Trash2 size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="msg-head">
-                  <span className="name" style={{ color: colorFor(m.author) }}>
-                    <UserName pubkey={m.author} />
-                  </span>
-                  <span className="time">{formatTime(m.ms)}</span>
-                  {m.author === state.material.owner && <span className="badge owner">Owner</span>}
-                </div>
-                {editing === m.id ? (
-                  <input
-                    className="field"
-                    style={{ width: "100%" }}
-                    value={editText}
-                    autoFocus
-                    onChange={(e) => setEditText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") saveEdit(m.id);
-                      if (e.key === "Escape") setEditing(null);
-                    }}
-                  />
-                ) : m.deleted ? (
-                  <div className="msg-text deleted">(message deleted)</div>
-                ) : (
-                  <div className="msg-text">
-                    {m.edited ?? m.content}
-                    {m.edited && <span className="time"> (edited)</span>}
-                  </div>
-                )}
-                {m.reactions.length > 0 && (
-                  <div className="reactions">
-                    {m.reactions.map((r) => (
-                      <button
-                        key={r.emoji}
-                        className={`reaction ${r.authors.includes(client.pubkey) ? "mine" : ""}`}
-                        onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, r.emoji)}
-                      >
-                        {r.emoji} {r.count}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {canWrite && (
-                <div className="msg-actions">
-                  {EMOJIS.slice(0, 3).map((e) => (
-                    <button key={e} onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, e)}>
-                      {e}
-                    </button>
-                  ))}
-                  <button title="Reply" onClick={() => setReplyTo({ id: m.id, author: m.author })}>
-                    <Reply size={16} />
-                  </button>
-                  {m.author === client.pubkey && !m.deleted && (
-                    <>
-                      <button
-                        title="Edit"
-                        onClick={() => {
-                          setEditing(m.id);
-                          setEditText(m.edited ?? m.content);
-                        }}
-                      >
-                        <Pencil size={16} />
-                      </button>
-                      <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
-                        <Trash2 size={16} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+                );
+              })}
             </div>
           ))}
         </div>
