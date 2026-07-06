@@ -19,10 +19,12 @@ export const pool = new RelayPool();
 NostrConnectSigner.subscriptionMethod = pool.subscription.bind(pool);
 NostrConnectSigner.publishMethod = pool.publish.bind(pool);
 
-// Relays a fresh nostrconnect:// (QR) login listens on for the remote signer's
-// reply. Overridable via VITE_NOSTR_CONNECT_RELAYS.
+// Default relays a fresh nostrconnect:// (QR) login listens on for the remote
+// signer's reply. The user can override these per-login in the UI, or globally
+// via VITE_NOSTR_CONNECT_RELAYS.
 export const NOSTR_CONNECT_RELAYS = (
 	import.meta.env.VITE_NOSTR_CONNECT_RELAYS?.split(",").map((r: string) => r.trim()).filter(Boolean) ?? [
+		"wss://bucket.coracle.social",
 		"wss://relay.nsec.app",
 	]
 );
