@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DoorOpen,
   Hand,
@@ -8,6 +9,7 @@ import {
   Menu,
   MessageSquare,
   Landmark,
+  Paperclip,
   Pencil,
   Plus,
   Reply,
@@ -31,7 +33,9 @@ import {
 } from "./modals";
 import { clockTime, colorFor, formatTime, groupMessages } from "./util";
 import { UserAvatar, UserName } from "./User";
+import { SettingsView } from "./settings";
 import { useDecryptedImage } from "./useDecryptedImage";
+import { MessageContent } from "./MessageContent";
 import type { ChatMessage } from "../concord/client";
 import type { CommunityState } from "../concord/types";
 import { PERM } from "../concord/types";
@@ -41,18 +45,51 @@ const EMOJIS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 export function App() {
   const account = useActiveAccount();
   if (!account) return <Login />;
-  return <ConcordProvider>{() => <Shell />}</ConcordProvider>;
+  return (
+    <ConcordProvider>
+      {() => (
+        <Routes>
+          <Route path="/" element={<Shell />} />
+          <Route path="/c/:cid" element={<Shell />} />
+          <Route path="/c/:cid/:channelId" element={<Shell />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      )}
+    </ConcordProvider>
+  );
 }
+
+/** Overlay names carried in the `?modal=` query param. */
+type ModalName = "create" | "join" | "channel" | "invite" | "admin" | "addMenu" | "leave";
 
 function Shell() {
   const client = useConcord();
   const communities = use$(client.communities$) ?? [];
   const status = use$(client.status$);
-  const [selectedCid, setSelectedCid] = useState<string | null>(null);
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [modal, setModal] = useState<
-    null | "create" | "join" | "channel" | "invite" | "admin" | "addMenu" | "leave"
-  >(null);
+  const navigate = useNavigate();
+  const { cid: cidParam, channelId: channelParam } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // All navigation state lives in the URL: community/channel in the path,
+  // transient overlays (modals + settings) in the query string.
+  const selectedCid = cidParam ?? null;
+  const selectedChannel = channelParam ?? null;
+  const modal = searchParams.get("modal") as ModalName | null;
+  const settingsPage = searchParams.get("settings");
+
+  function setParam(key: string, value: string | null) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === null) next.delete(key);
+        else next.set(key, value);
+        return next;
+      },
+      { replace: true },
+    );
+  }
+  const setModal = (m: ModalName | null) => setParam("modal", m);
+
   const [leaving, setLeaving] = useState(false);
   // Mobile off-canvas drawers (ignored by CSS above the tablet breakpoint).
   const [navOpen, setNavOpen] = useState(false);
@@ -62,23 +99,26 @@ function Shell() {
     setMembersOpen(false);
   };
 
-  // Auto-select a community and channel as they arrive.
+  // Auto-select a community and channel as they arrive, reflecting the choice
+  // into the URL (replace, so it doesn't clutter history).
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
   useEffect(() => {
-    if (!selectedCid && communities.length) setSelectedCid(communities[0].material.community_id);
-    if (selectedCid && !communities.some((c) => c.material.community_id === selectedCid)) {
-      setSelectedCid(communities[0]?.material.community_id ?? null);
-      setSelectedChannel(null);
+    if (communities.length === 0) {
+      if (selectedCid) navigate("/", { replace: true });
+      return;
     }
-  }, [communities, selectedCid]);
+    if (!selectedCid || !communities.some((c) => c.material.community_id === selectedCid)) {
+      navigate(`/c/${communities[0].material.community_id}`, { replace: true });
+    }
+  }, [communities, selectedCid, navigate]);
 
   useEffect(() => {
     if (!activeState) return;
     const channels = activeState.channels;
     if (channels.length && (!selectedChannel || !channels.some((c) => c.channel_id === selectedChannel))) {
-      setSelectedChannel(channels[0].channel_id);
+      navigate(`/c/${activeState.material.community_id}/${channels[0].channel_id}`, { replace: true });
     }
-  }, [activeState, selectedChannel]);
+  }, [activeState, selectedChannel, navigate]);
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}${membersOpen ? " members-open" : ""}`}>
@@ -101,7 +141,7 @@ function Shell() {
             state={c}
             active={c.material.community_id === selectedCid}
             onClick={() => {
-              setSelectedCid(c.material.community_id);
+              navigate(`/c/${c.material.community_id}`);
               setNavOpen(false);
             }}
           />
@@ -109,6 +149,14 @@ function Shell() {
         <div className="rail-divider" />
         <button className="rail-icon add" title="Add a community" onClick={() => setModal("addMenu")}>
           <Plus size={24} />
+        </button>
+        <button
+          className="rail-icon settings-gear"
+          title="Settings"
+          style={{ marginTop: "auto" }}
+          onClick={() => setParam("settings", "profile")}
+        >
+          <Settings size={22} />
         </button>
       </div>
 
@@ -118,7 +166,7 @@ function Shell() {
             state={activeState}
             selectedChannel={selectedChannel}
             onSelectChannel={(id) => {
-              setSelectedChannel(id);
+              navigate(`/c/${activeState.material.community_id}/${id}`);
               setNavOpen(false);
             }}
             onNewChannel={() => setModal("channel")}
@@ -171,22 +219,11 @@ function Shell() {
       {modal === "create" && (
         <CreateCommunityModal
           onClose={() => setModal(null)}
-          onCreated={(id) => {
-            setSelectedCid(id);
-            setSelectedChannel(null);
-            setModal(null);
-          }}
+          onCreated={(id) => navigate(`/c/${id}`)}
         />
       )}
       {modal === "join" && (
-        <JoinModal
-          onClose={() => setModal(null)}
-          onJoined={(id) => {
-            setSelectedCid(id);
-            setSelectedChannel(null);
-            setModal(null);
-          }}
-        />
+        <JoinModal onClose={() => setModal(null)} onJoined={(id) => navigate(`/c/${id}`)} />
       )}
       {modal === "channel" && activeState && (
         <CreateChannelModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
@@ -213,8 +250,7 @@ function Shell() {
                 setLeaving(true);
                 try {
                   await client.leave(cid);
-                  setSelectedChannel(null);
-                  setModal(null);
+                  navigate("/");
                 } finally {
                   setLeaving(false);
                 }
@@ -227,6 +263,14 @@ function Shell() {
             </button>
           </div>
         </Modal>
+      )}
+
+      {settingsPage !== null && (
+        <SettingsView
+          page={settingsPage}
+          onSelectPage={(p) => setParam("settings", p)}
+          onClose={() => setParam("settings", null)}
+        />
       )}
 
       {status && <div className="status-toast">{status}</div>}
@@ -346,7 +390,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -362,11 +409,23 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
 
   async function send() {
     const value = text.trim();
-    if (!value) return;
-    setText("");
+    if (!value && files.length === 0) return;
     const reply = replyTo ?? undefined;
+    const attach = files;
+    setText("");
     setReplyTo(null);
-    await client.sendMessage(cid, channelId, value, reply);
+    setFiles([]);
+    setSending(true);
+    try {
+      await client.sendMessage(cid, channelId, value, reply, attach.length ? attach : undefined);
+    } catch (err) {
+      console.error("send failed", err);
+      // Restore the draft so the user doesn't lose their message/attachments.
+      setText(value);
+      setFiles(attach);
+    } finally {
+      setSending(false);
+    }
   }
 
   async function saveEdit(id: string) {
@@ -442,10 +501,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                       ) : m.deleted ? (
                         <div className="msg-text deleted">(message deleted)</div>
                       ) : (
-                        <div className="msg-text">
-                          {m.edited ?? m.content}
+                        <>
+                          <MessageContent text={m.edited ?? m.content} attachments={m.attachments} />
                           {m.edited && <span className="time"> (edited)</span>}
-                        </div>
+                        </>
                       )}
                       {m.reactions.length > 0 && (
                         <div className="reactions">
@@ -506,7 +565,32 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
               <button onClick={() => setReplyTo(null)}><X size={16} /></button>
             </div>
           )}
+          {files.length > 0 && (
+            <div className="attach-bar">
+              {files.map((f, i) => (
+                <span className="attach-chip" key={i} title={f.name}>
+                  📎 {f.name}
+                  <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="box">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
+                e.target.value = "";
+              }}
+            />
+            <button className="attach" title="Attach files" onClick={() => fileInputRef.current?.click()}>
+              <Paperclip size={20} />
+            </button>
             <textarea
               rows={1}
               placeholder={`Message ${channel?.private ? "🔒" : "#"}${channel?.name ?? ""}`}
@@ -519,8 +603,8 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                 }
               }}
             />
-            <button className="send" onClick={send}>
-              Send
+            <button className="send" onClick={send} disabled={sending}>
+              {sending ? "Sending…" : "Send"}
             </button>
           </div>
         </div>
