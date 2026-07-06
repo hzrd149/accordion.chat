@@ -1,3 +1,6 @@
 [submodule "concord"]
 	path = refs/concord
 	url = https://github.com/concord-protocol/concord
+[submodule "armada"]
+	path = refs/armada
+	url = https://gitlab.com/soapbox-pub/armada.git
