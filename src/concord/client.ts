@@ -4,8 +4,7 @@
 // protocol layer (crypto/stream/control/guestbook/invite) to fold plane events
 // into reactive community state. One instance per logged-in user.
 
-import { BehaviorSubject, firstValueFrom, timeout, toArray } from "rxjs";
-import type { Subscription } from "rxjs";
+import { BehaviorSubject, Subscription, firstValueFrom, timeout, toArray } from "rxjs";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import type { NostrEvent } from "nostr-tools";
 
@@ -49,7 +48,7 @@ import {
 import { createStreamEvent, decodeStreamEventCached, rewrapSeal } from "./stream";
 import { clearCache, loadCache, saveCache, MAX_CHANNEL_CACHE } from "./cache";
 import type { CachedEntry } from "./cache";
-import { autoAuthenticate } from "./relay-auth";
+import { autoAuthenticate, authedFilters$ } from "./relay-auth";
 import { registerStreamKeys } from "./stream-auth";
 import type { Signer } from "./stream";
 import { foldControl } from "./control";
@@ -647,6 +646,29 @@ export class ConcordClient {
     return rt.material.relays.length ? rt.material.relays : DEFAULT_RELAYS;
   }
 
+  /**
+   * Subscribe to gift wraps (kind 1059/21059) authored by `authors` across the
+   * community's relays. Rather than `pool.subscription` (whose auth gate is a
+   * single `authenticated$` boolean), we open one subscription per relay behind
+   * `authedFilters$`, so a strict relay only receives the REQ once EVERY queried
+   * author has authenticated (NIP-42) on that connection. Wraps stream into
+   * `ingest`; the returned Subscription tears every relay's REQ down together.
+   */
+  private subscribeWraps(rt: Runtime, authors: string[]): Subscription {
+    const filters = [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }];
+    const sub = new Subscription();
+    for (const url of this.relaysFor(rt)) {
+      const relay = pool.relay(url);
+      sub.add(
+        relay.subscription(authedFilters$(url, authors, filters)).subscribe((event) => {
+          if (typeof event === "string") return; // "EOSE"
+          this.ingest(rt, event as NostrEvent);
+        }),
+      );
+    }
+    return sub;
+  }
+
   /** The control/guestbook/dissolved planes never change address within an
    * epoch, so this subscription is opened once and never torn down mid-sync. */
   private openControlSub(rt: Runtime): void {
@@ -671,12 +693,7 @@ export class ConcordClient {
     registerStreamKeys([control, guestbook, dissolved, nextBaseRekey]);
     const authors = [control.pk, guestbook.pk, dissolved.pk, nextBaseRekey.pk];
     rt.controlSub?.unsubscribe();
-    rt.controlSub = pool
-      .subscription(this.relaysFor(rt), [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
-      .subscribe((event) => {
-        if (typeof event === "string") return;
-        this.ingest(rt, event as NostrEvent);
-      });
+    rt.controlSub = this.subscribeWraps(rt, authors);
   }
 
   /** Reopen the channel subscription only when the set of channel addresses
@@ -697,12 +714,7 @@ export class ConcordClient {
     rt.channelAuthors = sig;
     rt.channelSub?.unsubscribe();
     if (authors.length === 0) return;
-    rt.channelSub = pool
-      .subscription(this.relaysFor(rt), [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
-      .subscribe((event) => {
-        if (typeof event === "string") return;
-        this.ingest(rt, event as NostrEvent);
-      });
+    rt.channelSub = this.subscribeWraps(rt, authors);
   }
 
   /** True when this wrap has already been folded into the plane it belongs to,

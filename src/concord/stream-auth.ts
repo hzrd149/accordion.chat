@@ -19,13 +19,16 @@
 
 import { finalizeEvent } from "nostr-tools";
 import type { NostrEvent } from "nostr-tools";
+import { BehaviorSubject } from "rxjs";
 import type { GroupKey } from "./crypto";
 
 /** pubkey (x-only hex) → the stream secret key that authenticates it. */
 const registry = new Map<string, Uint8Array>();
 
-type Listener = (added: string[]) => void;
-const listeners = new Set<Listener>();
+/** Bumps whenever new stream keys register. Lets the per-relay auth driver
+ * re-authenticate the newly-held keys on connections it already opened (a
+ * channel folds in after the control plane is already subscribed). */
+export const streamKeysVersion$ = new BehaviorSubject(0);
 
 /** Register stream keys (idempotent). Returns the pubkeys newly added. */
 export function registerStreamKeys(keys: GroupKey[]): string[] {
@@ -35,22 +38,12 @@ export function registerStreamKeys(keys: GroupKey[]): string[] {
     registry.set(k.pk, k.sk);
     added.push(k.pk);
   }
-  if (added.length > 0) for (const l of listeners) l(added);
+  if (added.length > 0) streamKeysVersion$.next(streamKeysVersion$.value + 1);
   return added;
-}
-
-export function isStreamPubkey(pubkey: string): boolean {
-  return registry.has(pubkey);
 }
 
 export function streamPubkeys(): string[] {
   return [...registry.keys()];
-}
-
-/** Subscribe to registry growth (fires with newly-added pubkeys). */
-export function onStreamKeysAdded(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
 }
 
 /**
