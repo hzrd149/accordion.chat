@@ -1,0 +1,10 @@
+# applesauce-relay tracks a `0.0.0-next-*` prerelease (native multi-signer
+# NIP-42 auth) that is newer than pnpm's minimumReleaseAge safety cutoff.
+# Exclude just that package from the age check so `pnpm install`/`pnpm dev`
+# don't reject the freshly-published version; the policy still applies to every
+# other dependency.
+minimumReleaseAgeExclude:
+  - applesauce-relay
+
+allowBuilds:
+  esbuild: true
