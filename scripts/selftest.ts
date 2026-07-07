@@ -123,26 +123,46 @@ async function main() {
   const wrongKey = deriveKeys({ ...genesis.material, community_root: toHex(generateSecretKey()) }, []).control.convKey;
   assert(decodeStreamEvent(msgWrap, wrongKey) === null, "wrong key cannot decode (outsider sees noise)");
 
-  // 8. Stream-key NIP-42 auth: one verifiable kind-22242 per registered key.
-  const { registerStreamKeys, signStreamAuths, _resetStreamAuthRegistry } = await import(
+  // 8. Stream-key NIP-42 auth: each registered key yields a signer that produces
+  //    a verifiable kind-22242. Signing itself is native applesauce
+  //    (`relay.authenticate`); here we exercise the registry's signers directly.
+  const { registerStreamKeys, streamSigners, streamPubkeys, _resetStreamAuthRegistry } = await import(
     "../src/concord/stream-auth"
   );
   const { verifyEvent } = await import("nostr-tools");
   _resetStreamAuthRegistry();
   registerStreamKeys([keys.control, keys.guestbook]);
-  const auths = signStreamAuths("challenge-abc", "wss://relay.example");
-  assert(auths.length === 2, "one AUTH event per registered stream key");
+  const signers = streamSigners();
+  assert(signers.length === 2, "one signer per registered stream key");
   assert(
-    auths.every((e) => e.kind === 22242 && verifyEvent(e)),
-    "each stream AUTH is a valid signed kind-22242",
+    streamPubkeys().includes(keys.control.pk) && streamPubkeys().includes(keys.guestbook.pk),
+    "registry holds each stream pubkey",
+  );
+  const auths = await Promise.all(
+    signers.map(({ signer }) =>
+      signer.signEvent({
+        kind: 22242,
+        content: "",
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ["relay", "wss://relay.example"],
+          ["challenge", "challenge-abc"],
+        ],
+      }),
+    ),
   );
   assert(
-    auths.some((e) => e.pubkey === keys.control.pk) && auths.some((e) => e.pubkey === keys.guestbook.pk),
-    "AUTH events are signed AS the stream pubkeys",
+    auths.every((e) => e.kind === 22242 && verifyEvent(e)),
+    "each stream signer produces a valid signed kind-22242",
+  );
+  assert(
+    signers.some(({ pubkey }) => pubkey === keys.control.pk) &&
+      signers.some(({ pubkey }) => pubkey === keys.guestbook.pk),
+    "signers authenticate AS the stream pubkeys",
   );
   assert(
     auths.every((e) => e.tags.find((t) => t[0] === "challenge")?.[1] === "challenge-abc"),
-    "AUTH events carry the relay challenge",
+    "stream AUTH events carry the relay challenge",
   );
 
   void finalizeEvent as unknown as EventTemplate;

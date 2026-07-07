@@ -48,7 +48,7 @@ import {
 import { createStreamEvent, decodeStreamEventCached, rewrapSeal } from "./stream";
 import { clearCache, loadCache, saveCache, MAX_CHANNEL_CACHE } from "./cache";
 import type { CachedEntry } from "./cache";
-import { autoAuthenticate, authedFilters$ } from "./relay-auth";
+import { autoAuthenticate, authenticateStreamKeys } from "./relay-auth";
 import { registerStreamKeys } from "./stream-auth";
 import type { Signer } from "./stream";
 import { foldControl } from "./control";
@@ -185,7 +185,7 @@ export class ConcordClient {
     if (this.started) return;
     this.started = true;
     // Answer NIP-42 challenges from community relays so they serve our events.
-    this.authSub = autoAuthenticate(this.signer);
+    this.authSub = autoAuthenticate(this.signer, this.pubkey);
     // Restore memberships from the local mirror first (instant, offline-safe),
     // then reconcile with the relay-published Community List (kind 13302).
     for (const m of this.loadMaterialsLocal()) {
@@ -648,24 +648,22 @@ export class ConcordClient {
 
   /**
    * Subscribe to gift wraps (kind 1059/21059) authored by `authors` across the
-   * community's relays. Rather than `pool.subscription` (whose auth gate is a
-   * single `authenticated$` boolean), we open one subscription per relay behind
-   * `authedFilters$`, so a strict relay only receives the REQ once EVERY queried
-   * author has authenticated (NIP-42) on that connection. Wraps stream into
-   * `ingest`; the returned Subscription tears every relay's REQ down together.
+   * community's relays. `waitForAuth: authors` holds each relay's REQ until EVERY
+   * queried stream author is authenticated (NIP-42) on that connection and
+   * re-issues it after a reconnect; `authenticateStreamKeys` drives that
+   * authentication per relay. Wraps stream into `ingest`; the returned
+   * Subscription tears every relay's REQ (and auth driver) down together.
    */
   private subscribeWraps(rt: Runtime, authors: string[]): Subscription {
+    const relays = this.relaysFor(rt);
     const filters = [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }];
     const sub = new Subscription();
-    for (const url of this.relaysFor(rt)) {
-      const relay = pool.relay(url);
-      sub.add(
-        relay.subscription(authedFilters$(url, authors, filters)).subscribe((event) => {
-          if (typeof event === "string") return; // "EOSE"
-          this.ingest(rt, event as NostrEvent);
-        }),
-      );
-    }
+    for (const url of relays) sub.add(authenticateStreamKeys(pool.relay(url)));
+    sub.add(
+      pool.subscription(relays, filters, { waitForAuth: authors }).subscribe((event) => {
+        this.ingest(rt, event as NostrEvent);
+      }),
+    );
     return sub;
   }
 

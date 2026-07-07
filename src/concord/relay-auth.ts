@@ -6,177 +6,111 @@
 // authenticate AS each stream key we hold (see `stream-auth.ts`), plus the
 // user's own key.
 //
-// Applesauce's REQ pipeline can pause on `auth-required` and retry, but its gate
-// is a single `authenticated$` boolean — it assumes ONE signer per connection
-// and flips true after the FIRST successful AUTH. Concord authenticates AS MANY
-// stream keys on one connection, so that boolean can't tell us whether *every*
-// queried author is authenticated. We therefore track authentication OURSELVES,
-// per (relay, challenge, stream-pubkey).
-//
-// The stream-key AUTH is driven per-relay, from inside `authedFilters$`, off the
-// relay's OWN `challenge$` — NOT the pool-wide `status$`. (`pool.status$` is a
-// `shareReplay(1)`+`switchMap` over the relay set; an early subscriber, like a
-// global watcher started at login, stops receiving updates for relays added
-// later — so it never sees a community's relay and never authenticates it. The
-// relay object's `challenge$` BehaviorSubject has no such problem.) Every
-// gift-wrap REQ is then held behind `authedFilters$` until all of its authors
-// have a confirmed AUTH-OK on the relay's current challenge; a reconnect issues
-// a fresh challenge, re-authenticates, and re-issues the REQ.
+// applesauce-relay now authenticates multiple pubkeys per connection natively:
+// `relay.authenticate(signer)` builds/sends the kind-22242 and tracks per-pubkey
+// state, `relay.isAuthenticated(pubkeys)` reports it, and a REQ opened with
+// `waitForAuth: [...pubkeys]` is held until all of them are authenticated (and
+// retried on a reconnect). The gating therefore lives at the subscription
+// (see `client.subscribeWraps`); this module only DRIVES the authentication:
+// it hands every held signer to `relay.authenticate` whenever a relay presents
+// a challenge. Auth state resets on disconnect and a fresh challenge re-emits on
+// reconnect, so simply re-running on each `challenge$` re-authenticates.
 
-import { BehaviorSubject, Subscription, combineLatest, merge } from "rxjs";
-import { distinctUntilChanged, filter, ignoreElements, map, tap } from "rxjs/operators";
-import type { Observable } from "rxjs";
-import type { Relay, RelayStatus } from "applesauce-relay";
+import { Subscription, combineLatest } from "rxjs";
+import type { Relay } from "applesauce-relay";
 import { pool } from "../nostr";
 import type { Signer } from "./stream";
-import { signStreamAuths, streamKeysVersion$, streamPubkeys } from "./stream-auth";
+import { streamKeysVersion$, streamSigners } from "./stream-auth";
 
-// Per-relay authentication tracking, keyed by the relay's NORMALIZED url.
-// `authed$` holds the stream pubkeys with a confirmed AUTH-OK on the *current*
-// challenge; a challenge change (reconnect) resets it.
-interface RelayAuthTrack {
-  challenge: string | null;
-  authed$: BehaviorSubject<Set<string>>;
-  userAuthed: boolean;
-  /** guards against overlapping stream-auth runs on the same relay */
-  authing: boolean;
+// One shared auth driver per relay URL, reference-counted. Both the control and
+// channel gift-wrap subscriptions target the same relays and the same
+// (whole-registry) stream keys, so a driver per subscription would send
+// duplicate AUTHs; instead they share a single driver that lives as long as any
+// subscription holds a reference.
+interface Driver {
+  sub: Subscription;
+  refs: number;
 }
-const tracks = new Map<string, RelayAuthTrack>();
-
-function trackFor(url: string): RelayAuthTrack {
-  let t = tracks.get(url);
-  if (!t) {
-    t = { challenge: null, authed$: new BehaviorSubject<Set<string>>(new Set()), userAuthed: false, authing: false };
-    tracks.set(url, t);
-  }
-  return t;
-}
-
-/** Adopt a challenge, resetting the authenticated set when it changes (reconnect). */
-function setChallenge(url: string, challenge: string): RelayAuthTrack {
-  const t = trackFor(url);
-  if (t.challenge !== challenge) {
-    t.challenge = challenge;
-    t.userAuthed = false;
-    t.authed$.next(new Set());
-  }
-  return t;
-}
-
-function markAuthed(url: string, pubkey: string): void {
-  const t = trackFor(url);
-  if (t.authed$.value.has(pubkey)) return;
-  const next = new Set(t.authed$.value);
-  next.add(pubkey);
-  t.authed$.next(next);
-}
-
-/** Authenticate (locally, no prompt) as every registered stream key not yet
- *  authed on `relay`'s current challenge. Idempotent and self-guarded so the
- *  challenge / new-keys triggers can both fire it without racing. */
-async function authenticateStreamKeys(relay: Relay, challenge: string): Promise<void> {
-  const track = setChallenge(relay.url, challenge);
-  if (track.authing) return;
-  track.authing = true;
-  try {
-    let pending = streamPubkeys().filter((pk) => !track.authed$.value.has(pk));
-    // Re-check after each await: keys may register (channels fold in) mid-run.
-    while (pending.length > 0 && track.challenge === challenge) {
-      for (const authEvent of signStreamAuths(challenge, relay.url, pending)) {
-        try {
-          const res = await relay.auth(authEvent);
-          if (res.ok) markAuthed(relay.url, authEvent.pubkey);
-        } catch (err) {
-          console.warn(`stream-key AUTH to ${relay.url} failed`, err);
-        }
-      }
-      pending = streamPubkeys().filter((pk) => !track.authed$.value.has(pk));
-    }
-  } finally {
-    track.authing = false;
-  }
-}
+const drivers = new Map<string, Driver>();
 
 /**
- * A filter observable for a gift-wrap REQ that (a) drives stream-key AUTH on the
- * relay whenever it presents a challenge or new stream keys register, and (b)
- * holds `filters` back until it is safe to query `authors` from `url`: either
- * the relay presents a challenge and every author has a confirmed AUTH-OK on it,
- * or the relay is connected and never challenged (no auth required). Emits once
- * per distinct challenge, so a reconnect re-issues the (re-authenticated) REQ.
- * Pass this straight to `relay.subscription(...)` — subscribing opens the
- * connection (the REQ pipeline connects eagerly), which lets the challenge
- * arrive and the auth driver resolve.
+ * Keep `relay` authenticated (NIP-42) as every registered stream key. Native
+ * `relay.authenticate` handles the AUTH event and per-pubkey state; we re-run it
+ * whenever the relay presents a fresh challenge (connect/reconnect) or new stream
+ * keys register (a channel folds in after the connection is already open). A
+ * single-flight guard plus a make-progress loop keeps concurrent triggers from
+ * racing while still picking up keys registered mid-run. Returns a Subscription
+ * that releases this caller's reference; the shared driver stops at zero refs.
  */
-export function authedFilters$<T>(url: string, authors: string[], filters: T): Observable<T> {
-  const relay = pool.relay(url);
-  const track = trackFor(relay.url);
+export function authenticateStreamKeys(relay: Relay): Subscription {
+  let driver = drivers.get(relay.url);
+  if (!driver) {
+    let running = false;
+    async function run(): Promise<void> {
+      if (running) return;
+      running = true;
+      try {
+        // Loop so keys registered mid-run get authenticated too; stop when a
+        // full pass makes no progress (a persistently-rejecting relay won't spin).
+        for (;;) {
+          const pending = streamSigners().filter(({ pubkey }) => !relay.isAuthenticated(pubkey));
+          if (!relay.challenge || pending.length === 0) break;
+          let progressed = false;
+          for (const { pubkey, signer } of pending) {
+            if (relay.isAuthenticated(pubkey)) continue;
+            try {
+              const res = await relay.authenticate(signer);
+              if (res.ok) progressed = true;
+            } catch (err) {
+              console.warn(`stream-key AUTH to ${relay.url} failed`, err);
+            }
+          }
+          if (!progressed) break;
+        }
+      } finally {
+        running = false;
+      }
+    }
+    // `challenge$` re-emits on every (re)connect; `streamKeysVersion$` on new keys.
+    const sub = combineLatest([relay.challenge$, streamKeysVersion$]).subscribe(() => void run());
+    driver = { sub, refs: 0 };
+    drivers.set(relay.url, driver);
+  }
+  driver.refs++;
 
-  // Side-effect only: keep the relay authenticated as all held stream keys.
-  // Re-runs on every challenge (connect/reconnect) and whenever keys register.
-  const auth$ = combineLatest([relay.challenge$, streamKeysVersion$]).pipe(
-    tap(([challenge]) => {
-      if (challenge) void authenticateStreamKeys(relay, challenge);
-    }),
-    ignoreElements(),
-  ) as Observable<T>;
-
-  const gate$ = combineLatest([relay.connected$, relay.challenge$, track.authed$]).pipe(
-    filter(([connected, challenge, authed]) =>
-      challenge ? authors.every((pk) => authed.has(pk)) : connected,
-    ),
-    // Collapse to the challenge so we emit once per challenge (not on every later
-    // same-challenge auth), but still re-emit after a reconnect.
-    map(([, challenge]) => challenge ?? ""),
-    distinctUntilChanged(),
-    map(() => filters),
-  );
-
-  return merge(auth$, gate$);
+  return new Subscription(() => {
+    const d = drivers.get(relay.url);
+    if (!d) return;
+    if (--d.refs <= 0) {
+      d.sub.unsubscribe();
+      drivers.delete(relay.url);
+    }
+  });
 }
 
 /**
  * Answer NIP-42 challenges with the USER's key so gating relays accept the
  * user's own published events (the Community List, invite bundles, …). Stream
- * reads authenticate per-relay via {@link authedFilters$}; this covers only the
- * user-authored write path. We watch `pool.status$` here (fine for the fixed set
- * of publish relays connected up front) and authenticate once per challenge when
- * the relay requires it.
+ * reads authenticate per-relay via {@link authenticateStreamKeys}; this covers
+ * only the user-authored write path across the fixed publish-relay set connected
+ * up front. Native per-pubkey auth state (`isAuthenticated`) provides
+ * idempotency and resets on reconnect, so we simply (re-)authenticate whenever a
+ * relay requires auth and the user isn't yet authenticated on it.
  */
-export function autoAuthenticate(signer: Signer): Subscription {
+export function autoAuthenticate(signer: Signer, pubkey: string): Subscription {
   const inflight = new Set<string>();
 
-  async function answerUser(url: string, challenge: string): Promise<void> {
-    const track = setChallenge(url, challenge);
-    if (track.userAuthed) return;
-    track.userAuthed = true;
-    try {
-      await pool.relay(url).authenticate(signer);
-    } catch (err) {
-      console.warn(`user AUTH to ${url} failed`, err);
-      track.userAuthed = false;
-    }
-  }
-
-  const statusSub = pool.status$.subscribe((statuses: Record<string, RelayStatus>) => {
+  return pool.status$.subscribe((statuses) => {
     for (const [url, status] of Object.entries(statuses)) {
-      const challenge = status.challenge;
-      if (!challenge) continue;
+      if (!status.challenge) continue;
       if (!status.authRequiredForRead && !status.authRequiredForPublish) continue;
-      if (inflight.has(url)) continue;
-      const track = setChallenge(url, challenge);
-      if (track.userAuthed) continue;
+      const relay = pool.relay(url);
+      if (relay.isAuthenticated(pubkey) || inflight.has(url)) continue;
       inflight.add(url);
-      answerUser(url, challenge).finally(() => inflight.delete(url));
+      relay
+        .authenticate(signer)
+        .catch((err) => console.warn(`user AUTH to ${url} failed`, err))
+        .finally(() => inflight.delete(url));
     }
   });
-
-  const sub = new Subscription();
-  sub.add(statusSub);
-  return sub;
-}
-
-/** Test seam: forget every relay's tracked auth state. */
-export function _resetRelayAuthTracking(): void {
-  tracks.clear();
 }

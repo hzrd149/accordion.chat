@@ -36,8 +36,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0(@capacitor/core@7.6.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@6.0.3)
       applesauce-relay:
-        specifier: ^6.2.1
-        version: 6.2.1(typescript@6.0.3)
+        specifier: 0.0.0-next-20260707181638
+        version: 0.0.0-next-20260707181638(typescript@6.0.3)
       applesauce-signers:
         specifier: ^6.2.2
         version: 6.2.2(@capacitor/core@7.6.7)(typescript@6.0.3)
@@ -1438,8 +1438,8 @@ packages:
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
 
-  applesauce-relay@6.2.1:
-    resolution: {integrity: sha512-YIUHEtL2Fl5FZjeKYe/IuwL3OnMUNP2j4ydSr3iZDeHEZSEda4d1PoChefiNhtjE/U/F5OBHEbAX1zCHRZoxpg==}
+  applesauce-relay@0.0.0-next-20260707181638:
+    resolution: {integrity: sha512-NEpGRMikaY//zQgjUIglbNMp18p2qXdCjqj2Vw9+Wu96CGbZDS2eTCmdxnBmxusnaM5fzyT0Gct3MPnPjIpleQ==}
 
   applesauce-signers@6.2.2:
     resolution: {integrity: sha512-UIJCFIqSdA+rI5DE4SHrFmJf7CkkBbgALGdxgtvScFf1IaOvrT+ntR5D4fbuZREyPnrVuEIwuCTZ7b31WbQ7yQ==}
@@ -4432,7 +4432,7 @@ snapshots:
       - supports-color
       - typescript
 
-  applesauce-relay@6.2.1(typescript@6.0.3):
+  applesauce-relay@0.0.0-next-20260707181638(typescript@6.0.3):
     dependencies:
       '@noble/hashes': 2.2.0
       applesauce-core: 6.2.0(typescript@6.0.3)
