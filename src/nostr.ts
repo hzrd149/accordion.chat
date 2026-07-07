@@ -1,16 +1,49 @@
 // Applesauce singletons — one EventStore and one RelayPool for the whole app.
 
 import { EventStore } from "applesauce-core";
-import { setEncryptedContentEncryptionMethod } from "applesauce-core/helpers";
+import {
+	persistEventsToCache,
+	setEncryptedContentEncryptionMethod,
+} from "applesauce-core/helpers";
 import { RelayPool } from "applesauce-relay";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
 import { registerCommonAccountTypes } from "applesauce-accounts/accounts";
 import { NostrConnectSigner } from "applesauce-signers";
+import { NostrIDB } from "nostr-idb";
+import type { Filter } from "nostr-tools";
 import { KIND } from "./concord/types";
 
 export const eventStore = new EventStore();
 export const pool = new RelayPool();
+
+// Local IndexedDB event cache (nostr-idb). Everything the EventStore ingests —
+// profiles (kind 0), relay lists, and any other event the automatic loader
+// fetches from relays — is mirrored here so avatars and metadata resolve
+// instantly on the next load without a round-trip. This is a *cache* in front of
+// the loaders, not an event database: the EventStore itself stays in-memory.
+//
+// Note: this is orthogonal to src/concord/cache.ts, which persists *decoded*
+// Concord rumors (never raw 1059 giftwraps) per community. nostr-idb caches the
+// public Nostr events (profiles etc.) the UI renders alongside them.
+const nostrIDB = new NostrIDB();
+// start() kicks off the write-flush cycle; add()ed events queue until it runs.
+// getDb() opens the database lazily, so we don't need to await this — reads and
+// writes before it resolves simply see an empty cache.
+void nostrIDB.start();
+
+// Reads from the cache, used by the loaders below on an EventStore miss before
+// they fall back to relays. query() resolves to [] until the DB opens.
+function cacheRequest(filters: Filter[]) {
+	return nostrIDB.query(filters);
+}
+
+// Mirror every event added to the EventStore into the cache (batched internally,
+// ~5s). Ephemeral kinds are ignored by nostr-idb; replaceable events dedupe by
+// address so only the newest survives.
+persistEventsToCache(eventStore, async (events) => {
+	await Promise.allSettled(events.map((event) => nostrIDB.add(event)));
+});
 
 // NIP-46 remote signers (bunker:// and nostrconnect://) talk to the remote
 // signer over relays. Wire the global fallbacks so every NostrConnectSigner —
@@ -53,6 +86,7 @@ export const LOOKUP_RELAYS = import.meta.env.VITE_LOOKUP_RELAYS?.split(",")
 // first, then falling back to the indexer relays above — and adds the result
 // back to the store so reactive queries resolve.
 createEventLoaderForStore(eventStore, pool, {
+	cacheRequest,
 	followRelayHints: true,
 	lookupRelays: LOOKUP_RELAYS,
 });
