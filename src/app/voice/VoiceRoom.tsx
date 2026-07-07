@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { LiveKitRoom, RoomAudioRenderer } from "@livekit/components-react";
 import { Loader2, PhoneOff } from "lucide-react";
 import {
+  AudioPresets,
   BaseKeyProvider,
   DisconnectReason,
   Room,
@@ -132,16 +133,16 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
       },
       videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
       publishDefaults: {
-        // CRITICAL for E2EE audio: LiveKit leaves Opus RED (redundant encoding)
-        // on for mono tracks even with E2EE, but RED's redundant-frame recovery
-        // layered over the insertable-streams frame crypto delivers duplicated /
-        // reordered frames to the decoder — heard as screeching/garble. DTX
-        // (silence suppression) similarly glitches on resume under E2EE. Disable
-        // both; they only trade a little packet-loss resilience, and this is a
-        // per-publisher transport choice, so it stays interoperable with peers
-        // that keep them on.
-        red: false,
-        dtx: false,
+        // Match armada's known-good voice profile exactly: musicHighQuality
+        // (96 kbps) Opus with RED (packet-loss resilience) + DTX (don't transmit
+        // silence). These ride BELOW the E2EE frame crypto — the insertable-
+        // streams worker encrypts whole encoded frames regardless of codec — so
+        // they don't interact with decryption. (An earlier build disabled RED/DTX
+        // chasing an audio-garble bug; the real cause was the LiveKit version, not
+        // the codec — video was corrupted too, which RED can't touch.)
+        audioPreset: AudioPresets.musicHighQuality,
+        red: true,
+        dtx: true,
         videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360, VideoPresets.h720],
         screenShareEncoding: VideoPresets.h1080.encoding,
       },
