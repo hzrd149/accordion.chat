@@ -8,7 +8,6 @@ import {
   LogOut,
   Menu,
   MessageSquare,
-  Landmark,
   Paperclip,
   Pencil,
   Plus,
@@ -190,7 +189,7 @@ function Shell() {
       ) : (
         <div className="main">
           <div className="empty">
-            <div className="big"><Landmark size={48} /></div>
+            <div className="big app-emoji-icon" aria-hidden="true">🪗</div>
             <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Appcordion</h2>
             <div>Create your own community or join one with an invite link.</div>
             <div style={{ display: "flex", gap: 12, marginTop: 12 }}>

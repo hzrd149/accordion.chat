@@ -58,6 +58,10 @@ button > svg {
   justify-content: center;
   color: var(--text-muted);
 }
+.app-emoji-icon {
+  font-size: 48px;
+  line-height: 1;
+}
 
 input,
 textarea {

@@ -1,6 +1,6 @@
-# Concord
+# Appcordion
 
-A **Concord** client — Discord-style, end-to-end-encrypted communities over [Nostr](https://nostr.com). Create or join communities, organize them into channels, chat in real time, react/reply/edit/delete messages, manage roles and members, and invite people with a link — all encrypted, with no central server.
+An **Appcordion** client for the Concord protocol — Discord-style, end-to-end-encrypted communities over [Nostr](https://nostr.com). Create or join communities, organize them into channels, chat in real time, react/reply/edit/delete messages, manage roles and members, and invite people with a link — all encrypted, with no central server.
 
 Built with **React 19 + TypeScript + Vite**. Nostr I/O goes through the [applesauce](https://hzrd149.github.io/applesauce/) SDK. The protocol spec lives in `refs/concord/` (a git submodule).
 

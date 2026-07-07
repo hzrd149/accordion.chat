@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Landmark, ArrowLeft, Copy, Check, Settings2 } from "lucide-react";
+import { ArrowLeft, Copy, Check, Settings2 } from "lucide-react";
 import { nip19 } from "nostr-tools";
 import { ExtensionAccount, PrivateKeyAccount, NostrConnectAccount } from "applesauce-accounts/accounts";
 import type { IAccount } from "applesauce-accounts";
@@ -7,7 +7,7 @@ import { NostrConnectSigner } from "applesauce-signers";
 import { accounts, CONCORD_SIGNER_PERMISSIONS, NOSTR_CONNECT_RELAYS } from "../nostr";
 import { QRCode } from "./QRCode";
 
-const APP_METADATA = { name: "Concord", url: window.location.origin };
+const APP_METADATA = { name: "Appcordion", url: window.location.origin };
 
 export function Login() {
   const [nsec, setNsec] = useState("");
@@ -63,8 +63,8 @@ export function Login() {
   return (
     <div className="login-screen">
       <div className="login-card">
-        <div className="logo"><Landmark size={48} /></div>
-        <h1>Concord</h1>
+        <div className="logo app-emoji-icon" aria-hidden="true">🪗</div>
+        <h1>Appcordion</h1>
         <p>Discord-style communities on Nostr, end-to-end encrypted.</p>
 
         {error && <div className="error">{error}</div>}
