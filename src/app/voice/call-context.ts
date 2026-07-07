@@ -23,6 +23,8 @@ export interface CallController {
   pending: CallRequest | null;
   /** Join a voice channel's call (resolves a broker, connects, heartbeats). */
   join(req: CallRequest): void;
+  /** Move the active call to a different broker (§5 split-heal). */
+  migrate(broker: string): void;
   /** Leave the active or pending call. */
   leave(): void;
 }

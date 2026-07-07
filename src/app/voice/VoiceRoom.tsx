@@ -20,11 +20,19 @@ import {
 import { use$ } from "applesauce-react/hooks";
 
 import { useConcord } from "../concord-context";
-import { fetchAvToken, verifiedAuthorOf, type AvToken, type VoicePresenceFold } from "../../concord/voice";
+import {
+  fetchAvToken,
+  rendezvousCandidates,
+  verifiedAuthorOf,
+  type AvToken,
+  type VoicePresenceFold,
+} from "../../concord/voice";
+import { useCall } from "./call-context";
 import { voiceSenderKey } from "../../concord/crypto";
 import { randomBytes } from "../../lib/bytes";
 import { CallStage } from "./CallStage";
 import { CallBar } from "./CallBar";
+import { playJoinSound, playLeaveSound } from "./callSounds";
 import { VoiceIdentityContext, type VoiceIdentityResolver } from "./identity";
 import type { ActiveCall } from "./call-context";
 
@@ -169,6 +177,37 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
     };
   }, [e2ee, tokenData]);
   useEffect(() => () => e2ee.worker.terminate(), [e2ee]);
+
+  // A friendly chirp as people come and go (a remote roster change, never our
+  // own connect). Synthesized, so there are no assets to ship.
+  useEffect(() => {
+    const room = e2ee.room;
+    const onJoin = () => playJoinSound();
+    const onLeave = () => playLeaveSound();
+    room.on(RoomEvent.ParticipantConnected, onJoin);
+    room.on(RoomEvent.ParticipantDisconnected, onLeave);
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, onJoin);
+      room.off(RoomEvent.ParticipantDisconnected, onLeave);
+    };
+  }, [e2ee]);
+
+  // Split healing (§5): if presence shows the call occupied on a broker that
+  // beats ours in the tie-break, migrate there — once per mount (the remount key
+  // includes the broker, so a migration builds a fresh room). Guards on someone
+  // ELSE being there, so two simultaneous joiners converge on one winner.
+  const controller = useCall();
+  const migrated = useRef(false);
+  useEffect(() => {
+    if (!tokenData || !voice || migrated.current) return;
+    const winner = rendezvousCandidates(voice.room.pk, fold, [])[0];
+    if (!winner || winner === broker) return;
+    const occupiedByOther = fold.present.some((p) => p.broker === winner && p.identity !== tokenData.identity);
+    if (occupiedByOther) {
+      migrated.current = true;
+      controller.migrate(winner);
+    }
+  }, [fold, tokenData, voice, broker, controller]);
 
   // Identity → member resolution for the call UI (§4): our own identity is us;
   // anyone else's renders as a member only under a sole fresh presence claim.

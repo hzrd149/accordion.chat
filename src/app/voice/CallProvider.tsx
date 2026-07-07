@@ -50,7 +50,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [client],
   );
 
-  const controller = useMemo(() => ({ active, pending, join, leave }), [active, pending, join, leave]);
+  // §5 split-heal: jump the live call to a broker that beats ours in the
+  // tie-break. Bumps joinSeq so any in-flight resolution is discarded, and the
+  // new broker in the key remounts VoiceRoom with a fresh connection.
+  const migrate = useCallback((broker: string) => {
+    joinSeq.current++;
+    setActive((a) => (a && a.broker !== broker ? { ...a, broker } : a));
+  }, []);
+
+  const controller = useMemo(
+    () => ({ active, pending, join, migrate, leave }),
+    [active, pending, join, migrate, leave],
+  );
 
   return (
     <CallContext.Provider value={controller}>

@@ -4,6 +4,8 @@
 
 import { useLocalParticipant } from "@livekit/components-react";
 
+import { playMuteSound, playScreenShareSound, playUnmuteSound } from "./callSounds";
+
 export function CallBar({ onLeave }: { onLeave: () => void }) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
     useLocalParticipant();
@@ -13,7 +15,11 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
       <button
         className={isMicrophoneEnabled ? "call-btn active" : "call-btn"}
         title={isMicrophoneEnabled ? "Mute" : "Unmute"}
-        onClick={() => void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)}
+        onClick={() => {
+          if (isMicrophoneEnabled) playMuteSound();
+          else playUnmuteSound();
+          void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+        }}
       >
         {isMicrophoneEnabled ? "🎙️" : "🔇"}
       </button>
@@ -27,7 +33,10 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
       <button
         className={isScreenShareEnabled ? "call-btn active" : "call-btn"}
         title={isScreenShareEnabled ? "Stop sharing" : "Share screen"}
-        onClick={() => void localParticipant.setScreenShareEnabled(!isScreenShareEnabled, { audio: true })}
+        onClick={() => {
+          if (!isScreenShareEnabled) playScreenShareSound();
+          void localParticipant.setScreenShareEnabled(!isScreenShareEnabled, { audio: true });
+        }}
       >
         🖥️
       </button>
