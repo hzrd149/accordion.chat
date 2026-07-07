@@ -182,21 +182,33 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
     };
   }, [e2ee, tokenData, fold, voice]);
 
-  // Enable E2EE once our own key is installed; terminate the worker on unmount.
+  // Enable E2EE *before* connecting, and gate the connection on it (`e2eeReady`).
+  // This ordering is load-bearing: on SignalConnected LiveKit's E2EEManager runs
+  // `setParticipantCryptorEnabled(localParticipant.isE2EEEnabled, …)` once, so the
+  // local frame cryptor is turned on only if `encryptionType` is ALREADY GCM at
+  // connect time. `setE2EEEnabled(true)` sets that synchronously (even pre-connect,
+  // before its no-track early-return), so awaiting it before we connect guarantees
+  // the cryptor activates. Enabling it *after* connect — the obvious `tokenData`
+  // effect — loses a race against the SFU handshake: the token round-trip often
+  // resolves after SignalConnected (always so under React StrictMode's remount),
+  // leaving encryption GCM on paper but every remote frame silently dropped
+  // (failureTolerance:-1 suppresses the error). Bug hunted down via
+  // scripts/drive-voice-audio.mjs — audio was mute with E2EE on, perfect with it off.
+  const [e2eeReady, setE2eeReady] = useState(false);
   useEffect(() => {
-    if (!tokenData) return;
     let cancelled = false;
     void (async () => {
       try {
-        if (!cancelled) await e2ee.room.setE2EEEnabled(true);
+        await e2ee.room.setE2EEEnabled(true);
       } catch (err) {
         console.warn("failed to enable Concord voice E2EE", err);
       }
+      if (!cancelled) setE2eeReady(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [e2ee, tokenData]);
+  }, [e2ee]);
   useEffect(() => () => e2ee.worker.terminate(), [e2ee]);
 
   // A friendly chirp as people come and go (a remote roster change, never our
@@ -257,7 +269,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
       </div>,
     );
   }
-  if (!voice || !tokenData) {
+  if (!voice || !tokenData || !e2eeReady) {
     return host(
       <div className="call-status">
         <Loader2 className="spin" size={16} />
