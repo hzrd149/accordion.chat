@@ -682,7 +682,10 @@ export class ConcordClient {
    * subscription (which was the source of a mid-sync teardown race). */
   private reconcileChannelSub(rt: Runtime): void {
     for (const [channelId, key] of rt.keys.channels) {
-      rt.planeMap.set(key.pk, { type: "channel", convKey: key.convKey, channelId });
+      // Record the epoch this key derives at, so the receive-side binding check
+      // (CORD-03 §44) can strict-compare the rumor's `epoch` tag against the
+      // epoch whose key actually decrypted the wrap.
+      rt.planeMap.set(key.pk, { type: "channel", convKey: key.convKey, channelId, epoch: this.channelEpoch(rt, channelId) });
     }
     // Register channel stream keys so the channel REQ can pass an auth gate.
     registerStreamKeys([...rt.keys.channels.values()]);
@@ -755,9 +758,12 @@ export class ConcordClient {
         break;
       case "channel": {
         const channelId = info.channelId!;
+        // CORD-03 §44: the receiver MUST check both `channel` and `epoch`
+        // strict-equal against the channel/epoch whose key opened the wrap, and
+        // drop any mismatch — this is the anti-replay guarantee (no member can
+        // splice a rumor into another channel or replay it across an epoch).
         if (!checkChatBinding(decoded.rumor.tags, channelId, info.epoch ?? this.channelEpoch(rt, channelId))) {
-          // epoch may differ per held key; accept if channel matches at least
-          if (decoded.rumor.tags.find((t) => t[0] === "channel")?.[1] !== channelId) return;
+          return;
         }
         let ch = rt.channelEvents.get(channelId);
         if (!ch) {
