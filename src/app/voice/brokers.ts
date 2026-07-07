@@ -1,10 +1,12 @@
 // Concord AV broker configuration + rendezvous resolution (CORD-07 §2, §5).
 //
 // A broker is a blind LiveKit token endpoint. We hold no relay of our own, so
-// the default brokers come from `VITE_CONCORD_AV_SERVERS` (comma-separated https
-// origins) — point it at an armada deployment's `/.well-known/concord/av`. When
-// a call is already live, the participants' presence-announced broker is the
-// rendezvous point and our defaults are only the fallback (§5).
+// the default broker is the public Armada instance (`https://armada.buzz`), whose
+// relay hosts a CORD-07 `/.well-known/concord/av` broker + LiveKit SFU — so E2E
+// calls work out of the box. Operators override with `VITE_CONCORD_AV_SERVERS`
+// (comma-separated https origins) or set it empty to disable voice. When a call
+// is already live, the participants' presence-announced broker is the rendezvous
+// point and our defaults are only the empty-room fallback (§5).
 
 import {
   canonicalOrigin,
@@ -13,8 +15,13 @@ import {
   type VoicePresenceFold,
 } from "../../concord/voice";
 
+/** The public Armada broker: a blind CORD-07 token endpoint + LiveKit SFU. */
+const DEFAULT_PUBLIC_AV_SERVER = "https://armada.buzz";
+
 /** The client's own preferred brokers, in order — the empty-room fallback (§5). */
-export const CONCORD_AV_SERVERS: string[] = (import.meta.env.VITE_CONCORD_AV_SERVERS ?? "")
+export const CONCORD_AV_SERVERS: string[] = (
+  import.meta.env.VITE_CONCORD_AV_SERVERS ?? DEFAULT_PUBLIC_AV_SERVER
+)
   .split(",")
   .map((s: string) => s.trim())
   .filter((s: string): s is string => Boolean(s))

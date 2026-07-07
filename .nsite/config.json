@@ -14,5 +14,6 @@
 	],
 	"id": "appcordion",
 	"title": "Appcordion",
-	"description": "A Concord community app built using applesauce"
+	"description": "A Concord community app built using applesauce",
+	"fallback": "index.html"
 }

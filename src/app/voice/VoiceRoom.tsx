@@ -63,24 +63,30 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   const voice = useMemo(() => client.voiceKeys(cid, channelId), [client, cid, channelId]);
   const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? EMPTY_FOLD;
 
-  // Token from the blind broker (§2). Fetched once per (room, broker) and NEVER
-  // refetched: the identity is baked into the token and drives the frame keys,
-  // so a refetch would change who we are mid-call.
+  // Token from the blind broker (§2). Fetched exactly once per (room, broker) and
+  // NEVER refetched: the identity is baked into the token and drives the frame
+  // keys, so a refetch would change who we are mid-call. A single shared promise
+  // (not a fresh fetch per effect run) is essential — the grant's event id is
+  // deterministic within a second, so two grants would collide and the broker's
+  // anti-replay would 401 the second (e.g. React StrictMode's double-invoke).
   const [tokenData, setTokenData] = useState<AvToken | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const tokenReq = useRef<{ key: string; promise: Promise<AvToken> } | null>(null);
   useEffect(() => {
     if (!voice) return;
-    // The component remounts per (cid:channelId:broker) via its key, so this
-    // runs once — no need to reset token/error state on re-run.
+    const key = `${voice.room.pk}:${broker}`;
+    if (tokenReq.current?.key !== key) {
+      tokenReq.current = { key, promise: fetchAvToken(broker, voice.room) };
+    }
     let cancelled = false;
-    void (async () => {
-      try {
-        const t = await fetchAvToken(broker, voice.room);
+    tokenReq.current.promise.then(
+      (t) => {
         if (!cancelled) setTokenData(t);
-      } catch (err) {
+      },
+      (err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "voice token failed");
-      }
-    })();
+      },
+    );
     return () => {
       cancelled = true;
     };
