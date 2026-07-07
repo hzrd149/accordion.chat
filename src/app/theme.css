@@ -1150,15 +1150,49 @@ textarea {
 }
 
 @media (max-width: 768px) {
+  /* Stack the nav on top as a horizontal tab strip so forms get full width. */
+  .settings {
+    flex-direction: column;
+  }
   .settings-nav {
-    width: 160px;
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    /* right padding leaves room for the floating close button */
+    padding: 10px 52px 10px 12px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  /* Keep just the community/user icon for context; the label would crowd tabs. */
+  .settings-nav-head {
+    padding: 0 4px 0 0;
+    flex-shrink: 0;
+  }
+  .settings-nav-head span {
+    display: none;
+  }
+  .settings-nav-item {
+    width: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 8px 12px;
   }
   .settings-content {
-    padding: 32px 20px;
+    padding: 24px 16px 40px;
   }
+  /* Float over the tab strip's top-right corner instead of the content flow. */
   .settings-close {
-    top: 16px;
-    right: 16px;
+    position: fixed;
+    top: 10px;
+    right: 12px;
+    width: 36px;
+    height: 36px;
+  }
+  /* Let role/permission rows wrap instead of overflowing the narrow viewport. */
+  .role-row {
+    flex-wrap: wrap;
   }
 }
 
