@@ -45,7 +45,7 @@ import {
   rekeyLocator,
   ROOT_SCOPE_HEX,
 } from "./rekey";
-import { createStreamEvent, decodeStreamEventCached, rewrapSeal } from "./stream";
+import { createStreamEvent, decodeStreamEventCached, rewrapSeal, splitTime } from "./stream";
 import { clearCache, loadCache, saveCache, MAX_CHANNEL_CACHE } from "./cache";
 import type { CachedEntry } from "./cache";
 import { autoAuthenticate, authenticateStreamKeys } from "./relay-auth";
@@ -64,8 +64,16 @@ import type { CommunityList } from "./community-list";
 import { buildSnapshotRumors, foldMembers } from "./guestbook";
 import { resolveStanding, canActOn, hasPerm } from "./permissions";
 import type { Standing } from "./permissions";
-import { createCommunity, deriveKeys, verifyOwner } from "./community";
-import type { CommunityKeys } from "./community";
+import { createCommunity, deriveKeys, verifyOwner, voiceKeysFor } from "./community";
+import type { CommunityKeys, VoiceKeys } from "./community";
+import {
+  foldVoicePresence,
+  parsePresence,
+  presenceTags,
+  VOICE_HEARTBEAT_MS,
+  VOICE_STALE_MS,
+} from "./voice";
+import type { VoicePresenceEntry, VoicePresenceFold } from "./voice";
 import { buildEdition, computeEditionHash } from "./editions";
 import {
   messageRumor,
@@ -146,6 +154,14 @@ interface Runtime {
   channelAuthors: string;
   state$: BehaviorSubject<CommunityState>;
   messages$: Map<string, BehaviorSubject<ChatMessage[]>>;
+  /** CORD-07 §4: per voice-channel, the latest presence per author. */
+  voicePresence: Map<string, Map<string, VoicePresenceEntry>>;
+  /** channelId -> folded, staleness-decayed presence view. */
+  presence$: Map<string, BehaviorSubject<VoicePresenceFold>>;
+  /** Periodic decay so a `joined` that stops heartbeating ages out (§4). */
+  presenceDecay?: ReturnType<typeof setInterval>;
+  /** channelId -> our own heartbeat timer while we're in that call. */
+  voiceHeartbeats: Map<string, ReturnType<typeof setInterval>>;
   refoldTimer?: ReturnType<typeof setTimeout>;
   persistTimer?: ReturnType<typeof setTimeout>;
 }
@@ -221,6 +237,9 @@ export class ConcordClient {
     for (const rt of this.runtimes.values()) {
       rt.controlSub?.unsubscribe();
       rt.channelSub?.unsubscribe();
+      if (rt.presenceDecay) clearInterval(rt.presenceDecay);
+      for (const timer of rt.voiceHeartbeats.values()) clearInterval(timer);
+      rt.voiceHeartbeats.clear();
       if (rt.persistTimer) {
         clearTimeout(rt.persistTimer);
         this.persistCache(rt); // flush any pending cache write before teardown
@@ -243,6 +262,140 @@ export class ConcordClient {
       this.recomputeMessages(rt, channelId);
     }
     return subj;
+  }
+
+  // ---- voice (CORD-07) ----------------------------------------------------
+
+  /** The folded call-presence view for a voice channel (CORD-07 §4). */
+  getVoicePresence$(cid: string, channelId: string): BehaviorSubject<VoicePresenceFold> {
+    const rt = this.runtimes.get(cid)!;
+    let subj = rt.presence$.get(channelId);
+    if (!subj) {
+      subj = new BehaviorSubject<VoicePresenceFold>({ present: [], claims: new Map() });
+      rt.presence$.set(channelId, subj);
+      this.recomputePresence(rt, channelId);
+      this.ensurePresenceDecay(rt);
+    }
+    return subj;
+  }
+
+  /** The voice keys (SFU room + media root) for a channel, or undefined if the
+   *  channel isn't a voice channel or isn't known. */
+  voiceKeys(cid: string, channelId: string): VoiceKeys | undefined {
+    const rt = this.runtimes.get(cid);
+    const ch = rt?.state$.value.channels.find((c) => c.channel_id === channelId);
+    if (!rt || !ch?.voice) return undefined;
+    return voiceKeysFor(rt.material, ch);
+  }
+
+  private ingestPresence(rt: Runtime, channelId: string, decoded: DecodedEvent): void {
+    const entry = parsePresence(decoded);
+    if (!entry) return;
+    // Reject far-future stamps so a forged date can't squat "latest".
+    if (entry.ms > Date.now() + 60_000) return;
+    let byAuthor = rt.voicePresence.get(channelId);
+    if (!byAuthor) {
+      byAuthor = new Map();
+      rt.voicePresence.set(channelId, byAuthor);
+    }
+    const prev = byAuthor.get(entry.author);
+    // Latest wins (ms basis, rumor-id tiebreak) — a replayed older ping loses.
+    if (prev && !(entry.ms > prev.ms || (entry.ms === prev.ms && entry.rumorId < prev.rumorId))) return;
+    byAuthor.set(entry.author, entry);
+    this.recomputePresence(rt, channelId);
+  }
+
+  private recomputePresence(rt: Runtime, channelId: string): void {
+    const subj = rt.presence$.get(channelId);
+    if (!subj) return;
+    const now = Date.now();
+    const byAuthor = rt.voicePresence.get(channelId);
+    if (byAuthor) {
+      // Prune long-stale entries so the map stays bounded; anything a pruned
+      // entry could out-rank is even older, so this never resurrects one.
+      for (const [author, e] of byAuthor) if (now - e.ms > VOICE_STALE_MS) byAuthor.delete(author);
+    }
+    subj.next(foldVoicePresence(byAuthor ? [...byAuthor.values()] : [], now));
+  }
+
+  /** One shared decay ticker per runtime re-folds every open call so a
+   *  participant who stops heartbeating ages out even with no new events. */
+  private ensurePresenceDecay(rt: Runtime): void {
+    if (rt.presenceDecay) return;
+    rt.presenceDecay = setInterval(() => {
+      for (const channelId of rt.presence$.keys()) this.recomputePresence(rt, channelId);
+    }, VOICE_STALE_MS / 6);
+  }
+
+  /**
+   * Announce joining a call (CORD-07 §4): publish a `joined` (carrying the
+   * broker-assigned SFU identity + broker rendezvous hint) now and every 30s.
+   * Idempotent per channel — re-joining replaces the prior heartbeat.
+   */
+  async joinVoice(cid: string, channelId: string, identity: string, broker: string): Promise<void> {
+    const rt = this.runtimes.get(cid);
+    if (!rt) return;
+    this.stopHeartbeat(rt, channelId);
+    const beat = () => void this.publishPresence(rt, channelId, "joined", identity, broker);
+    beat();
+    rt.voiceHeartbeats.set(channelId, setInterval(beat, VOICE_HEARTBEAT_MS));
+    this.ensurePresenceDecay(rt);
+  }
+
+  /** Announce leaving a call (§4): best-effort `left`; a missed one heals by
+   *  staleness. Stops our heartbeat. */
+  async leaveVoice(cid: string, channelId: string): Promise<void> {
+    const rt = this.runtimes.get(cid);
+    if (!rt) return;
+    if (!rt.voiceHeartbeats.has(channelId)) return;
+    this.stopHeartbeat(rt, channelId);
+    await this.publishPresence(rt, channelId, "left");
+  }
+
+  private stopHeartbeat(rt: Runtime, channelId: string): void {
+    const timer = rt.voiceHeartbeats.get(channelId);
+    if (timer) {
+      clearInterval(timer);
+      rt.voiceHeartbeats.delete(channelId);
+    }
+  }
+
+  /** Publish one presence rumor over the channel's own address (ephemeral wrap)
+   *  and reflect it locally so our own roster tile appears immediately. */
+  private async publishPresence(
+    rt: Runtime,
+    channelId: string,
+    status: "joined" | "left",
+    identity?: string,
+    broker?: string,
+  ): Promise<void> {
+    const epoch = this.channelEpoch(rt, channelId);
+    const key = this.channelKey(rt, channelId);
+    const { created_at, ms } = splitTime();
+    const rumor = {
+      kind: KIND.VOICE_PRESENCE,
+      content: status,
+      created_at,
+      tags: [
+        ["channel", channelId],
+        ["epoch", String(epoch)],
+        ...presenceTags(status, identity, broker),
+        ["ms", String(ms)],
+      ],
+    };
+    const { wrap } = await createStreamEvent({
+      streamSk: key.sk,
+      convKey: key.convKey,
+      author: this.signer,
+      rumor,
+      ephemeral: true,
+    });
+    // Ephemeral publishToPlane skips the local echo, so reflect presence into
+    // our own fold directly (the relay echo would otherwise be our only source).
+    const decoded = decodeStreamEventCached(wrap, key.convKey);
+    if (decoded) this.ingestPresence(rt, channelId, decoded);
+    const relays = rt.material.relays.length ? rt.material.relays : DEFAULT_RELAYS;
+    pool.publish(relays, wrap).catch((err) => console.warn("presence publish failed", err));
   }
 
   // ---- creating / joining -------------------------------------------------
@@ -629,6 +782,9 @@ export class ConcordClient {
       channelAuthors: "",
       state$: new BehaviorSubject<CommunityState>(emptyState(material)),
       messages$: new Map(),
+      voicePresence: new Map(),
+      presence$: new Map(),
+      voiceHeartbeats: new Map(),
     };
     this.runtimes.set(material.community_id, rt);
     // Rehydrate from the local cache first, so channels/members are visible
@@ -775,6 +931,13 @@ export class ConcordClient {
         // drop any mismatch — this is the anti-replay guarantee (no member can
         // splice a rumor into another channel or replay it across an epoch).
         if (!checkChatBinding(decoded.rumor.tags, channelId, info.epoch ?? this.channelEpoch(rt, channelId))) {
+          return;
+        }
+        // Voice presence (CORD-07 §4) rides the Channel's own address but is not
+        // chat: route it to the presence fold, never into the message store or
+        // the persisted cache (it's ephemeral, nothing worth storing).
+        if (decoded.rumor.kind === KIND.VOICE_PRESENCE) {
+          this.ingestPresence(rt, channelId, decoded);
           return;
         }
         let ch = rt.channelEvents.get(channelId);
