@@ -2,6 +2,12 @@
 // livekit-client bundle stays out of the boot path and the connection survives
 // navigation between channels/communities (the provider lives above the router
 // shell). Joining resolves the §5 rendezvous broker before the room mounts.
+//
+// The room itself stays mounted here at the root (so its audio + connection
+// outlive navigation), but its visible surface is portaled by VoiceRoom into a
+// slot the current voice channel's view registers (`stageEl`) — so the call
+// renders center-top of that channel with chat below, and shrinks to a
+// minimized bar when you browse elsewhere.
 
 import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -17,6 +23,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<ActiveCall | null>(null);
   const [pending, setPending] = useState<CallRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stageEl, setStageEl] = useState<HTMLElement | null>(null);
   // Guards against a stale broker-resolution completing after a newer join/leave.
   const joinSeq = useRef(0);
 
@@ -26,6 +33,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setActive(null);
     setError(null);
   }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const join = useCallback(
     (req: CallRequest) => {
@@ -59,27 +68,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const controller = useMemo(
-    () => ({ active, pending, join, migrate, leave }),
-    [active, pending, join, migrate, leave],
+    () => ({ active, pending, error, join, migrate, leave, clearError, stageEl, setStageEl }),
+    [active, pending, error, join, migrate, leave, clearError, stageEl],
   );
 
   return (
     <CallContext.Provider value={controller}>
       {children}
-      {error && (
-        <div className="call-error call-float">
-          <span>{error}</span>
-          <button onClick={() => setError(null)}>Dismiss</button>
-        </div>
-      )}
-      {pending && (
-        <div className="call-connecting call-float">
-          <span>Finding a voice broker for #{pending.channelName}…</span>
-          <button onClick={leave}>Cancel</button>
-        </div>
-      )}
       {active && (
-        <Suspense fallback={<div className="call-connecting call-float">Loading call…</div>}>
+        <Suspense fallback={null}>
           <VoiceRoom key={`${active.cid}:${active.channelId}:${active.broker}`} call={active} onLeave={leave} />
         </Suspense>
       )}

@@ -3,6 +3,7 @@
 // only (no enforceable server-side mute), so these govern our own publishing.
 
 import { useLocalParticipant } from "@livekit/components-react";
+import { Mic, MicOff, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
 
 import { playMuteSound, playScreenShareSound, playUnmuteSound } from "./callSounds";
 
@@ -21,14 +22,14 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
           void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
         }}
       >
-        {isMicrophoneEnabled ? "🎙️" : "🔇"}
+        {isMicrophoneEnabled ? <Mic size={18} /> : <MicOff size={18} />}
       </button>
       <button
         className={isCameraEnabled ? "call-btn active" : "call-btn"}
         title={isCameraEnabled ? "Stop camera" : "Start camera"}
         onClick={() => void localParticipant.setCameraEnabled(!isCameraEnabled)}
       >
-        {isCameraEnabled ? "📹" : "📷"}
+        {isCameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
       </button>
       <button
         className={isScreenShareEnabled ? "call-btn active" : "call-btn"}
@@ -38,10 +39,10 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
           void localParticipant.setScreenShareEnabled(!isScreenShareEnabled, { audio: true });
         }}
       >
-        🖥️
+        {isScreenShareEnabled ? <ScreenShareOff size={18} /> : <ScreenShare size={18} />}
       </button>
       <button className="call-btn hangup" title="Leave call" onClick={onLeave}>
-        📞
+        <PhoneOff size={18} />
       </button>
     </div>
   );

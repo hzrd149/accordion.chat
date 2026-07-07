@@ -45,12 +45,22 @@ async function clickText(page, text, sel = "button") {
   );
 }
 const shot = (page, n) => page.screenshot({ path: `${SHOTS}/${n}.png` });
-const joinVoice = (page) =>
-  page.evaluate(() => {
+// Select the voice channel (shows chat + pre-join panel), then click its Join
+// button (the call is started from the top toolbar, not the sidebar row).
+const joinVoice = async (page) => {
+  await page.evaluate(() => {
     const b = [...document.querySelectorAll(".voice-channel .channel")].find((x) => x.textContent.includes("hangout"));
     if (!b) throw new Error("no voice channel row");
     b.click();
   });
+  await page.waitForFunction(
+    () => [...document.querySelectorAll(".call-prejoin button")].some((b) => /join/i.test(b.textContent)),
+    { timeout: 8000 },
+  );
+  await page.evaluate(() => {
+    [...document.querySelectorAll(".call-prejoin button")].find((b) => /join/i.test(b.textContent)).click();
+  });
+};
 const callState = (page) =>
   page.evaluate(() => ({
     participants: document.querySelectorAll(".call-tile").length,

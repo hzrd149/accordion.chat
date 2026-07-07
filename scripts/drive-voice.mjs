@@ -81,31 +81,62 @@ try {
   });
   console.log("voice channel row rendered:", hasVoiceRow);
   if (!hasVoiceRow) throw new Error("voice channel did not render as a .voice-channel row");
-  await shot("03-voice-channel");
 
-  // Join the call — resolves the default broker, mints a token, connects to the
-  // SFU with E2EE, and announces presence over the channel.
+  // Selecting the voice channel shows its chat + a pre-join panel WITHOUT joining.
   await page.evaluate(() => {
-    const row = [...document.querySelectorAll(".voice-channel .channel")].find((b) =>
-      b.textContent.includes("hangout"),
-    );
-    row.click();
+    [...document.querySelectorAll(".voice-channel .channel")].find((b) => b.textContent.includes("hangout")).click();
+  });
+  await sleep(1500);
+  await shot("03-voice-selected");
+  const preState = await page.evaluate(() => ({
+    prejoin: !!document.querySelector(".call-prejoin"),
+    joinBtn: !!(
+      [...document.querySelectorAll(".call-prejoin button")].find((b) => /join/i.test(b.textContent))
+    ),
+    composer: !!document.querySelector(".composer textarea"),
+    inCall: !!document.querySelector(".call-surface"),
+  }));
+  console.log("pre-join state:", JSON.stringify(preState));
+  if (!preState.prejoin) throw new Error("pre-join panel did not render on select");
+  if (!preState.joinBtn) throw new Error("no Join button in the pre-join toolbar");
+  if (!preState.composer) throw new Error("chat composer not shown for the voice channel");
+  if (preState.inCall) throw new Error("joined without clicking Join");
+
+  // Click Join — resolves the default broker, mints a token, connects to the SFU
+  // with E2EE, and announces presence over the channel.
+  await page.evaluate(() => {
+    [...document.querySelectorAll(".call-prejoin button")].find((b) => /join/i.test(b.textContent)).click();
   });
   await sleep(7000);
   await shot("04-in-call");
-  const state = await page.evaluate(() => ({
-    callWindow: !!document.querySelector(".call-window"),
-    error: document.querySelector(".call-error")?.textContent ?? null,
-    participants: document.querySelectorAll(".call-tile").length,
-    rosterMembers: document.querySelectorAll(".voice-roster .voice-member").length,
-    callBarButtons: document.querySelectorAll(".call-bar .call-btn").length,
-  }));
+  const state = await page.evaluate(() => {
+    const surface = document.querySelector(".call-surface");
+    const chat = document.querySelector(".composer");
+    // Call surface should sit ABOVE the chat composer in the document.
+    const above = surface && chat
+      ? surface.getBoundingClientRect().top < chat.getBoundingClientRect().top
+      : false;
+    return {
+      callSurface: !!surface,
+      surfaceAboveChat: above,
+      error: document.querySelector(".call-status-error")?.textContent ?? null,
+      participants: document.querySelectorAll(".call-tile").length,
+      rosterMembers: document.querySelectorAll(".voice-roster .voice-member").length,
+      callBarButtons: document.querySelectorAll(".call-bar .call-btn").length,
+      lucideIcons: document.querySelectorAll(".call-bar .call-btn svg.lucide").length,
+      composerStillShown: !!chat,
+    };
+  });
   console.log("in-call state:", JSON.stringify(state));
 
   if (state.error) throw new Error("call surfaced an error: " + state.error);
-  if (!state.callWindow) throw new Error("call window did not render after join");
+  if (!state.callSurface) throw new Error("call surface did not render after join");
+  if (!state.composerStillShown) throw new Error("chat disappeared when the call started");
+  if (!state.surfaceAboveChat) throw new Error("call surface is not above the chat");
   if (state.participants < 1) throw new Error("no participant tile after join");
   if (state.rosterMembers < 1) throw new Error("own presence not in the sidebar roster");
+  if (state.callBarButtons !== 4) throw new Error("expected 4 call-bar buttons");
+  if (state.lucideIcons < 4) throw new Error("call-bar buttons are not using lucide icons");
 
   const fatal = errors.filter(
     (e) => !/relay|websocket|ws:|wss:|network|Failed to load resource|401|data channel|Failed to fetch|ERR_/i.test(e),

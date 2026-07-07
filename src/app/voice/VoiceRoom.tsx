@@ -8,7 +8,10 @@
 // externally-derived per-identity key material.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { LiveKitRoom, RoomAudioRenderer } from "@livekit/components-react";
+import { Loader2, PhoneOff } from "lucide-react";
 import {
   BaseKeyProvider,
   DisconnectReason,
@@ -213,7 +216,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // beats ours in the tie-break, migrate there — once per mount (the remount key
   // includes the broker, so a migration builds a fresh room). Guards on someone
   // ELSE being there, so two simultaneous joiners converge on one winner.
-  const controller = useCall();
+  const { migrate, stageEl } = useCall();
   const migrated = useRef(false);
   useEffect(() => {
     if (!tokenData || !voice || migrated.current) return;
@@ -222,9 +225,9 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
     const occupiedByOther = fold.present.some((p) => p.broker === winner && p.identity !== tokenData.identity);
     if (occupiedByOther) {
       migrated.current = true;
-      controller.migrate(winner);
+      migrate(winner);
     }
-  }, [fold, tokenData, voice, broker, controller]);
+  }, [fold, tokenData, voice, broker, migrate]);
 
   // Identity → member resolution for the call UI (§4): our own identity is us;
   // anyone else's renders as a member only under a sole fresh presence claim.
@@ -234,27 +237,41 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
     return author ? { pubkey: author, verified: true } : { pubkey: identity, verified: false };
   };
 
+  // The visible call surface renders into the current voice channel's slot
+  // (`stageEl`, center-top with chat below) when that channel is on screen, or a
+  // compact bar (fixed, top-center) when you're browsing elsewhere. Either way
+  // it's a portal, so the LiveKit connection stays mounted here at the root.
+  const host = (node: ReactNode) =>
+    stageEl
+      ? createPortal(<div className="call-surface">{node}</div>, stageEl)
+      : createPortal(<div className="call-surface call-mini">{node}</div>, document.body);
+
   if (error) {
-    return (
-      <div className="call-error">
+    return host(
+      <div className="call-status call-status-error">
         <span>Voice unavailable: {error}</span>
-        <button onClick={onLeave}>Dismiss</button>
-      </div>
+        <button className="btn secondary" onClick={onLeave}>
+          Dismiss
+        </button>
+      </div>,
     );
   }
   if (!voice || !tokenData) {
-    return (
-      <div className="call-connecting">
+    return host(
+      <div className="call-status">
+        <Loader2 className="spin" size={16} />
         <span>Connecting to #{call.channelName}…</span>
-        <button onClick={onLeave}>Cancel</button>
-      </div>
+        <button className="btn secondary" onClick={onLeave}>
+          Cancel
+        </button>
+      </div>,
     );
   }
 
   return (
     <VoiceIdentityContext.Provider value={resolveIdentity}>
       <LiveKitRoom
-        className="call-window"
+        className="call-root"
         room={e2ee.room}
         serverUrl={tokenData.url}
         token={tokenData.token}
@@ -269,8 +286,20 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
         }}
       >
         <RoomAudioRenderer />
-        <CallStage channelName={call.channelName} />
-        <CallBar onLeave={onLeave} />
+        {host(
+          <>
+            {!stageEl && (
+              <div className="call-mini-head">
+                <span className="call-mini-title">In call · #{call.channelName}</span>
+                <button className="call-btn hangup" title="Leave call" onClick={onLeave}>
+                  <PhoneOff size={16} />
+                </button>
+              </div>
+            )}
+            <CallStage channelName={call.channelName} />
+            <CallBar onLeave={onLeave} />
+          </>,
+        )}
       </LiveKitRoom>
     </VoiceIdentityContext.Provider>
   );

@@ -10,6 +10,7 @@ import {
   type TrackReference,
 } from "@livekit/components-react";
 import { Track, type Participant } from "livekit-client";
+import { MicOff, ShieldQuestion } from "lucide-react";
 
 import { UserAvatar, UserName } from "../User";
 import { useVoiceIdentity } from "./identity";
@@ -43,9 +44,15 @@ function AvatarTile({ participant }: { participant: Participant }) {
       {info.verified ? (
         <UserAvatar pubkey={info.pubkey} className="call-avatar" />
       ) : (
-        <div className="call-avatar unverified">?</div>
+        <div className="call-avatar unverified">
+          <ShieldQuestion size={22} />
+        </div>
       )}
-      {participant.isMicrophoneEnabled === false && <span className="call-tile-muted">🔇</span>}
+      {participant.isMicrophoneEnabled === false && (
+        <span className="call-tile-muted">
+          <MicOff size={13} />
+        </span>
+      )}
       <TileLabel identity={participant.identity} />
     </div>
   );

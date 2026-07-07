@@ -4,6 +4,7 @@ import {
   DoorOpen,
   Hand,
   Hash,
+  Loader2,
   Lock,
   LogOut,
   Menu,
@@ -11,9 +12,11 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Phone,
   Plus,
   Reply,
   Settings,
+  ShieldQuestion,
   SmilePlus,
   Trash2,
   UserPlus,
@@ -26,7 +29,7 @@ import { accounts } from "../nostr";
 import { ConcordProvider } from "./context";
 import { CallProvider } from "./voice/CallProvider";
 import { useCall } from "./voice/call-context";
-import { verifiedAuthorOf } from "../concord/voice";
+import { verifiedAuthorOf, type VoicePresenceFold } from "../concord/voice";
 import { useConcord } from "./concord-context";
 import { Login } from "./Login";
 import {
@@ -367,7 +370,14 @@ function Sidebar({
         </div>
         {state.channels.map((ch) =>
           ch.voice ? (
-            <VoiceChannelRow key={ch.channel_id} cid={state.material.community_id} channelId={ch.channel_id} name={ch.name} />
+            <VoiceChannelRow
+              key={ch.channel_id}
+              cid={state.material.community_id}
+              channelId={ch.channel_id}
+              name={ch.name}
+              selected={ch.channel_id === selectedChannel}
+              onSelect={() => onSelectChannel(ch.channel_id)}
+            />
           ) : (
             <button
               key={ch.channel_id}
@@ -408,27 +418,47 @@ function Sidebar({
   );
 }
 
-/**
- * A voice channel in the sidebar (CORD-07): a speaker-icon row that joins the
- * call on click, with the live roster of present members listed beneath it.
- */
-function VoiceChannelRow({ cid, channelId, name }: { cid: string; channelId: string; name: string }) {
+const EMPTY_FOLD: VoicePresenceFold = { present: [], claims: new Map<string, string[]>() };
+
+/** Roster entries (identity → verified author) for a channel's live call (§4). */
+function useRoster(cid: string, channelId: string) {
   const client = useConcord();
-  const call = useCall();
-  const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? {
-    present: [],
-    claims: new Map<string, string[]>(),
+  const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? EMPTY_FOLD;
+  return {
+    fold,
+    roster: fold.present.map((p) => ({ identity: p.identity, author: verifiedAuthorOf(fold, p.identity) })),
   };
+}
+
+/**
+ * A voice channel in the sidebar (CORD-07): selecting it opens the channel like
+ * any other (chat + the call panel render in the main view); it is NOT a join.
+ * A live-count badge and the roster of present members show at a glance who's
+ * in the call.
+ */
+function VoiceChannelRow({
+  cid,
+  channelId,
+  name,
+  selected,
+  onSelect,
+}: {
+  cid: string;
+  channelId: string;
+  name: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const call = useCall();
+  const { fold, roster } = useRoster(cid, channelId);
   const inThisCall = call.active?.channelId === channelId && call.active?.cid === cid;
-  // A present participant renders in the roster only when its identity verifies
-  // to exactly one author (§4); contested/unclaimed are shown as unverified.
-  const roster = fold.present.map((p) => ({ identity: p.identity, author: verifiedAuthorOf(fold, p.identity) }));
 
   return (
-    <div className={`voice-channel ${inThisCall ? "active" : ""}`}>
-      <button className="channel" onClick={() => (inThisCall ? call.leave() : call.join({ cid, channelId, channelName: name }))}>
+    <div className="voice-channel">
+      <button className={`channel ${selected ? "active" : ""}`} onClick={onSelect}>
         <span className="hash"><Volume2 size={16} /></span>
         <span>{name}</span>
+        {inThisCall && <span className="voice-live-dot" title="You're in this call" />}
         {fold.present.length > 0 && <span className="voice-count">{fold.present.length}</span>}
       </button>
       {roster.length > 0 && (
@@ -447,6 +477,55 @@ function VoiceChannelRow({ cid, channelId, name }: { cid: string; channelId: str
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The call surface at the top of a voice channel's view. When you're in this
+ * channel's call, it hosts the live stage (the persistent VoiceRoom portals into
+ * the slot). Otherwise it's a pre-join toolbar: who's in the call + a Join
+ * button. Chat renders below it either way.
+ */
+function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: string; name: string }) {
+  const { active, pending, error, join, setStageEl } = useCall();
+  const { roster } = useRoster(cid, channelId);
+  const isActiveHere = active?.cid === cid && active?.channelId === channelId;
+  const isPendingHere = pending?.cid === cid && pending?.channelId === channelId;
+
+  // Host the persistent call surface here. `setStageEl` is the stable state
+  // setter, so it's safe as a ref callback (node on mount, null on unmount).
+  if (isActiveHere) return <div className="call-host" ref={setStageEl} />;
+
+  return (
+    <div className="call-prejoin">
+      <div className="call-prejoin-info">
+        <Volume2 size={18} />
+        <span>{roster.length ? `${roster.length} in the call` : "No one's in the call yet"}</span>
+        <div className="call-prejoin-avatars">
+          {roster.map((r) =>
+            r.author ? (
+              <UserAvatar key={r.identity} pubkey={r.author} className="voice-member-avatar" />
+            ) : (
+              <span key={r.identity} className="voice-member-avatar unverified">
+                <ShieldQuestion size={14} />
+              </span>
+            ),
+          )}
+        </div>
+      </div>
+      <div className="call-prejoin-actions">
+        {error && !isPendingHere && <span className="call-error-text">{error}</span>}
+        {isPendingHere ? (
+          <button className="btn" disabled>
+            <Loader2 className="spin" size={16} /> Connecting…
+          </button>
+        ) : (
+          <button className="btn" onClick={() => join({ cid, channelId, channelName: name })}>
+            <Phone size={16} /> Join call
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -515,12 +594,13 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
     <div className="main">
       <div className="main-header">
         <span className="hash" style={{ color: "var(--text-muted)" }}>
-          {channel?.private ? <Lock size={20} /> : <Hash size={20} />}
+          {channel?.voice ? <Volume2 size={20} /> : channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
         <span className="title">{channel?.name}</span>
         <span className="topic">{state.metadata?.description}</span>
         <div className="spacer" />
       </div>
+      {channel?.voice && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
       <MessageList
         ref={scrollRef}
         messages={messages}
