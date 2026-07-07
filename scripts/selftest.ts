@@ -165,6 +165,93 @@ async function main() {
     "stream AUTH events carry the relay challenge",
   );
 
+  // 9. Voice (CORD-07): both members derive the same room, grants verify,
+  //    presence round-trips through the ephemeral wrap, and rendezvous is stable.
+  {
+    const { voiceKeysFor } = await import("../src/concord/community");
+    const {
+      signAvGrant,
+      parsePresence,
+      presenceTags,
+      foldVoicePresence,
+      verifiedAuthorOf,
+      canonicalOrigin,
+      brokerRank,
+      orderBrokers,
+      rendezvousCandidates,
+    } = await import("../src/concord/voice");
+    const voiceCh = { ...state.channels[0], voice: true };
+    const ownerVoice = voiceKeysFor(genesis.material, voiceCh);
+    const memberVoice = voiceKeysFor(genesis.material, voiceCh);
+    assert(ownerVoice.room.pk === memberVoice.room.pk, "both members derive same voice room");
+    assert(toHex(ownerVoice.mediaKey) === toHex(memberVoice.mediaKey), "both members derive same media key");
+    assert(ownerVoice.room.pk !== chKey.pk, "voice room differs from chat address");
+
+    // Token grant: kind-27235 self-signed by voice_key.sk, pubkey == room.
+    const grantUrl = `https://broker.example/.well-known/concord/av/${ownerVoice.room.pk}`;
+    const grant = JSON.parse(atob(signAvGrant(ownerVoice.room, grantUrl))) as NostrEvent;
+    assert(grant.kind === 27235 && verifyEvent(grant), "voice grant is a valid kind-27235");
+    assert(grant.pubkey === ownerVoice.room.pk, "grant pubkey equals the room name");
+    assert(grant.tags.find((t) => t[0] === "u")?.[1] === grantUrl, "grant binds the exact url");
+
+    // Presence round-trip: a `joined` rumor over the channel's ephemeral wrap.
+    const identity = "a".repeat(32);
+    const presRumor = {
+      kind: 23313,
+      content: "joined",
+      tags: [
+        ["channel", voiceCh.channel_id],
+        ["epoch", "0"],
+        ...presenceTags("joined", identity, "https://broker.example"),
+        ["ms", "417"],
+      ],
+    };
+    const { wrap: presWrap } = await createStreamEvent({
+      streamSk: chKey.sk,
+      convKey: chKey.convKey,
+      author: member,
+      rumor: presRumor,
+      ephemeral: true,
+    });
+    assert(presWrap.kind === 21059, "presence uses the ephemeral wrap");
+    const presDec = decodeStreamEvent(presWrap, chKey.convKey);
+    assert(presDec !== null, "presence decodes at the channel address");
+    const entry = parsePresence(presDec!);
+    assert(entry !== null && entry.status === "joined", "presence parses as joined");
+    assert(entry!.identity === identity, "presence carries the SFU identity");
+    assert(entry!.broker === "https://broker.example", "presence carries the canonicalized broker");
+    const fold = foldVoicePresence([entry!], presDec!.ms);
+    assert(fold.present.length === 1 && fold.present[0].author === memberPub, "fold shows the member present");
+    assert(verifiedAuthorOf(fold, identity) === memberPub, "sole claimant of an identity verifies");
+
+    // A contested identity (two authors claiming it) verifies for neither.
+    const contested = foldVoicePresence(
+      [
+        { author: memberPub, status: "joined", identity, broker: "https://b.example", ms: 1, rumorId: "x" },
+        { author: ownerPub, status: "joined", identity, broker: "https://b.example", ms: 2, rumorId: "y" },
+      ],
+      2,
+    );
+    assert(verifiedAuthorOf(contested, identity) === undefined, "contested identity verifies for no one");
+
+    // Stale presence ages out.
+    const stale = foldVoicePresence([entry!], presDec!.ms + 91_000);
+    assert(stale.present.length === 0, "presence older than 90s counts as absent");
+
+    // Rendezvous tie-break is canonical and stable.
+    assert(canonicalOrigin("https://Broker.Example:443/path/") === "https://broker.example", "origin canonicalizes");
+    assert(canonicalOrigin("http://broker.example") === null, "plaintext http origin refused");
+    const room = ownerVoice.room.pk;
+    const ordered = orderBrokers(room, ["https://b.example", "https://a.example"]);
+    assert(
+      ordered[0] === (brokerRank(room, "https://a.example") < brokerRank(room, "https://b.example") ? "https://a.example" : "https://b.example"),
+      "brokers order by the sha256 tie-break",
+    );
+    const rendezvous = rendezvousCandidates(room, fold, ["https://my.example"]);
+    assert(rendezvous[0] === "https://broker.example", "rendezvous joins the occupied broker first");
+    assert(rendezvous.includes("https://my.example"), "own default is the fallback candidate");
+  }
+
   void finalizeEvent as unknown as EventTemplate;
   void ({} as NostrEvent);
   console.log("\nALL SELFTESTS PASSED");

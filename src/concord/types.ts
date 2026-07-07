@@ -19,6 +19,8 @@ export const KIND = {
   WEBXDC: 3310,
   SNAPSHOT: 3312,
   TYPING: 23311,
+  VOICE_PRESENCE: 23313,
+  HTTP_AUTH: 27235,
   INVITE_BUNDLE: 33301,
   COMMUNITY_LIST: 13302,
   INVITE_LIST: 13303,
@@ -123,6 +125,8 @@ export interface ChannelMetadata {
   name: string;
   private: boolean;
   deleted?: boolean;
+  /** CORD-07 §1: a voice/video Channel. Folds like any other channel property. */
+  voice?: boolean;
   custom?: Record<string, unknown>;
   // client-tracked keying (from invite / derivation), not part of the edition:
   key?: string; // private channel key hex; undefined => public (community_root)

@@ -6,6 +6,8 @@ import {
   communityId,
   controlGroupKey,
   guestbookGroupKey,
+  voiceGroupKey,
+  voiceMediaKey,
 } from "./crypto";
 import type { GroupKey } from "./crypto";
 import { buildEdition } from "./editions";
@@ -25,12 +27,39 @@ export interface CommunityKeys {
   channels: Map<string, GroupKey>;
 }
 
-export function channelKeyFor(material: JoinMaterial, channel: ChannelMetadata): GroupKey {
+/**
+ * The `(channel_secret, epoch)` pair that addresses a Channel's Chat Plane
+ * (CORD-03 §1): the Channel's own key/epoch for a Private one, the
+ * community_root at the root epoch for a Public one. Both the Chat key and the
+ * voice keys (CORD-07 §1) derive from this same pair, so they rotate together.
+ */
+function channelSecret(material: JoinMaterial, channel: ChannelMetadata): { secret: Uint8Array; epoch: number } {
   if (channel.private && channel.key) {
-    return channelGroupKey(fromHex(channel.key), fromHex(channel.channel_id), channel.epoch ?? 1);
+    return { secret: fromHex(channel.key), epoch: channel.epoch ?? 1 };
   }
-  // Public channel: key derives from community_root at the root epoch.
-  return channelGroupKey(fromHex(material.community_root), fromHex(channel.channel_id), material.root_epoch);
+  return { secret: fromHex(material.community_root), epoch: material.root_epoch };
+}
+
+export function channelKeyFor(material: JoinMaterial, channel: ChannelMetadata): GroupKey {
+  const { secret, epoch } = channelSecret(material, channel);
+  return channelGroupKey(secret, fromHex(channel.channel_id), epoch);
+}
+
+/** A voice Channel's derived keys (CORD-07 §1): the SFU room signer + media root. */
+export interface VoiceKeys {
+  /** `pk` is the SFU room name; `sk` signs token grants (§2). */
+  room: GroupKey;
+  /** The 32-byte root of per-sender media encryption (§3). */
+  mediaKey: Uint8Array;
+}
+
+export function voiceKeysFor(material: JoinMaterial, channel: ChannelMetadata): VoiceKeys {
+  const { secret, epoch } = channelSecret(material, channel);
+  const channelId = fromHex(channel.channel_id);
+  return {
+    room: voiceGroupKey(secret, channelId, epoch),
+    mediaKey: voiceMediaKey(secret, channelId, epoch),
+  };
 }
 
 export function deriveKeys(material: JoinMaterial, channels: ChannelMetadata[]): CommunityKeys {

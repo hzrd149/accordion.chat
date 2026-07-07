@@ -147,6 +147,40 @@ export function baseRekeyGroupKey(priorRoot: Uint8Array, communityId: Uint8Array
   return groupKey("concord/base-rekey-pseudonym", priorRoot, communityId, newEpoch);
 }
 
+// ---- Voice (CORD-07 §1) ----------------------------------------------------
+
+/**
+ * A voice Channel's signing keypair (CORD-07 §1). Its x-only `pk` is the SFU
+ * **room name** and its `sk` signs token grants (§2); the pk is never a stream
+ * address, the `group_key` shape is reused only for its deterministic keypair.
+ * `secret`/`epoch` are the same pair that addresses the Channel's Chat Plane —
+ * community_root@root_epoch for a Public Channel, the Channel's own key/epoch
+ * for a Private one — so the room rolls exactly when the Channel's key does.
+ */
+export function voiceGroupKey(secret: Uint8Array, channelId: Uint8Array, epoch: number): GroupKey {
+  return groupKey("concord/voice-signer", secret, channelId, epoch);
+}
+
+/**
+ * A voice Channel's raw 32-byte media-encryption root (CORD-07 §1). Never feeds
+ * a cipher directly — every publisher's per-sender frame key derives from it
+ * (see {@link voiceSenderKey}).
+ */
+export function voiceMediaKey(secret: Uint8Array, channelId: Uint8Array, epoch: number): Uint8Array {
+  return concordHkdf(secret, "concord/voice-media", channelId, epoch);
+}
+
+/**
+ * A publisher's per-sender frame-key material (CORD-07 §3):
+ * `hkdf(voice_media_key, "concord/voice-sender", sha256(utf8(identity)))` — the
+ * epoch field is omitted, `voice_media_key` already carries it. Distinct keys
+ * per sender partition the AEAD nonce domains; every member computes every
+ * sender's key from the identity the SFU presents, no in-band exchange.
+ */
+export function voiceSenderKey(mediaKey: Uint8Array, identity: string): Uint8Array {
+  return concordHkdf(mediaKey, "concord/voice-sender", sha256(utf8(identity)));
+}
+
 // ---- Coordinate (eid) derivations — hkdf output used as a 32-byte id -------
 
 /** A member's Grant coordinate. secret = community_id, id = member_xonly. */
