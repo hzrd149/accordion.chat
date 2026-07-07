@@ -24,7 +24,6 @@ import { accounts } from "../nostr";
 import { ConcordProvider, useConcord } from "./context";
 import { Login } from "./Login";
 import {
-  AdminModal,
   CreateChannelModal,
   CreateCommunityModal,
   InviteModal,
@@ -34,6 +33,7 @@ import {
 import { clockTime, colorFor, formatTime, groupMessages } from "./util";
 import { UserAvatar, UserName } from "./User";
 import { SettingsView } from "./settings";
+import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { MessageContent } from "./MessageContent";
 import type { ChatMessage } from "../concord/client";
@@ -60,7 +60,7 @@ export function App() {
 }
 
 /** Overlay names carried in the `?modal=` query param. */
-type ModalName = "create" | "join" | "channel" | "invite" | "admin" | "addMenu" | "leave";
+type ModalName = "create" | "join" | "channel" | "invite" | "addMenu" | "leave";
 
 function Shell() {
   const client = useConcord();
@@ -76,6 +76,7 @@ function Shell() {
   const selectedChannel = channelParam ?? null;
   const modal = searchParams.get("modal") as ModalName | null;
   const settingsPage = searchParams.get("settings");
+  const adminPage = searchParams.get("admin");
 
   function setParam(key: string, value: string | null) {
     setSearchParams(
@@ -171,7 +172,7 @@ function Shell() {
             }}
             onNewChannel={() => setModal("channel")}
             onInvite={() => setModal("invite")}
-            onSettings={() => setModal("admin")}
+            onSettings={() => setParam("admin", "overview")}
             onLeave={() => setModal("leave")}
           />
           {selectedChannel ? (
@@ -190,7 +191,7 @@ function Shell() {
         <div className="main">
           <div className="empty">
             <div className="big"><Landmark size={48} /></div>
-            <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Concord</h2>
+            <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Appcordion</h2>
             <div>Create your own community or join one with an invite link.</div>
             <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
               <button className="btn" onClick={() => setModal("create")}>
@@ -231,9 +232,6 @@ function Shell() {
       {modal === "invite" && activeState && (
         <InviteModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
       )}
-      {modal === "admin" && activeState && (
-        <AdminModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
-      )}
       {modal === "leave" && activeState && (
         <Modal onClose={() => (leaving ? undefined : setModal(null))}>
           <h2>Leave {activeState.metadata?.name ?? activeState.material.name}?</h2>
@@ -270,6 +268,15 @@ function Shell() {
           page={settingsPage}
           onSelectPage={(p) => setParam("settings", p)}
           onClose={() => setParam("settings", null)}
+        />
+      )}
+
+      {adminPage !== null && activeState && (
+        <CommunitySettingsView
+          cid={activeState.material.community_id}
+          page={adminPage}
+          onSelectPage={(p) => setParam("admin", p)}
+          onClose={() => setParam("admin", null)}
         />
       )}
 

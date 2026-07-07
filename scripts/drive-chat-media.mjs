@@ -2,12 +2,12 @@ import puppeteer from "puppeteer-core";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const CHROME = process.env.CHROME || "/usr/bin/google-chrome";
-const URL = "http://localhost:5173";
+const URL = process.env.URL || "http://localhost:5173";
 const SHOTS = "/tmp/concord-shots";
 mkdirSync(SHOTS, { recursive: true });
 
-// A real 4x4 red PNG on disk to feed the file input.
-const PNG = "/tmp/concord-shots/icon.png";
+// A real 4x4 green PNG to attach.
+const PNG = "/tmp/concord-shots/attach.png";
 writeFileSync(PNG, Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR42mNk+M9QzzCEwSgAA6UBB2+RmZ0AAAAASUVORK5CYII=",
   "base64"));
@@ -40,71 +40,60 @@ try {
   await sleep(1500);
   await clickText("Create a community");
   await page.waitForSelector(".modal", { timeout: 5000 });
-  await page.type(".modal input", "Image Test HQ");
+  await page.type(".modal input", "Media Chat HQ");
   await clickText("Create");
   await page.waitForFunction(() => document.querySelector(".channel"), { timeout: 15000 });
   await sleep(1000);
 
-  // Open community settings (Overview tab)
+  // Point the community's Blossom list at the local mock server.
   await page.click('button[title="Community settings"]');
   await page.waitForSelector(".modal", { timeout: 5000 });
-  await page.waitForSelector(".image-preview.icon", { timeout: 5000 });
-  await shot("img-01-settings");
-
-  // Point the community's Blossom list at the local mock server, then save.
   const blossomBox = await page.evaluateHandle(() => {
-    const labels = [...document.querySelectorAll(".field label")];
-    const l = labels.find((x) => x.textContent.includes("Blossom"));
+    const l = [...document.querySelectorAll(".field label")].find((x) => x.textContent.includes("Blossom"));
     return l.parentElement.querySelector("textarea");
   });
   await blossomBox.click({ clickCount: 3 });
   await blossomBox.type("http://localhost:3999/");
   await clickText("Save changes");
-  await sleep(1500);
-
-  // Upload icon via the hidden file input inside the icon ImageField.
-  const iconInput = await page.evaluateHandle(() => {
-    const field = document.querySelector(".image-field.icon");
-    return field.querySelector('input[type="file"]');
-  });
-  await iconInput.uploadFile(PNG);
-  console.log("uploading icon…");
-
-  // Wait for the icon preview <img> to appear (upload + fold + decrypt done).
-  await page.waitForFunction(
-    () => document.querySelector(".image-preview.icon img"),
-    { timeout: 45000 },
-  );
-  await shot("img-02-icon-uploaded");
-
-  // Upload a banner too.
-  const bannerInput = await page.evaluateHandle(() => {
-    const field = document.querySelector(".image-field.banner");
-    return field.querySelector('input[type="file"]');
-  });
-  await bannerInput.uploadFile(PNG);
-  await page.waitForFunction(
-    () => document.querySelector(".image-preview.banner img"),
-    { timeout: 45000 },
-  );
-  await shot("img-03-banner-uploaded");
-
-  // Close modal, verify rail icon + sidebar banner render as images.
-  await page.evaluate(() => document.querySelector(".modal-backdrop, .modal")?.dispatchEvent(new MouseEvent("mousedown")));
+  await sleep(1000);
+  // Close the settings modal (click backdrop).
+  await page.evaluate(() => document.querySelector(".modal-backdrop")?.click());
   await page.keyboard.press("Escape").catch(() => {});
   await sleep(500);
-  const railHasImg = await page.evaluate(() => !!document.querySelector(".rail-icon img"));
-  const bannerShown = await page.evaluate(() => !!document.querySelector(".sidebar-banner"));
-  await shot("img-04-final");
 
-  console.log("rail icon is <img>:", railHasImg);
-  console.log("sidebar banner shown:", bannerShown);
-  console.log("errors:", errors.length ? errors : "none");
-  if (!railHasImg) throw new Error("rail icon did not render as image");
+  // Attach an image via the composer's hidden file input, then send.
+  await page.waitForSelector(".composer .box input[type=file]", { timeout: 5000 });
+  const fileInput = await page.$(".composer .box input[type=file]");
+  await fileInput.uploadFile(PNG);
+  await page.waitForSelector(".attach-chip", { timeout: 5000 });
+  await shot("chat-01-attached");
+  await page.type(".composer textarea", "here is an encrypted pic");
+  await clickText("Send");
+  console.log("sent; waiting for decrypted <img> to render…");
+
+  // The message should render a decrypted inline image.
+  await page.waitForFunction(
+    () => document.querySelector(".messages .msg-text img.attachment"),
+    { timeout: 45000 },
+  );
+  await sleep(500);
+  await shot("chat-02-rendered");
+
+  const imgOk = await page.evaluate(() => {
+    const img = document.querySelector(".messages .msg-text img.attachment");
+    return !!img && img.src.startsWith("blob:") && img.naturalWidth > 0;
+  });
+  const textOk = await page.evaluate(() =>
+    [...document.querySelectorAll(".messages .msg-text")].some((n) => n.textContent.includes("encrypted pic")));
+
+  console.log("decrypted <img> rendered (blob:, naturalWidth>0):", imgOk);
+  console.log("caption text preserved:", textOk);
+  console.log("page errors:", errors.filter((e) => !e.includes("404") && !e.includes("WebSocket")));
+  if (!imgOk) throw new Error("decrypted attachment image did not render");
   console.log("RESULT: PASS");
 } catch (e) {
   console.error("RESULT: FAIL —", e.message);
-  await shot("img-99-fail");
+  await shot("chat-99-fail");
   console.log("errors:", errors);
   process.exitCode = 1;
 } finally {

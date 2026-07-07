@@ -5,12 +5,36 @@
 // merged with observed authors (anyone seen publishing is present) and minus
 // the Banlist, yields the Complete Memberlist.
 
-import { PERM } from "./types";
+import { KIND, PERM } from "./types";
 import type { DecodedEvent } from "./types";
+import type { RumorTemplate } from "./stream";
 import { hasPerm } from "./permissions";
 import type { Standing } from "./permissions";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
+
+/** Snapshot chunk size: 400 present members per event (CORD-02 §5). */
+export const SNAPSHOT_CHUNK = 400;
+
+/**
+ * Refounder-signed snapshot rumors seeding a new epoch's Guestbook: present
+ * members only, chunked at {@link SNAPSHOT_CHUNK}, all chunks sharing one
+ * snapshot id and one timestamp (CORD-02 §5). Mirrors armada guestbook.ts.
+ */
+export function buildSnapshotRumors(members: string[], snapshotIdHex: string, ms: number = Date.now()): RumorTemplate[] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < members.length; i += SNAPSHOT_CHUNK) chunks.push(members.slice(i, i + SNAPSHOT_CHUNK));
+  if (chunks.length === 0) chunks.push([]);
+  const n = chunks.length;
+  return chunks.map((chunk, i) => ({
+    kind: KIND.SNAPSHOT,
+    content: JSON.stringify(chunk),
+    tags: [
+      ["snap", snapshotIdHex, (i + 1).toString(), n.toString()],
+      ["ms", String(ms % 1000)],
+    ],
+  }));
+}
 
 interface Coalesced {
   present: boolean;

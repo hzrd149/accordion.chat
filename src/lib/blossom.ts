@@ -3,48 +3,34 @@
 // Concord uploads only *ciphertext* blobs (see image.ts), so a media server
 // never sees plaintext. The SDK handles the BUD-02/BUD-04 dance (upload to the
 // first server, mirror to the rest, preflight HEAD checks); we supply the
-// server list and a kind-24242 auth event signed by the user's own key.
+// server list (community-defined or the user's own kind-10063 list) and a
+// kind-24242 auth event signed by the user's own key.
 
 import { Actions, createUploadAuth, type Signer as BlossomSigner } from "blossom-client-sdk";
 import type { Signer } from "../concord/stream";
 
 /**
- * Default Blossom media servers used when the user has no kind-10063 server
- * list. Order follows BUD-03's "most trusted first" convention.
+ * Last-resort Blossom servers, used only when neither the community nor the
+ * user has defined one. Order follows BUD-03's "most trusted first" convention.
  */
 export const DEFAULT_BLOSSOM_SERVERS = ["https://blossom.primal.net/", "https://blossom.band/"];
-
-/** Parse a kind-10063 Blossom server list event's tags into validated URLs. */
-export function parseBlossomServerList(tags: string[][]): string[] {
-  return tags
-    .filter(([name]) => name === "server")
-    .map(([, url]) => url)
-    .filter((url) => {
-      try {
-        new URL(url);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-}
 
 function normalizeUrl(url: string): string {
   return url.toLowerCase().replace(/\/+$/, "");
 }
 
-/** Merge the user's servers with the app defaults, deduplicated, user first. */
-export function mergeBlossomServers(userServers: string[]): string[] {
+/** Deduplicate a server list, preserving order (first occurrence wins). */
+export function dedupeServers(servers: string[]): string[] {
   const seen = new Set<string>();
-  const merged: string[] = [];
-  for (const url of [...userServers, ...DEFAULT_BLOSSOM_SERVERS]) {
+  const out: string[] = [];
+  for (const url of servers) {
     const key = normalizeUrl(url);
     if (!seen.has(key)) {
       seen.add(key);
-      merged.push(url);
+      out.push(url);
     }
   }
-  return merged;
+  return out;
 }
 
 /**

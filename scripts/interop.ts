@@ -16,10 +16,10 @@ import { finalizeEvent, generateSecretKey, getPublicKey, nip44 } from "nostr-too
 
 // ── OURS (src/concord) ───────────────────────────────────────────────────────
 import { createCommunity, deriveKeys, channelKeyFor } from "../src/concord/community";
-import { createStreamEvent, decodeStreamEvent } from "../src/concord/stream";
+import { createStreamEvent, decodeStreamEvent, rewrapSeal as ourRewrapSeal } from "../src/concord/stream";
 import { messageRumor, checkChatBinding } from "../src/concord/chat";
 import { foldControl } from "../src/concord/control";
-import { foldMembers } from "../src/concord/guestbook";
+import { foldMembers, buildSnapshotRumors as ourBuildSnapshotRumors } from "../src/concord/guestbook";
 import { resolveStanding } from "../src/concord/permissions";
 import { buildEdition, computeEditionHash, dissolutionRumor } from "../src/concord/editions";
 import {
@@ -87,6 +87,7 @@ import {
   coalesceGuestbook,
   completeMemberlist,
   buildJoinRumor as armBuildJoinRumor,
+  buildSnapshotRumors as armBuildSnapshotRumors,
   sealGuestbook as armSealGuestbook,
 } from "@/concord-v2/lib/guestbook";
 import {
@@ -320,6 +321,28 @@ async function main() {
   const ourMembers = foldMembers(ourGbDecoded, new Map(), new Set(), (m) => resolveStanding(m, ownerPub, noRoles, new Map()));
   assert(ourMembers.has(memberPub), "our fold reads armada's Join as a present member");
 
+  // Snapshot (P2): a refounder-signed 3312 snapshot seeds present members. Our
+  // snapshot seeds armada's coalesce (with snapshotAuthority = owner) and armada's
+  // seeds our foldMembers.
+  const ourSnapWraps = [];
+  for (const rumor of ourBuildSnapshotRumors([memberPub, ownerPub], toHex(randomBytes(32)))) {
+    ourSnapWraps.push((await createStreamEvent({ streamSk: ours.guestbook.sk, convKey: ours.guestbook.convKey, author: owner, rumor })).wrap);
+  }
+  const armSnapMembers = completeMemberlist(
+    coalesceGuestbook(ourSnapWraps.map((w) => openWrap(w, armGuest)), { nowMs: Date.now(), canKick: () => false, snapshotAuthority: ownerPub }),
+    new Map(),
+    new Set(),
+  );
+  assert(armSnapMembers.has(memberPub) && armSnapMembers.has(ownerPub), "armada seeds present members from our guestbook snapshot");
+
+  const armSnapWraps = [];
+  for (const rumor of armBuildSnapshotRumors(ownerPub, [memberPub], toHex(randomBytes(32)), Date.now())) {
+    armSnapWraps.push(await armSealGuestbook(rumor, armGuest, owner));
+  }
+  const ourSnapDecoded = armSnapWraps.map((w) => decodeStreamEvent(w, ours.guestbook.convKey)).filter((d): d is NonNullable<typeof d> => d !== null);
+  const ourSnapMembers = foldMembers(ourSnapDecoded, new Map(), new Set(), (m) => resolveStanding(m, ownerPub, noRoles, new Map()));
+  assert(ourSnapMembers.has(memberPub), "our foldMembers seeds a present member from armada's snapshot");
+
   // ═══ G. Roles / grants / banlist fold parity (CORD-04) ═══
   section("G. roles / grants / banlist fold parity");
   const roleId = toHex(randomBytes(32));
@@ -456,6 +479,28 @@ async function main() {
 
   // Continuity: a rotation whose prevcommit is over the WRONG root is rejected as a fork.
   assert(ourCheckContinuity(ourSets[0], 0n, randomBytes(32)).ok === false, "our continuity check rejects a wrong-prior-root (fork)");
+
+  // Compaction (CORD-06 §3): a Refounding re-anchors the Control Plane by
+  // re-wrapping each head's PLAINTEXT seal into the new epoch — no re-sign. Prove
+  // our rewrapSeal produces a wrap armada opens + folds under the new root, with
+  // the original owner still the verified author.
+  const armNewControl = armControlGroupKey(ourNewRoot, cid, 1n);
+  const genesisMetaWrap = (
+    await createStreamEvent({
+      streamSk: ours.control.sk,
+      convKey: ours.control.convKey,
+      author: owner,
+      rumor: genesis.controlRumors[0], // the metadata edition (plaintext seal)
+      plaintextSeal: true,
+    })
+  ).wrap;
+  const decodedHead = decodeStreamEvent(genesisMetaWrap, ours.control.convKey);
+  assert(decodedHead?.seal !== undefined, "our decode retains the plaintext seal for compaction");
+  const compacted = ourRewrapSeal(decodedHead!.seal!, armNewControl.sk, armNewControl.convKey);
+  const compactedEditions = [parseEdition(openWrap(compacted, armNewControl))];
+  const compactedFold = foldControlState(compactedEditions, cid, ownerPub);
+  assert(compactedFold.metadata?.name === "Interop", "armada folds our compacted (re-wrapped) metadata under the new root");
+  assert(compactedFold.headEditions.size >= 1 && [...compactedFold.headEditions.values()][0].author === ownerPub, "compacted head keeps the original owner as verified author");
 
   // ═══ D. Invite link + bundle cross-client ═══
   section("D. invite links & bundles");

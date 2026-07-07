@@ -158,8 +158,31 @@ export function decodeStreamEvent(wrap: RawEvent, convKey: Uint8Array): DecodedE
       wrapId: wrap.id,
       sealKind: seal.kind,
       ms: rumorMs(rumor),
+      seal,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Re-wrap an already-verified PLAINTEXT seal into another stream (a compaction,
+ * CORD-06 §3): only plaintext seals (kind 20014) survive a re-wrap, because
+ * their signature is over the rumor JSON verbatim and doesn't depend on the
+ * outer stream key. Used by a Refounding to re-anchor each Control-Plane head
+ * edition under the new epoch without re-signing (the original author's proof
+ * is carried forward intact).
+ */
+export function rewrapSeal(seal: NostrEvent, targetStreamSk: Uint8Array, targetConvKey: Uint8Array): NostrEvent {
+  if (seal.kind !== KIND.SEAL_PLAINTEXT) throw new Error("only plaintext seals survive a re-wrap");
+  const ephemeralPubkey = getPublicKey(generateSecretKey());
+  return finalizeEvent(
+    {
+      kind: KIND.WRAP,
+      content: nip44.encrypt(JSON.stringify(seal), targetConvKey),
+      tags: [["p", ephemeralPubkey]],
+      created_at: Math.floor(Date.now() / 1000),
+    },
+    targetStreamSk,
+  );
 }

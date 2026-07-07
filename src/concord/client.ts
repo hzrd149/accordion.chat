@@ -20,14 +20,32 @@ import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
 import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "../lib/image";
 import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "../lib/blossom";
+import { parseImeta, type MediaAttachment } from "../lib/imeta";
 import {
   banlistLocator,
   baseRekeyGroupKey,
+  controlGroupKey,
   dissolvedGroupKey,
+  epochKeyCommitment,
   grantLocator,
+  guestbookGroupKey,
   inviteLinksLocator,
 } from "./crypto";
-import { createStreamEvent, decodeStreamEventCached } from "./stream";
+import {
+  base64ToBytes,
+  buildRekeyRumors,
+  bytesToBase64,
+  checkContinuity,
+  decodeWrappedKey,
+  encodeWrappedKey,
+  findBlob,
+  groupRotations,
+  lowerKeyWins,
+  parseRekey,
+  rekeyLocator,
+  ROOT_SCOPE_HEX,
+} from "./rekey";
+import { createStreamEvent, decodeStreamEventCached, rewrapSeal } from "./stream";
 import { clearCache, loadCache, saveCache, MAX_CHANNEL_CACHE } from "./cache";
 import type { CachedEntry } from "./cache";
 import { autoAuthenticate } from "./relay-auth";
@@ -43,8 +61,8 @@ import {
   withinByteCap,
 } from "./community-list";
 import type { CommunityList } from "./community-list";
-import { foldMembers } from "./guestbook";
-import { resolveStanding, canActOn } from "./permissions";
+import { buildSnapshotRumors, foldMembers } from "./guestbook";
+import { resolveStanding, canActOn, hasPerm } from "./permissions";
 import type { Standing } from "./permissions";
 import { createCommunity, deriveKeys, verifyOwner } from "./community";
 import type { CommunityKeys } from "./community";
@@ -89,10 +107,12 @@ export interface ChatMessage {
   deleted: boolean;
   replyTo?: { id: string; author: string };
   reactions: { emoji: string; count: number; authors: string[] }[];
+  /** Encrypted media/files parsed from the message's NIP-92 imeta tags. */
+  attachments: MediaAttachment[];
 }
 
 interface PlaneInfo {
-  type: "control" | "guestbook" | "channel" | "dissolved";
+  type: "control" | "guestbook" | "channel" | "dissolved" | "rekey";
   convKey: Uint8Array;
   channelId?: string;
   epoch?: number;
@@ -107,6 +127,11 @@ interface Runtime {
   observed: Map<string, number>;
   planeMap: Map<string, PlaneInfo>;
   dissolved: boolean;
+  /** CORD-06 rekey blobs seen at the next-epoch base-rekey address. */
+  rekeyEvents: Map<string, DecodedEvent>;
+  /** Guard: adopt/tombstone at most once per target epoch. */
+  rekeyHandled: Set<number>;
+  rekeyTimer?: ReturnType<typeof setTimeout>;
   /** stable subscription: control + guestbook + dissolved planes */
   controlSub?: Subscription;
   /** dynamic subscription: channel planes (reopened when the set changes) */
@@ -289,10 +314,40 @@ export class ConcordClient {
     return ch?.private ? ch.epoch ?? 1 : rt.material.root_epoch;
   }
 
-  async sendMessage(cid: string, channelId: string, text: string, replyTo?: { id: string; author: string }): Promise<void> {
+  async sendMessage(
+    cid: string,
+    channelId: string,
+    text: string,
+    replyTo?: { id: string; author: string },
+    files?: File[],
+  ): Promise<void> {
     const rt = this.runtimes.get(cid)!;
     const epoch = this.channelEpoch(rt, channelId);
-    await this.publishToPlane(rt, this.channelKey(rt, channelId), messageRumor(channelId, epoch, text, replyTo), {});
+    // Encrypt + upload each file, appending its URL to the content and an imeta
+    // tag carrying the per-file key (see lib/imeta.ts, lib/image.ts).
+    let content = text;
+    let attachments: MediaAttachment[] | undefined;
+    if (files?.length) {
+      const servers = await this.blossomServers(cid);
+      attachments = [];
+      for (const file of files) {
+        const { ciphertext, key, nonce, hash } = await encryptImageBlob(file);
+        const url = await uploadBlob(ciphertext, servers, this.signer);
+        attachments.push({
+          url,
+          mime: file.type || undefined,
+          originalHash: hash,
+          encryption: { algorithm: "aes-gcm", key, nonce },
+        });
+        content = content ? `${content}\n${url}` : url;
+      }
+    }
+    await this.publishToPlane(
+      rt,
+      this.channelKey(rt, channelId),
+      messageRumor(channelId, epoch, content, replyTo, attachments),
+      {},
+    );
   }
 
   async react(cid: string, channelId: string, target: { id: string; author: string }, emoji: string): Promise<void> {
@@ -557,6 +612,8 @@ export class ConcordClient {
       observed: new Map(),
       planeMap: new Map(),
       dissolved: false,
+      rekeyEvents: new Map(),
+      rekeyHandled: new Set(),
       channelAuthors: "",
       state$: new BehaviorSubject<CommunityState>(emptyState(material)),
       messages$: new Map(),
@@ -586,15 +643,20 @@ export class ConcordClient {
     rt.planeMap.set(control.pk, { type: "control", convKey: control.convKey });
     rt.planeMap.set(guestbook.pk, { type: "guestbook", convKey: guestbook.convKey });
     rt.planeMap.set(dissolved.pk, { type: "dissolved", convKey: dissolved.convKey });
-    // Register the core stream keys so an auth-gating relay can be answered as
-    // these derived addresses (NIP-42) before the control REQ is served.
+    // The NEXT epoch's base-rekey address (CORD-06 §2): a Refounding publishes
+    // the new community_root here, keyed by the PRIOR root, so every current
+    // holder converges. Subscribe now so an armada refounding is picked up live.
+    const nextEpoch = rt.material.root_epoch + 1;
     const nextBaseRekey = baseRekeyGroupKey(
       fromHex(rt.material.community_root),
       fromHex(rt.material.community_id),
-      rt.material.root_epoch + 1,
+      nextEpoch,
     );
+    rt.planeMap.set(nextBaseRekey.pk, { type: "rekey", convKey: nextBaseRekey.convKey, epoch: nextEpoch });
+    // Register the core stream keys so an auth-gating relay can be answered as
+    // these derived addresses (NIP-42) before the REQ is served.
     registerStreamKeys([control, guestbook, dissolved, nextBaseRekey]);
-    const authors = [control.pk, guestbook.pk, dissolved.pk];
+    const authors = [control.pk, guestbook.pk, dissolved.pk, nextBaseRekey.pk];
     rt.controlSub?.unsubscribe();
     rt.controlSub = pool
       .subscription(this.relaysFor(rt), [{ kinds: [KIND.WRAP, KIND.WRAP_EPHEMERAL], authors }])
@@ -675,6 +737,10 @@ export class ConcordClient {
           rt.dissolved = true;
           this.scheduleRefold(rt);
         }
+        break;
+      case "rekey":
+        rt.rekeyEvents.set(event.id, decoded);
+        this.scheduleRekeyCheck(rt);
         break;
       case "channel": {
         const channelId = info.channelId!;
@@ -762,6 +828,183 @@ export class ConcordClient {
     this.communities$.next([...this.runtimes.values()].map((r) => r.state$.value));
   }
 
+  // ---- CORD-06 rekey read path (adopt a refounding or detect removal) ------
+
+  private scheduleRekeyCheck(rt: Runtime): void {
+    if (rt.rekeyTimer) return;
+    rt.rekeyTimer = setTimeout(() => {
+      rt.rekeyTimer = undefined;
+      void this.checkRekey(rt);
+    }, 200);
+  }
+
+  /**
+   * Fold the rekey blobs at the next-epoch base-rekey address (CORD-06 §2/§3):
+   * a complete, AUTHORIZED, continuity-checked root rotation carrying our blob
+   * means adopt the new root (racing rotations converge on the lowest key); a
+   * complete rotation with NO blob for us across all chunks means we've been
+   * removed. Authority is the roster (owner or BAN), never key possession — a
+   * removed member still holding the prior root can forge a perfect rotation.
+   */
+  private async checkRekey(rt: Runtime): Promise<void> {
+    if (!this.signer.nip44) return;
+    const heldEpoch = BigInt(rt.material.root_epoch);
+    const heldKey = fromHex(rt.material.community_root);
+    const state = rt.state$.value;
+    const rolesMap = new Map<string, Role>(state.roles.map((r) => [r.role_id, r]));
+    const authorized = (rotator: string): boolean => {
+      if (rotator === rt.material.owner) return true;
+      return hasPerm(resolveStanding(rotator, rt.material.owner, rolesMap, state.grants).permissions, PERM.BAN);
+    };
+
+    const parsed = [...rt.rekeyEvents.values()]
+      .map((d) => parseRekey(d))
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+    const rotations = groupRotations(parsed).filter(
+      (set) =>
+        set.scopeIdHex === ROOT_SCOPE_HEX &&
+        set.newEpoch === heldEpoch + 1n &&
+        authorized(set.rotator) &&
+        checkContinuity(set, heldEpoch, heldKey).ok,
+    );
+    if (rotations.length === 0) return;
+
+    const targetEpoch = rt.material.root_epoch + 1;
+    if (rt.rekeyHandled.has(targetEpoch)) return;
+
+    let adopted: { key: Uint8Array; rotator: string } | undefined;
+    let sawComplete = false;
+    for (const set of rotations) {
+      if (!set.complete) continue;
+      sawComplete = true;
+      const blob = findBlob(set, rekeyLocator(set.rotator, this.pubkey, ROOT_SCOPE_HEX, set.newEpoch));
+      if (!blob) continue;
+      try {
+        const plain = await this.signer.nip44.decrypt(set.rotator, blob.wrapped);
+        const newKey = decodeWrappedKey(base64ToBytes(plain), new Uint8Array(32), set.newEpoch);
+        if (!adopted || lowerKeyWins(adopted.key, newKey) === newKey) adopted = { key: newKey, rotator: set.rotator };
+      } catch {
+        // undecryptable blob at our locator — treat as absent
+      }
+    }
+    if (!this.runtimes.has(rt.material.community_id)) return; // torn down while awaiting
+
+    if (adopted) {
+      rt.rekeyHandled.add(targetEpoch);
+      this.adoptRefounding(rt, adopted.key, targetEpoch, adopted.rotator);
+    } else if (sawComplete) {
+      rt.rekeyHandled.add(targetEpoch);
+      this.handleRemoved(rt);
+    }
+  }
+
+  /**
+   * Follow a Refounding forward: roll the runtime to the new root/epoch, keep
+   * the prior root in `held_roots` so past history stays decodable, re-derive
+   * plane keys, and re-open subscriptions at the new addresses (the old
+   * planeMap entries are retained so already-fetched history still decodes).
+   */
+  private adoptRefounding(rt: Runtime, newRoot: Uint8Array, newEpoch: number, refounder: string): void {
+    const priorRoots = Array.isArray(rt.material.held_roots) ? rt.material.held_roots : [];
+    rt.material = {
+      ...rt.material,
+      community_root: toHex(newRoot),
+      root_epoch: newEpoch,
+      refounder,
+      held_roots: [{ epoch: rt.material.root_epoch, key: rt.material.community_root }, ...priorRoots],
+    };
+    rt.keys = deriveKeys(rt.material, rt.state$.value.channels);
+    this.openControlSub(rt); // re-subscribe control/guestbook/dissolved + next rekey at the new epoch
+    this.reconcileChannelSub(rt);
+    this.refold(rt);
+    this.saveMaterialsLocal();
+    void this.saveCommunityList();
+  }
+
+  /**
+   * Initiate a Refounding (CORD-06 §3): roll the community_root to sever the
+   * excluded, deliver the new root to `keep` as rekey blobs at the base-rekey
+   * address (under the PRIOR root), compact the Control Plane by re-wrapping each
+   * head's plaintext seal into the new epoch, seed the new Guestbook with a
+   * snapshot, then follow our own rotation forward. Requires BAN or ownership +
+   * a NIP-44 signer (pairwise wrapping is one ECDH either side can compute).
+   */
+  async refound(cid: string, opts: { keep: string[]; exclude?: string[] }): Promise<void> {
+    const rt = this.runtimes.get(cid);
+    if (!rt) throw new Error("unknown community");
+    if (!this.signer.nip44) throw new Error("this signer can't rotate keys (NIP-44 unsupported)");
+    const state = rt.state$.value;
+    const rolesMap = new Map<string, Role>(state.roles.map((r) => [r.role_id, r]));
+    const s = resolveStanding(this.pubkey, rt.material.owner, rolesMap, state.grants);
+    if (!s.isOwner && !hasPerm(s.permissions, PERM.BAN)) throw new Error("need BAN or ownership to refound");
+
+    const excluded = new Set(opts.exclude ?? []);
+    const recipients = [...new Set([this.pubkey, ...opts.keep])].filter((pk) => !excluded.has(pk));
+    const oldRoot = fromHex(rt.material.community_root);
+    const oldEpoch = rt.material.root_epoch;
+    const newEpoch = oldEpoch + 1;
+    const cidBytes = fromHex(rt.material.community_id);
+    const newRoot = generateSecretKey();
+    const prevCommit = toHex(epochKeyCommitment(oldEpoch, oldRoot));
+    const relays = this.relaysFor(rt);
+
+    // 1. The root roll: per-recipient rekey blobs at the base-rekey address
+    //    (keyed by the PRIOR root, so every current holder converges).
+    const plain = bytesToBase64(encodeWrappedKey(ZERO_32, BigInt(newEpoch), newRoot));
+    const blobs = [];
+    for (const pk of recipients) {
+      const wrapped = await this.signer.nip44.encrypt(pk, plain);
+      blobs.push({ locator: rekeyLocator(this.pubkey, pk, ROOT_SCOPE_HEX, BigInt(newEpoch)), wrapped });
+    }
+    const rekeyAddr = baseRekeyGroupKey(oldRoot, cidBytes, newEpoch);
+    for (const rumor of buildRekeyRumors(
+      { scope: { kind: "root" }, newEpoch: BigInt(newEpoch), prevEpoch: BigInt(oldEpoch), prevCommit },
+      blobs,
+    )) {
+      const { wrap } = await createStreamEvent({ streamSk: rekeyAddr.sk, convKey: rekeyAddr.convKey, author: this.signer, rumor });
+      await pool.publish(relays, wrap).catch((err) => console.warn("rekey publish failed", err));
+    }
+
+    // 2. Compaction: re-wrap each Control-Plane head's plaintext seal into the
+    //    new epoch so members read current state without re-syncing from genesis.
+    const newControl = controlGroupKey(newRoot, cidBytes, newEpoch);
+    for (const head of state.heads?.values() ?? []) {
+      if (!head.seal || head.sealKind !== KIND.SEAL_PLAINTEXT) continue;
+      try {
+        pool.publish(relays, rewrapSeal(head.seal, newControl.sk, newControl.convKey)).catch(() => {});
+      } catch {
+        /* an encrypted-seal head can't re-wrap; control heads are plaintext by construction */
+      }
+    }
+
+    // 3. Guestbook snapshot (best-effort, non-gating — CORD-02 §5).
+    const newGuestbook = guestbookGroupKey(newRoot, cidBytes, newEpoch);
+    for (const rumor of buildSnapshotRumors(recipients, toHex(generateSecretKey()))) {
+      const { wrap } = await createStreamEvent({ streamSk: newGuestbook.sk, convKey: newGuestbook.convKey, author: this.signer, rumor });
+      pool.publish(relays, wrap).catch(() => {});
+    }
+
+    // 4. Follow our own rotation forward.
+    rt.rekeyHandled.add(newEpoch);
+    this.adoptRefounding(rt, newRoot, newEpoch, this.pubkey);
+  }
+
+  /** We were excluded from a Refounding: tombstone the membership and tear down. */
+  private handleRemoved(rt: Runtime): void {
+    const cid = rt.material.community_id;
+    rt.controlSub?.unsubscribe();
+    rt.channelSub?.unsubscribe();
+    if (rt.persistTimer) clearTimeout(rt.persistTimer);
+    if (rt.refoldTimer) clearTimeout(rt.refoldTimer);
+    if (rt.rekeyTimer) clearTimeout(rt.rekeyTimer);
+    clearCache(cid);
+    this.runtimes.delete(cid);
+    this.communityList = removeFromList(this.communityList, cid, Date.now());
+    this.saveMaterialsLocal();
+    this.emitCommunities();
+    void this.saveCommunityList();
+  }
+
   // ---- message assembly ---------------------------------------------------
 
   private recomputeMessages(rt: Runtime, channelId: string): void {
@@ -787,6 +1030,7 @@ export class ConcordClient {
             deleted: false,
             replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
             reactions: [],
+            attachments: [...parseImeta(r.tags).values()],
           });
         } else if (r.kind === KIND.EDIT) {
           edits.push(d);

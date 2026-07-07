@@ -4,6 +4,7 @@
 
 import type { RumorTemplate } from "./stream";
 import { KIND } from "./types";
+import { buildImetaTag, type MediaAttachment } from "../lib/imeta";
 
 function base(channelId: string, epoch: number): string[][] {
   return [
@@ -18,9 +19,12 @@ export function messageRumor(
   epoch: number,
   text: string,
   replyTo?: { id: string; author: string },
+  attachments?: MediaAttachment[],
 ): RumorTemplate {
   const tags = base(channelId, epoch);
   if (replyTo) tags.push(["q", replyTo.id, "", replyTo.author]);
+  // NIP-92: one imeta tag per attachment, carrying the per-file decryption key.
+  for (const a of attachments ?? []) tags.push(buildImetaTag(a));
   return { kind: KIND.MESSAGE, content: text, tags };
 }
 

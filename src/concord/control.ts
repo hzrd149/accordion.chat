@@ -33,6 +33,8 @@ interface Edition {
   author: string;
   rumorId: string;
   ms: number;
+  /** The decoded stream event this edition arrived in (carries the re-wrappable seal). */
+  source: DecodedEvent;
 }
 
 function parseEdition(d: DecodedEvent): Edition | null {
@@ -56,6 +58,7 @@ function parseEdition(d: DecodedEvent): Edition | null {
     author: d.author,
     rumorId: r.id,
     ms: d.ms,
+    source: d,
   };
 }
 
@@ -122,6 +125,9 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
   const roles = new Map<string, Role>();
   const grants = new Map<string, string[]>();
   const owner = material.owner;
+  // The winning head edition per entity (by eid), retained for CORD-06
+  // compaction — a Refounding re-wraps each of these plaintext seals.
+  const heads = new Map<string, DecodedEvent>();
 
   const standing = (member: string) => resolveStanding(member, owner, roles, grants);
 
@@ -146,6 +152,7 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
         const prev = roles.get(eid);
         if (!prev || prev.position !== role.position || prev.name !== role.name) changed = true;
         roles.set(eid, role);
+        heads.set(eid, cand.source);
         break;
       }
     }
@@ -172,6 +179,7 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
         const prevRoles = grants.get(grant.member) ?? [];
         if (prevRoles.join(",") !== grant.role_ids.join(",")) changed = true;
         grants.set(grant.member, grant.role_ids);
+        heads.set(cand.eid, cand.source);
         break;
       }
     }
@@ -186,6 +194,7 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
     if (!s.isOwner && !hasPerm(s.permissions, PERM.MANAGE_METADATA)) continue;
     try {
       metadata = JSON.parse(cand.content) as CommunityMetadata;
+      heads.set(material.community_id, cand.source);
       break;
     } catch {
       /* skip */
@@ -207,6 +216,7 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
           meta.key = known.key;
           meta.epoch = known.epoch;
         }
+        heads.set(eid, cand.source); // head retained for compaction even if deleted
         if (!meta.deleted) channels.push(meta);
         break;
       } catch {
@@ -218,10 +228,12 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
   // ---- Banlist (BAN) ------------------------------------------------------
   const banlist = new Set<string>();
   for (const cand of groupByEntity(byVsk(VSK.BANLIST)).values().next().value ?? []) {
-    const s = standing((cand as Edition).author);
+    const e = cand as Edition;
+    const s = standing(e.author);
     if (!s.isOwner && !hasPerm(s.permissions, PERM.BAN)) continue;
     try {
-      for (const pk of JSON.parse((cand as Edition).content) as string[]) banlist.add(pk);
+      for (const pk of JSON.parse(e.content) as string[]) banlist.add(pk);
+      heads.set(e.eid, e.source);
       break;
     } catch {
       /* skip */
@@ -237,6 +249,7 @@ export function foldControl(events: DecodedEvent[], material: JoinMaterial): Com
     banlist,
     members: new Set(),
     dissolved: false,
+    heads,
   };
 }
 

@@ -80,6 +80,9 @@ export interface DecodedEvent {
   sealKind: number;
   /** millisecond-resolution ordering time (CORD-02 §4) */
   ms: number;
+  /** The verified seal event — retained for CORD-06 compaction (re-wrapping a
+   *  plaintext control seal into a new epoch). Absent on cache-rehydrated events. */
+  seal?: NostrEvent;
 }
 
 // ---- Metadata (vsk 0 / CORD-02 §6) ----------------------------------------
@@ -93,6 +96,8 @@ export interface CommunityMetadata {
   name: string;
   description?: string;
   relays: string[];
+  /** Blossom media servers the community prefers for its encrypted images. */
+  blossom_servers?: string[];
   icon?: BlobPointer;
   banner?: BlobPointer;
   custom?: Record<string, unknown>;
@@ -146,6 +151,10 @@ export interface JoinMaterial {
   channels: ChannelKey[];
   relays: string[];
   name: string;
+  /** Retained prior roots `[{epoch, key}]` after a Refounding (CORD-06; armada-compatible). */
+  held_roots?: Array<{ epoch: number; key: string }>;
+  /** The npub whose Refounding minted the current `root_epoch` (CORD-06). */
+  refounder?: string;
 }
 
 // ---- Invite bundle (CORD-05 §1) -------------------------------------------
@@ -166,6 +175,8 @@ export interface CommunityState {
   banlist: Set<string>;
   members: Set<string>;
   dissolved: boolean;
+  /** Winning head edition per entity (eid → decoded), for CORD-06 compaction. */
+  heads?: Map<string, DecodedEvent>;
 }
 
 export type RawEvent = NostrEvent;

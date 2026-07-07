@@ -84,21 +84,41 @@ async function writeCached(hash: string, plaintext: Uint8Array, mime: string): P
  * across reloads.
  */
 export async function decryptImagePointer(pointer: BlobPointer, signal?: AbortSignal): Promise<string> {
-  const cached = await readCached(pointer.hash);
-  if (cached) return URL.createObjectURL(cached);
+  return decryptToObjectURL(pointer.url, pointer.key, pointer.nonce, { hash: pointer.hash, signal });
+}
 
-  const res = await fetch(pointer.url, { signal });
-  if (!res.ok) throw new Error(`image fetch failed: HTTP ${res.status}`);
+/**
+ * Fetch + AES-GCM-decrypt an encrypted blob (community icon/banner or a chat
+ * attachment) into an object URL. When `hash` is given, the plaintext SHA-256 is
+ * verified and a swapped blob fails closed; `mime` overrides the sniffed type
+ * (needed for video/audio, which magic-byte sniffing doesn't cover). Results are
+ * disk-cached by content hash so reloads skip re-fetch + re-decrypt.
+ */
+export async function decryptToObjectURL(
+  url: string,
+  keyHex: string,
+  nonceHex: string,
+  opts: { hash?: string; mime?: string; signal?: AbortSignal } = {},
+): Promise<string> {
+  // Persistent (Cache Storage) caching is content-addressed, so only when a hash
+  // is known; otherwise the in-memory hook cache handles dedup for the session.
+  if (opts.hash) {
+    const cached = await readCached(opts.hash);
+    if (cached) return URL.createObjectURL(cached);
+  }
+
+  const res = await fetch(url, { signal: opts.signal });
+  if (!res.ok) throw new Error(`attachment fetch failed: HTTP ${res.status}`);
   const ciphertext = new Uint8Array(await res.arrayBuffer());
 
-  const cryptoKey = await crypto.subtle.importKey("raw", buf(fromHex(pointer.key)), "AES-GCM", false, ["decrypt"]);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(fromHex(pointer.nonce)) }, cryptoKey, buf(ciphertext));
+  const cryptoKey = await crypto.subtle.importKey("raw", buf(fromHex(keyHex)), "AES-GCM", false, ["decrypt"]);
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: buf(fromHex(nonceHex)) }, cryptoKey, buf(ciphertext));
   const plaintext = new Uint8Array(pt);
 
-  if (toHex(sha256(plaintext)) !== pointer.hash.toLowerCase()) {
-    throw new Error("image integrity check failed");
+  if (opts.hash && toHex(sha256(plaintext)) !== opts.hash.toLowerCase()) {
+    throw new Error("attachment integrity check failed");
   }
-  const mime = sniffImageMime(plaintext);
-  void writeCached(pointer.hash, plaintext, mime);
+  const mime = opts.mime ?? sniffImageMime(plaintext);
+  if (opts.hash) void writeCached(opts.hash, plaintext, mime);
   return URL.createObjectURL(new Blob([buf(plaintext)], { type: mime }));
 }
