@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
 import { decryptToObjectURL } from "../lib/image";
@@ -82,7 +82,7 @@ function AttachmentView({ att }: { att: MediaAttachment }) {
   );
 }
 
-export function MessageContent({
+export const MessageContent = memo(function MessageContent({
   text,
   attachments,
   emojiTags,
@@ -151,4 +151,4 @@ export function MessageContent({
       ))}
     </div>
   );
-}
+});

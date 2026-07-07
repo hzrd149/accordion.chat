@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DoorOpen,
@@ -38,7 +38,7 @@ import { useDecryptedImage } from "./useDecryptedImage";
 import { MessageContent } from "./MessageContent";
 import { EmojiPicker } from "./EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
-import type { ChatMessage } from "../concord/client";
+import type { ChatMessage, ConcordClient } from "../concord/client";
 import type { CommunityState } from "../concord/types";
 import { PERM } from "../concord/types";
 
@@ -389,75 +389,56 @@ function Sidebar({
   );
 }
 
+type ReplyTarget = { id: string; author: string };
+
+/** Render a quick-reaction label: a unicode char, or a custom emoji image. */
+function reactionLabel(r: string | Emoji) {
+  return typeof r === "string" ? (
+    r
+  ) : (
+    <img className="inline-emoji" src={r.url} alt={`:${r.shortcode}:`} loading="lazy" />
+  );
+}
+
+// The chat view is split into three independently-rendering pieces so a keystroke
+// in the composer never re-renders the (potentially long) message list:
+//   • ChatView    — owns the message stream, scroll, and shared reply target.
+//   • MessageList — memoized; re-renders only when the messages/groups change.
+//   • Composer    — owns the draft text/files/sending/picker state locally.
 function ChatView({ cid, channelId, state }: { cid: string; channelId: string; state: CommunityState }) {
   const client = useConcord();
   const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? []) as ChatMessage[];
   const channel = state.channels.find((c) => c.channel_id === channelId);
-  const [text, setText] = useState("");
-  const [replyTo, setReplyTo] = useState<{ id: string; author: string } | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editText, setEditText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
-  const [sending, setSending] = useState(false);
-  // Which message's reaction picker is open (by id), or "composer" for the composer's.
-  const [picker, setPicker] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
   const favorites = useFavoriteEmojis(client.pubkey);
   // Quick-react buttons: lead with the user's favorites, backfill with defaults.
-  const quickReactions: (string | Emoji)[] = [
-    ...favorites.slice(0, 3),
-    ...DEFAULT_REACTIONS.slice(0, favorites.length >= 3 ? 2 : 3),
-  ];
-
-  const doReact = (m: ChatMessage, reaction: string | Emoji) =>
-    client.react(cid, channelId, { id: m.id, author: m.author }, reaction);
+  // Memoized so the reference stays stable and doesn't defeat MessageList's memo.
+  const quickReactions = useMemo<(string | Emoji)[]>(
+    () => [...favorites.slice(0, 3), ...DEFAULT_REACTIONS.slice(0, favorites.length >= 3 ? 2 : 3)],
+    [favorites],
+  );
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
 
-  useEffect(() => {
-    setReplyTo(null);
-    setText("");
-  }, [channelId]);
+  // Switching channels clears the shared reply target (the composer resets its
+  // own draft via its `key`).
+  useEffect(() => setReplyTo(null), [channelId]);
 
   const canWrite = !state.dissolved;
 
-  async function send() {
-    const value = text.trim();
-    if (!value && files.length === 0) return;
-    const reply = replyTo ?? undefined;
-    const attach = files;
-    setText("");
-    setReplyTo(null);
-    setFiles([]);
-    setSending(true);
-    try {
-      await client.sendMessage(cid, channelId, value, reply, attach.length ? attach : undefined, favorites);
-    } catch (err) {
-      console.error("send failed", err);
-      // Restore the draft so the user doesn't lose their message/attachments.
-      setText(value);
-      setFiles(attach);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function saveEdit(id: string) {
-    const value = editText.trim();
-    setEditing(null);
-    if (value) await client.editMessage(cid, channelId, id, value);
-  }
-
-  const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
-  // Collapse consecutive messages from the same author (within 2 min) into one
-  // avatar group — Discord/Slack style. Replies always start a fresh header.
-  const groups = useMemo(() => groupMessages(messages), [messages]);
+  const handleSend = useCallback(
+    async (value: string, files: File[], reply: ReplyTarget | null) => {
+      setReplyTo(null);
+      await client.sendMessage(cid, channelId, value, reply ?? undefined, files.length ? files : undefined, favorites);
+    },
+    [client, cid, channelId, favorites],
+  );
 
   return (
     <div className="main">
@@ -469,221 +450,366 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         <span className="topic">{state.metadata?.description}</span>
         <div className="spacer" />
       </div>
-      <div className="content-row">
-        <div className="messages" ref={scrollRef}>
-          <div className="filler" />
-          {messages.length === 0 && (
-            <div className="empty">
-              <div className="big"><Hand size={48} /></div>
-              <div>This is the beginning of #{channel?.name}. Say hello!</div>
-            </div>
-          )}
-          {groups.map((group) => (
-            <div className="msg-group" key={group[0].id}>
-              {group.map((m, i) => {
-                const showHeader = i === 0 || Boolean(m.replyTo);
-                return (
-                  <div className={`msg${showHeader ? "" : " continued"}`} key={m.id} tabIndex={-1}>
-                    {showHeader ? (
-                      <UserAvatar pubkey={m.author} />
-                    ) : (
-                      <div className="msg-gutter">
-                        <span className="time">{clockTime(m.ms)}</span>
-                      </div>
-                    )}
-                    <div className="msg-body">
-                      {m.replyTo && (
-                        <div className="msg-reply">
-                          <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {byId.get(m.replyTo.id)?.content ?? "message"}
-                        </div>
-                      )}
-                      {showHeader && (
-                      <div className="msg-head">
-                        <span className="name" style={{ color: colorFor(m.author) }}>
-                          <UserName pubkey={m.author} />
-                        </span>
-                        <span className="time">{formatTime(m.ms)}</span>
-                        {m.author === state.material.owner && <span className="badge owner">Owner</span>}
-                      </div>
-                      )}
-                      {editing === m.id ? (
-                        <input
-                          className="field"
-                          style={{ width: "100%" }}
-                          value={editText}
-                          autoFocus
-                          onChange={(e) => setEditText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEdit(m.id);
-                            if (e.key === "Escape") setEditing(null);
-                          }}
-                        />
-                      ) : m.deleted ? (
-                        <div className="msg-text deleted">(message deleted)</div>
-                      ) : (
-                        <>
-                          <MessageContent
-                            text={m.edited ?? m.content}
-                            attachments={m.attachments}
-                            emojiTags={m.emojiTags}
-                          />
-                          {m.edited && <span className="time"> (edited)</span>}
-                        </>
-                      )}
-                      {m.reactions.length > 0 && (
-                        <div className="reactions">
-                          {m.reactions.map((r) => (
-                            <button
-                              key={r.emoji}
-                              className={`reaction ${r.authors.includes(client.pubkey) ? "mine" : ""}`}
-                              // Re-react: reconstruct the custom emoji from its URL, else the unicode content.
-                              onClick={() =>
-                                doReact(m, r.url ? { shortcode: r.emoji.replace(/^:|:$/g, ""), url: r.url } : r.emoji)
-                              }
-                            >
-                              {r.url ? (
-                                <img className="inline-emoji" src={r.url} alt={r.emoji} title={r.emoji} loading="lazy" />
-                              ) : (
-                                r.emoji
-                              )}{" "}
-                              {r.count}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    {canWrite && (
-                      <div className="msg-actions">
-                        {quickReactions.map((e) => (
-                          <button
-                            key={typeof e === "string" ? e : e.shortcode}
-                            title={typeof e === "string" ? e : `:${e.shortcode}:`}
-                            onClick={() => doReact(m, e)}
-                          >
-                            {typeof e === "string" ? (
-                              e
-                            ) : (
-                              <img className="inline-emoji" src={e.url} alt={`:${e.shortcode}:`} loading="lazy" />
-                            )}
-                          </button>
-                        ))}
-                        <span className="picker-anchor">
-                          <button
-                            title="React…"
-                            onClick={() => setPicker((p) => (p === m.id ? null : m.id))}
-                          >
-                            <SmilePlus size={16} />
-                          </button>
-                          {picker === m.id && (
-                            <EmojiPicker
-                              favorites={favorites}
-                              onPick={(reaction) => doReact(m, reaction)}
-                              onClose={() => setPicker(null)}
-                            />
-                          )}
-                        </span>
-                        <button title="Reply" onClick={() => setReplyTo({ id: m.id, author: m.author })}>
-                          <Reply size={16} />
-                        </button>
-                        {m.author === client.pubkey && !m.deleted && (
-                          <>
-                            <button
-                              title="Edit"
-                              onClick={() => {
-                                setEditing(m.id);
-                                setEditText(m.edited ?? m.content);
-                              }}
-                            >
-                              <Pencil size={16} />
-                            </button>
-                            <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
-                              <Trash2 size={16} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
+      <MessageList
+        ref={scrollRef}
+        messages={messages}
+        channelName={channel?.name}
+        ownerPubkey={state.material.owner}
+        myPubkey={client.pubkey}
+        canWrite={canWrite}
+        client={client}
+        cid={cid}
+        channelId={channelId}
+        favorites={favorites}
+        quickReactions={quickReactions}
+        onReply={setReplyTo}
+      />
       {canWrite && (
-        <div className="composer">
-          {replyTo && (
-            <div className="reply-bar">
-              <span>
-                Replying to <UserName pubkey={replyTo.author} />
-              </span>
-              <button onClick={() => setReplyTo(null)}><X size={16} /></button>
-            </div>
-          )}
-          {files.length > 0 && (
-            <div className="attach-bar">
-              {files.map((f, i) => (
-                <span className="attach-chip" key={i} title={f.name}>
-                  📎 {f.name}
-                  <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="box">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
-                e.target.value = "";
-              }}
-            />
-            <button className="attach" title="Attach files" onClick={() => fileInputRef.current?.click()}>
-              <Paperclip size={20} />
-            </button>
-            <span className="picker-anchor">
-              <button
-                className="attach"
-                title="Emoji"
-                onClick={() => setPicker((p) => (p === "composer" ? null : "composer"))}
-              >
-                <SmilePlus size={20} />
-              </button>
-              {picker === "composer" && (
-                <EmojiPicker
-                  favorites={favorites}
-                  align="right"
-                  onPick={(e) => setText((t) => `${t}${typeof e === "string" ? e : `:${e.shortcode}:`}`)}
-                  onClose={() => setPicker(null)}
-                />
-              )}
-            </span>
-            <textarea
-              rows={1}
-              placeholder={`Message ${channel?.private ? "🔒" : "#"}${channel?.name ?? ""}`}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-            />
-            <button className="send" onClick={send} disabled={sending}>
-              {sending ? "Sending…" : "Send"}
-            </button>
-          </div>
-        </div>
+        <Composer
+          key={channelId}
+          channelName={channel?.name}
+          channelPrivate={Boolean(channel?.private)}
+          favorites={favorites}
+          replyTo={replyTo}
+          onClearReply={() => setReplyTo(null)}
+          onSend={handleSend}
+        />
       )}
     </div>
   );
 }
+
+const MessageList = memo(function MessageList({
+  ref,
+  messages,
+  channelName,
+  ownerPubkey,
+  myPubkey,
+  canWrite,
+  client,
+  cid,
+  channelId,
+  favorites,
+  quickReactions,
+  onReply,
+}: {
+  ref: React.Ref<HTMLDivElement>;
+  messages: ChatMessage[];
+  channelName: string | undefined;
+  ownerPubkey: string;
+  myPubkey: string;
+  canWrite: boolean;
+  client: ConcordClient;
+  cid: string;
+  channelId: string;
+  favorites: Emoji[];
+  quickReactions: (string | Emoji)[];
+  onReply: (r: ReplyTarget) => void;
+}) {
+  const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  // Collapse consecutive messages from the same author (within 2 min) into one
+  // avatar group — Discord/Slack style. Replies always start a fresh header.
+  const groups = useMemo(() => groupMessages(messages), [messages]);
+
+  return (
+    <div className="content-row">
+      <div className="messages" ref={ref}>
+        <div className="filler" />
+        {messages.length === 0 && (
+          <div className="empty">
+            <div className="big"><Hand size={48} /></div>
+            <div>This is the beginning of #{channelName}. Say hello!</div>
+          </div>
+        )}
+        {groups.map((group) => (
+          <div className="msg-group" key={group[0].id}>
+            {group.map((m, i) => (
+              <Message
+                key={m.id}
+                m={m}
+                showHeader={i === 0 || Boolean(m.replyTo)}
+                replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
+                ownerPubkey={ownerPubkey}
+                myPubkey={myPubkey}
+                canWrite={canWrite}
+                client={client}
+                cid={cid}
+                channelId={channelId}
+                favorites={favorites}
+                quickReactions={quickReactions}
+                onReply={onReply}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+// One message row. Memoized and holding its own edit / reaction-picker state, so
+// editing or opening a picker on one message never re-renders its siblings.
+// (The client rebuilds ChatMessage objects on every stream update, so memo can't
+// yet skip rows on genuine data changes — but it does isolate them from parent
+// re-renders driven by the reply bar or another row's picker.)
+const Message = memo(function Message({
+  m,
+  showHeader,
+  replyPreview,
+  ownerPubkey,
+  myPubkey,
+  canWrite,
+  client,
+  cid,
+  channelId,
+  favorites,
+  quickReactions,
+  onReply,
+}: {
+  m: ChatMessage;
+  showHeader: boolean;
+  replyPreview: string | undefined;
+  ownerPubkey: string;
+  myPubkey: string;
+  canWrite: boolean;
+  client: ConcordClient;
+  cid: string;
+  channelId: string;
+  favorites: Emoji[];
+  quickReactions: (string | Emoji)[];
+  onReply: (r: ReplyTarget) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const react = (reaction: string | Emoji) => client.react(cid, channelId, { id: m.id, author: m.author }, reaction);
+
+  async function saveEdit() {
+    const value = editText.trim();
+    setEditing(false);
+    if (value) await client.editMessage(cid, channelId, m.id, value);
+  }
+
+  return (
+    <div className={`msg${showHeader ? "" : " continued"}`} tabIndex={-1}>
+      {showHeader ? (
+        <UserAvatar pubkey={m.author} />
+      ) : (
+        <div className="msg-gutter">
+          <span className="time">{clockTime(m.ms)}</span>
+        </div>
+      )}
+      <div className="msg-body">
+        {m.replyTo && (
+          <div className="msg-reply">
+            <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {replyPreview}
+          </div>
+        )}
+        {showHeader && (
+          <div className="msg-head">
+            <span className="name" style={{ color: colorFor(m.author) }}>
+              <UserName pubkey={m.author} />
+            </span>
+            <span className="time">{formatTime(m.ms)}</span>
+            {m.author === ownerPubkey && <span className="badge owner">Owner</span>}
+          </div>
+        )}
+        {editing ? (
+          <input
+            className="field"
+            style={{ width: "100%" }}
+            value={editText}
+            autoFocus
+            onChange={(e) => setEditText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEdit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+          />
+        ) : m.deleted ? (
+          <div className="msg-text deleted">(message deleted)</div>
+        ) : (
+          <>
+            <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
+            {m.edited && <span className="time"> (edited)</span>}
+          </>
+        )}
+        {m.reactions.length > 0 && (
+          <div className="reactions">
+            {m.reactions.map((r) => (
+              <button
+                key={r.emoji}
+                className={`reaction ${r.authors.includes(myPubkey) ? "mine" : ""}`}
+                // Re-react: reconstruct the custom emoji from its URL, else the unicode content.
+                onClick={() => react(r.url ? { shortcode: r.emoji.replace(/^:|:$/g, ""), url: r.url } : r.emoji)}
+              >
+                {r.url ? (
+                  <img className="inline-emoji" src={r.url} alt={r.emoji} title={r.emoji} loading="lazy" />
+                ) : (
+                  r.emoji
+                )}{" "}
+                {r.count}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {canWrite && (
+        <div className="msg-actions">
+          {quickReactions.map((e) => (
+            <button
+              key={typeof e === "string" ? e : e.shortcode}
+              title={typeof e === "string" ? e : `:${e.shortcode}:`}
+              onClick={() => react(e)}
+            >
+              {reactionLabel(e)}
+            </button>
+          ))}
+          <span className="picker-anchor">
+            <button title="React…" onClick={() => setPickerOpen((v) => !v)}>
+              <SmilePlus size={16} />
+            </button>
+            {pickerOpen && (
+              <EmojiPicker favorites={favorites} onPick={react} onClose={() => setPickerOpen(false)} />
+            )}
+          </span>
+          <button title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
+            <Reply size={16} />
+          </button>
+          {m.author === myPubkey && !m.deleted && (
+            <>
+              <button
+                title="Edit"
+                onClick={() => {
+                  setEditText(m.edited ?? m.content);
+                  setEditing(true);
+                }}
+              >
+                <Pencil size={16} />
+              </button>
+              <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
+                <Trash2 size={16} />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+// The message composer. Owns its draft state locally so keystrokes re-render only
+// this component, not the message list above it.
+const Composer = memo(function Composer({
+  channelName,
+  channelPrivate,
+  favorites,
+  replyTo,
+  onClearReply,
+  onSend,
+}: {
+  channelName: string | undefined;
+  channelPrivate: boolean;
+  favorites: Emoji[];
+  replyTo: ReplyTarget | null;
+  onClearReply: () => void;
+  onSend: (text: string, files: File[], reply: ReplyTarget | null) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function send() {
+    const value = text.trim();
+    if (!value && files.length === 0) return;
+    const attach = files;
+    const reply = replyTo;
+    setText("");
+    setFiles([]);
+    setSending(true);
+    try {
+      await onSend(value, attach, reply);
+    } catch (err) {
+      console.error("send failed", err);
+      // Restore the draft so the user doesn't lose their message/attachments.
+      setText(value);
+      setFiles(attach);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="composer">
+      {replyTo && (
+        <div className="reply-bar">
+          <span>
+            Replying to <UserName pubkey={replyTo.author} />
+          </span>
+          <button onClick={onClearReply}><X size={16} /></button>
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="attach-bar">
+          {files.map((f, i) => (
+            <span className="attach-chip" key={i} title={f.name}>
+              📎 {f.name}
+              <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="box">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
+            e.target.value = "";
+          }}
+        />
+        <button className="attach" title="Attach files" onClick={() => fileInputRef.current?.click()}>
+          <Paperclip size={20} />
+        </button>
+        <span className="picker-anchor">
+          <button className="attach" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
+            <SmilePlus size={20} />
+          </button>
+          {pickerOpen && (
+            <EmojiPicker
+              favorites={favorites}
+              align="right"
+              onPick={(e) => setText((t) => `${t}${typeof e === "string" ? e : `:${e.shortcode}:`}`)}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </span>
+        <textarea
+          rows={1}
+          placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <button className="send" onClick={send} disabled={sending}>
+          {sending ? "Sending…" : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+});
 
 function MemberList({ state }: { state: CommunityState }) {
   const members = [...state.members];
