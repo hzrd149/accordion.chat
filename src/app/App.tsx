@@ -43,7 +43,7 @@ import { useMentionCandidates, useMentionSearch, detectMention, type MentionCand
 import { EmojiPicker } from "./EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
 import type { ChatMessage, ConcordClient } from "../concord/client";
-import type { CommunityState } from "../concord/types";
+import type { CommunityState, Role } from "../concord/types";
 import { PERM } from "../concord/types";
 
 export function App() {
@@ -970,27 +970,76 @@ const Composer = memo(function Composer({
   );
 });
 
-function MemberList({ state }: { state: CommunityState }) {
-  const members = [...state.members];
-  const owner = members.filter((m) => m === state.material.owner);
-  const others = members.filter((m) => m !== state.material.owner).sort();
+/** A u32 role colour as a CSS hex string, or undefined for the theme default. */
+function roleColor(color: number): string | undefined {
+  return color ? `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}` : undefined;
+}
 
-  const row = (m: string) => (
+function MemberList({ state }: { state: CommunityState }) {
+  const owner = state.material.owner;
+  const rolesById = useMemo(() => new Map(state.roles.map((r) => [r.role_id, r])), [state.roles]);
+
+  // Each member's highest-authority Role (lowest `position`), Discord-style: a
+  // member is hoisted under one role only. The owner is special-cased above.
+  const primaryRole = useCallback(
+    (m: string): Role | undefined => {
+      let best: Role | undefined;
+      for (const id of state.grants.get(m) ?? []) {
+        const r = rolesById.get(id);
+        if (r && (!best || r.position < best.position)) best = r;
+      }
+      return best;
+    },
+    [state.grants, rolesById],
+  );
+
+  const row = (m: string, role?: Role) => (
     <div className="member" key={m} title={m}>
       <UserAvatar pubkey={m} />
-      <span className="m-name">
+      <span className="m-name" style={role ? { color: roleColor(role.color) } : undefined}>
         <UserName pubkey={m} />
       </span>
-      {m === state.material.owner && <span className="badge owner">Owner</span>}
+      {m === owner ? (
+        <span className="badge owner">Owner</span>
+      ) : (
+        role && (
+          <span className="badge role" style={{ background: roleColor(role.color) }}>
+            {role.name}
+          </span>
+        )
+      )}
     </div>
   );
 
+  const members = [...state.members];
+  const ownerMembers = members.filter((m) => m === owner);
+  // Group the rest under their highest role, in authority order (lowest
+  // `position` first), then a trailing roleless "Members" section.
+  const nonOwner = members.filter((m) => m !== owner);
+  const roleless = nonOwner.filter((m) => !primaryRole(m)).sort();
+  const sections = [...state.roles]
+    .sort((a, b) => a.position - b.position || (a.role_id < b.role_id ? -1 : 1))
+    .map((r) => ({ role: r, members: nonOwner.filter((m) => primaryRole(m)?.role_id === r.role_id).sort() }))
+    .filter((s) => s.members.length > 0);
+
   return (
     <div className="members">
-      <h4>Owner</h4>
-      {owner.map(row)}
-      <h4>Members — {others.length}</h4>
-      {others.map(row)}
+      {ownerMembers.length > 0 && (
+        <>
+          <h4>Owner</h4>
+          {ownerMembers.map((m) => row(m))}
+        </>
+      )}
+      {sections.map((s) => (
+        <div key={s.role.role_id}>
+          <h4 style={{ color: roleColor(s.role.color) }}>
+            {s.role.name} — {s.members.length}
+          </h4>
+          {s.members.map((m) => row(m, s.role))}
+        </div>
+      ))}
+      <h4>Members — {roleless.length}</h4>
+      {roleless.map((m) => row(m))}
       {members.length === 0 && <p className="sub" style={{ padding: 8 }}>No members yet.</p>}
     </div>
   );
