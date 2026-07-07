@@ -18,24 +18,19 @@ function cacheKey(image: BlobPointer): string {
 
 /** Returns the decrypted object URL, or null while loading / on failure. */
 export function useDecryptedImage(image: BlobPointer | undefined): string | null {
-  const [src, setSrc] = useState<string | null>(() => (image ? resolved.get(cacheKey(image)) ?? null : null));
+  const ck = image ? cacheKey(image) : null;
+  // The resolved cache is the source of truth; `src` is derived from it each
+  // render. `bump` is only a re-render trigger fired from the async callback
+  // once the decrypt lands — so no state is set synchronously in the effect.
+  const cached = ck ? resolved.get(ck) ?? null : null;
+  const [, bump] = useState(0);
 
   useEffect(() => {
-    if (!image) {
-      setSrc(null);
-      return;
-    }
-    const ck = cacheKey(image);
-    const ready = resolved.get(ck);
-    if (ready) {
-      setSrc(ready);
-      return;
-    }
-
+    if (!ck || resolved.has(ck)) return;
     let cancelled = false;
     let promise = inflight.get(ck);
     if (!promise) {
-      promise = decryptImagePointer(image);
+      promise = decryptImagePointer(image!);
       inflight.set(ck, promise);
       promise
         .then((u) => {
@@ -49,19 +44,15 @@ export function useDecryptedImage(image: BlobPointer | undefined): string | null
           if (inflight.get(ck) === promise) inflight.delete(ck);
         });
     }
-    setSrc(null);
-    promise
-      .then((u) => {
-        if (!cancelled) setSrc(u);
-      })
-      .catch(() => {
-        if (!cancelled) setSrc(null);
-      });
+    // Re-render on settle (success or failure). Two-arg form so this subscriber
+    // handles its own rejection — `.finally` would leave it unhandled.
+    const rerender = () => !cancelled && bump((n) => n + 1);
+    promise.then(rerender, rerender);
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [image?.url, image?.key, image?.nonce]);
+  }, [ck]);
 
-  return src;
+  return cached;
 }

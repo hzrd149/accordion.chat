@@ -113,13 +113,17 @@ function ProfilePage({ signer, pubkey }: PageProps) {
   const [error, setError] = useState<string | null>(null);
 
   // Seed the form from the loaded profile once (and whenever a fresh copy loads).
-  useEffect(() => {
+  // Reset during render (keyed on the profile object) rather than in an effect,
+  // avoiding a cascading render each time the profile stream emits.
+  const [seededFrom, setSeededFrom] = useState<typeof profile | undefined>(undefined);
+  if (profile !== seededFrom) {
+    setSeededFrom(profile);
     const m = (profile?.metadata ?? {}) as Record<string, unknown>;
     const next: Record<string, string> = {};
     for (const f of PROFILE_FIELDS) next[f.key as string] = (m[f.key as string] as string) ?? "";
     next.about = (m.about as string) ?? "";
     setForm(next);
-  }, [profile]);
+  }
 
   function set(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }));

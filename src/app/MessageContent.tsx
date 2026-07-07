@@ -18,19 +18,16 @@ function attKey(a: MediaAttachment): string {
 
 /** Decrypt an attachment to an object URL (or pass through a plaintext URL). */
 function useAttachmentSrc(a: MediaAttachment): string | null {
-  const [src, setSrc] = useState<string | null>(() => (a.encryption ? resolved.get(attKey(a)) ?? null : a.url));
+  // Plaintext URLs pass straight through; encrypted ones resolve through the
+  // module cache, which is the source of truth. `src` is derived from it each
+  // render; `bump` only re-renders once the async decrypt lands (in a callback),
+  // so nothing is set synchronously inside the effect.
+  const ck = a.encryption ? attKey(a) : null;
+  const cached = a.encryption ? resolved.get(ck!) ?? null : a.url;
+  const [, bump] = useState(0);
 
   useEffect(() => {
-    if (!a.encryption) {
-      setSrc(a.url);
-      return;
-    }
-    const ck = attKey(a);
-    const ready = resolved.get(ck);
-    if (ready) {
-      setSrc(ready);
-      return;
-    }
+    if (!ck || !a.encryption || resolved.has(ck)) return;
     let cancelled = false;
     let promise = inflight.get(ck);
     if (!promise) {
@@ -49,15 +46,17 @@ function useAttachmentSrc(a: MediaAttachment): string | null {
         })
         .catch(() => inflight.get(ck) === promise && inflight.delete(ck));
     }
-    setSrc(null);
-    promise.then((u) => !cancelled && setSrc(u)).catch(() => !cancelled && setSrc(null));
+    // Re-render on settle (success or failure). Two-arg form so this subscriber
+    // handles its own rejection — `.finally` would leave it unhandled.
+    const rerender = () => !cancelled && bump((n) => n + 1);
+    promise.then(rerender, rerender);
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [a.url, a.encryption?.key, a.encryption?.nonce]);
+  }, [ck]);
 
-  return src;
+  return cached;
 }
 
 function AttachmentView({ att }: { att: MediaAttachment }) {

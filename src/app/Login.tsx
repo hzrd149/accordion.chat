@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Copy, Check, Settings2 } from "lucide-react";
 import { nip19 } from "nostr-tools";
 import { ExtensionAccount, PrivateKeyAccount, NostrConnectAccount } from "applesauce-accounts/accounts";
@@ -123,7 +123,6 @@ function RemoteSignerLogin({
   const [relays, setRelays] = useState<string[]>(NOSTR_CONNECT_RELAYS);
   const [editingRelays, setEditingRelays] = useState(false);
   const [relaysDraft, setRelaysDraft] = useState(relays.join("\n"));
-  const [uri, setUri] = useState("");
   const [copied, setCopied] = useState(false);
   const [bunkerUrl, setBunkerUrl] = useState("");
   const [bunkerBusy, setBunkerBusy] = useState(false);
@@ -131,13 +130,19 @@ function RemoteSignerLogin({
   // connect (or unmount) has already claimed the login.
   const doneRef = useRef(false);
 
-  // (Re)start a nostrconnect:// session whenever the relay set changes.
-  useEffect(() => {
-    if (relays.length === 0) return;
-    onError("");
-    const signer = new NostrConnectSigner({ relays });
-    setUri(signer.getNostrConnectURI({ ...APP_METADATA, permissions: CONCORD_SIGNER_PERMISSIONS }));
+  // Create one signer per relay set and derive its QR URI, rather than setting
+  // `uri` state from the effect (which would cascade a render). The signer's
+  // start/stop lifecycle stays in the effect below.
+  const signer = useMemo(() => (relays.length ? new NostrConnectSigner({ relays }) : null), [relays]);
+  const uri = useMemo(
+    () => signer?.getNostrConnectURI({ ...APP_METADATA, permissions: CONCORD_SIGNER_PERMISSIONS }) ?? "",
+    [signer],
+  );
 
+  // (Re)start the nostrconnect:// session whenever the signer changes.
+  useEffect(() => {
+    if (!signer) return;
+    onError("");
     const controller = new AbortController();
     signer
       .waitForSigner(controller.signal)
@@ -156,7 +161,7 @@ function RemoteSignerLogin({
       // QR session never completed.
       if (!signer.isConnected) signer.close();
     };
-  }, [relays, onError, onSigner]);
+  }, [signer, onError, onSigner]);
 
   function applyRelays() {
     const next = relaysDraft

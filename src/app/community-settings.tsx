@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ImagePlus, Landmark, Shield, Trash2, Users, X } from "lucide-react";
 import { use$ } from "applesauce-react/hooks";
-import { useConcord } from "./context";
+import { useConcord } from "./concord-context";
 import { UserAvatar, UserName } from "./User";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { PERM } from "../concord/types";

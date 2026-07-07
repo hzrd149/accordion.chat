@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { accounts } from "../nostr";
-import { ConcordProvider, useConcord } from "./context";
+import { ConcordProvider } from "./context";
+import { useConcord } from "./concord-context";
 import { Login } from "./Login";
 import {
   CreateChannelModal,
@@ -62,9 +63,14 @@ export function App() {
 /** Overlay names carried in the `?modal=` query param. */
 type ModalName = "create" | "join" | "channel" | "invite" | "addMenu" | "leave";
 
+// Stable empty fallback so `communities` keeps a constant identity while the
+// stream is still empty — otherwise a fresh `[]` each render would retrigger the
+// auto-select effect below on every render.
+const NO_COMMUNITIES: CommunityState[] = [];
+
 function Shell() {
   const client = useConcord();
-  const communities = use$(client.communities$) ?? [];
+  const communities = use$(client.communities$) ?? NO_COMMUNITIES;
   const status = use$(client.status$);
   const navigate = useNavigate();
   const { cid: cidParam, channelId: channelParam } = useParams();
@@ -427,8 +433,13 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   }, [messages.length]);
 
   // Switching channels clears the shared reply target (the composer resets its
-  // own draft via its `key`).
-  useEffect(() => setReplyTo(null), [channelId]);
+  // own draft via its `key`). Done during render — the documented alternative to
+  // a setState-in-effect — so it applies before the children paint.
+  const [prevChannel, setPrevChannel] = useState(channelId);
+  if (channelId !== prevChannel) {
+    setPrevChannel(channelId);
+    setReplyTo(null);
+  }
 
   const canWrite = !state.dissolved;
 

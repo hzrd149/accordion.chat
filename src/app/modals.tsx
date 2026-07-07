@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useConcord } from "./context";
+import { useConcord } from "./concord-context";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
