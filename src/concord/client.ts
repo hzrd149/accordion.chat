@@ -616,7 +616,7 @@ export class ConcordClient {
     return DEFAULT_BLOSSOM_SERVERS;
   }
 
-  async createChannel(cid: string, name: string, isPrivate: boolean): Promise<void> {
+  async createChannel(cid: string, name: string, isPrivate: boolean, voice = false): Promise<void> {
     const rt = this.runtimes.get(cid)!;
     const channelId = toHex(generateSecretKey());
     if (isPrivate) {
@@ -628,7 +628,9 @@ export class ConcordClient {
       this.saveMaterialsLocal();
       await this.saveCommunityList();
     }
-    await this.publishEdition(rt, VSK.CHANNEL, channelId, JSON.stringify({ name, private: isPrivate }));
+    const content: Record<string, unknown> = { name, private: isPrivate };
+    if (voice) content.voice = true;
+    await this.publishEdition(rt, VSK.CHANNEL, channelId, JSON.stringify(content));
   }
 
   async deleteChannel(cid: string, channelId: string): Promise<void> {

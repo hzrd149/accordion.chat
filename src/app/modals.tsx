@@ -150,12 +150,13 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   const client = useConcord();
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
+  const [voice, setVoice] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function create() {
     setBusy(true);
     try {
-      await client.createChannel(cid, name.trim().toLowerCase().replace(/\s+/g, "-"), priv);
+      await client.createChannel(cid, name.trim().toLowerCase().replace(/\s+/g, "-"), priv, voice);
       onClose();
     } catch {
       setBusy(false);
@@ -173,6 +174,12 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
         <input type="checkbox" id="priv" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
         <label htmlFor="priv" style={{ margin: 0 }}>
           Private channel (its own key, only role-holders can read)
+        </label>
+      </div>
+      <div className="check-row">
+        <input type="checkbox" id="voice" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
+        <label htmlFor="voice" style={{ margin: 0 }}>
+          Voice/video channel (end-to-end-encrypted calls)
         </label>
       </div>
       <div className="modal-actions">

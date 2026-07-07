@@ -18,11 +18,15 @@ import {
   Trash2,
   UserPlus,
   Users,
+  Volume2,
   X,
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { accounts } from "../nostr";
 import { ConcordProvider } from "./context";
+import { CallProvider } from "./voice/CallProvider";
+import { useCall } from "./voice/call-context";
+import { verifiedAuthorOf } from "../concord/voice";
 import { useConcord } from "./concord-context";
 import { Login } from "./Login";
 import {
@@ -52,12 +56,14 @@ export function App() {
   return (
     <ConcordProvider>
       {() => (
-        <Routes>
-          <Route path="/" element={<Shell />} />
-          <Route path="/c/:cid" element={<Shell />} />
-          <Route path="/c/:cid/:channelId" element={<Shell />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <CallProvider>
+          <Routes>
+            <Route path="/" element={<Shell />} />
+            <Route path="/c/:cid" element={<Shell />} />
+            <Route path="/c/:cid/:channelId" element={<Shell />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </CallProvider>
       )}
     </ConcordProvider>
   );
@@ -359,16 +365,20 @@ function Sidebar({
             </button>
           )}
         </div>
-        {state.channels.map((ch) => (
-          <button
-            key={ch.channel_id}
-            className={`channel ${ch.channel_id === selectedChannel ? "active" : ""}`}
-            onClick={() => onSelectChannel(ch.channel_id)}
-          >
-            <span className="hash">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
-            <span>{ch.name}</span>
-          </button>
-        ))}
+        {state.channels.map((ch) =>
+          ch.voice ? (
+            <VoiceChannelRow key={ch.channel_id} cid={state.material.community_id} channelId={ch.channel_id} name={ch.name} />
+          ) : (
+            <button
+              key={ch.channel_id}
+              className={`channel ${ch.channel_id === selectedChannel ? "active" : ""}`}
+              onClick={() => onSelectChannel(ch.channel_id)}
+            >
+              <span className="hash">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
+              <span>{ch.name}</span>
+            </button>
+          ),
+        )}
         {canInvite && !state.dissolved && (
           <button className="channel" style={{ marginTop: 12, color: "var(--success)" }} onClick={onInvite}>
             <span className="hash"><UserPlus size={16} /></span>
@@ -394,6 +404,49 @@ function Sidebar({
           <LogOut size={18} />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A voice channel in the sidebar (CORD-07): a speaker-icon row that joins the
+ * call on click, with the live roster of present members listed beneath it.
+ */
+function VoiceChannelRow({ cid, channelId, name }: { cid: string; channelId: string; name: string }) {
+  const client = useConcord();
+  const call = useCall();
+  const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? {
+    present: [],
+    claims: new Map<string, string[]>(),
+  };
+  const inThisCall = call.active?.channelId === channelId && call.active?.cid === cid;
+  // A present participant renders in the roster only when its identity verifies
+  // to exactly one author (§4); contested/unclaimed are shown as unverified.
+  const roster = fold.present.map((p) => ({ identity: p.identity, author: verifiedAuthorOf(fold, p.identity) }));
+
+  return (
+    <div className={`voice-channel ${inThisCall ? "active" : ""}`}>
+      <button className="channel" onClick={() => (inThisCall ? call.leave() : call.join({ cid, channelId, channelName: name }))}>
+        <span className="hash"><Volume2 size={16} /></span>
+        <span>{name}</span>
+        {fold.present.length > 0 && <span className="voice-count">{fold.present.length}</span>}
+      </button>
+      {roster.length > 0 && (
+        <div className="voice-roster">
+          {roster.map((r) => (
+            <div key={r.identity} className="voice-member">
+              {r.author ? (
+                <>
+                  <UserAvatar pubkey={r.author} className="voice-member-avatar" />
+                  <span className="voice-member-name"><UserName pubkey={r.author} /></span>
+                </>
+              ) : (
+                <span className="voice-member-name unverified">Unverified</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
