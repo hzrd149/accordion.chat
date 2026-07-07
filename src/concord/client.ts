@@ -16,6 +16,7 @@ import {
   setEncryptedContentCache,
   unlockEncryptedContent,
 } from "applesauce-core/helpers";
+import { getReactionEmoji } from "applesauce-common/helpers";
 import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
 import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "../lib/image";
@@ -73,6 +74,7 @@ import {
   deleteRumor,
   editRumor,
   checkChatBinding,
+  type Emoji,
 } from "./chat";
 import {
   buildBundleEventTemplate,
@@ -106,9 +108,12 @@ export interface ChatMessage {
   edited?: string;
   deleted: boolean;
   replyTo?: { id: string; author: string };
-  reactions: { emoji: string; count: number; authors: string[] }[];
+  /** `emoji` is the reaction content (a unicode char or `:shortcode:`); `url` is set for NIP-30 custom emoji. */
+  reactions: { emoji: string; url?: string; count: number; authors: string[] }[];
   /** Encrypted media/files parsed from the message's NIP-92 imeta tags. */
   attachments: MediaAttachment[];
+  /** The message's NIP-30 `["emoji", …]` tags, for rendering `:shortcode:` inline. */
+  emojiTags: string[][];
 }
 
 interface PlaneInfo {
@@ -320,6 +325,7 @@ export class ConcordClient {
     text: string,
     replyTo?: { id: string; author: string },
     files?: File[],
+    emojis?: Emoji[],
   ): Promise<void> {
     const rt = this.runtimes.get(cid)!;
     const epoch = this.channelEpoch(rt, channelId);
@@ -345,18 +351,23 @@ export class ConcordClient {
     await this.publishToPlane(
       rt,
       this.channelKey(rt, channelId),
-      messageRumor(channelId, epoch, content, replyTo, attachments),
+      messageRumor(channelId, epoch, content, replyTo, attachments, emojis),
       {},
     );
   }
 
-  async react(cid: string, channelId: string, target: { id: string; author: string }, emoji: string): Promise<void> {
+  async react(
+    cid: string,
+    channelId: string,
+    target: { id: string; author: string },
+    reaction: string | Emoji,
+  ): Promise<void> {
     const rt = this.runtimes.get(cid)!;
     const epoch = this.channelEpoch(rt, channelId);
     await this.publishToPlane(
       rt,
       this.channelKey(rt, channelId),
-      reactionRumor(channelId, epoch, { ...target, kind: KIND.MESSAGE }, emoji),
+      reactionRumor(channelId, epoch, { ...target, kind: KIND.MESSAGE }, reaction),
       {},
     );
   }
@@ -1012,7 +1023,9 @@ export class ConcordClient {
     if (!subj) return;
     const events = rt.channelEvents.get(channelId);
     const byId = new Map<string, ChatMessage>();
-    const reactions = new Map<string, Map<string, Set<string>>>(); // target -> emoji -> authors
+    // target -> reaction content -> { url?, authors }. A custom emoji reaction's
+    // content is `:shortcode:` and carries the image URL from its own emoji tag.
+    const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
     const edits: DecodedEvent[] = [];
     const deletes: DecodedEvent[] = [];
 
@@ -1031,6 +1044,7 @@ export class ConcordClient {
             replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
             reactions: [],
             attachments: [...parseImeta(r.tags).values()],
+            emojiTags: r.tags.filter((t) => t[0] === "emoji"),
           });
         } else if (r.kind === KIND.EDIT) {
           edits.push(d);
@@ -1044,12 +1058,15 @@ export class ConcordClient {
             emap = new Map();
             reactions.set(target, emap);
           }
-          let set = emap.get(r.content);
-          if (!set) {
-            set = new Set();
-            emap.set(r.content, set);
+          let entry = emap.get(r.content);
+          if (!entry) {
+            // NIP-30: resolve a custom `:shortcode:` reaction to its image URL
+            // via applesauce (plain unicode reactions resolve to undefined).
+            const custom = getReactionEmoji(r as unknown as NostrEvent);
+            entry = { url: custom?.url, authors: new Set() };
+            emap.set(r.content, entry);
           }
-          set.add(d.author);
+          entry.authors.add(d.author);
         }
       }
     }
@@ -1070,8 +1087,9 @@ export class ConcordClient {
     for (const [target, emap] of reactions) {
       const msg = byId.get(target);
       if (!msg) continue;
-      msg.reactions = [...emap.entries()].map(([emoji, authors]) => ({
+      msg.reactions = [...emap.entries()].map(([emoji, { url, authors }]) => ({
         emoji,
+        url,
         count: authors.size,
         authors: [...authors],
       }));

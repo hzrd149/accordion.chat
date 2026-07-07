@@ -82,8 +82,21 @@ function AttachmentView({ att }: { att: MediaAttachment }) {
   );
 }
 
-export function MessageContent({ text, attachments }: { text: string; attachments: MediaAttachment[] }) {
-  const root = useMemo(() => getParsedContent(text), [text]);
+export function MessageContent({
+  text,
+  attachments,
+  emojiTags,
+}: {
+  text: string;
+  attachments: MediaAttachment[];
+  emojiTags?: string[][];
+}) {
+  // Parse against a minimal event template so applesauce's `emojis` transformer
+  // can resolve `:shortcode:` against the message's NIP-30 emoji tags.
+  const root = useMemo(
+    () => getParsedContent({ kind: 9, content: text, tags: emojiTags ?? [], created_at: 0 }),
+    [text, emojiTags],
+  );
   const byUrl = useMemo(() => new Map(attachments.map((a) => [a.url, a])), [attachments]);
   const rendered = new Set<string>();
 
@@ -115,8 +128,12 @@ export function MessageContent({ text, attachments }: { text: string; attachment
           );
         }
       });
+    } else if (node.type === "emoji") {
+      // NIP-30 custom emoji — render the tagged image inline.
+      const e = node as unknown as { url: string; code: string; raw: string };
+      nodes.push(<img key={i} className="inline-emoji" src={e.url} alt={e.raw} title={e.code} loading="lazy" />);
     } else {
-      // text / mention / hashtag / emoji — render the raw written form.
+      // text / mention / hashtag — render the raw written form.
       const value = "value" in node ? (node as { value?: string }).value : undefined;
       if (value) nodes.push(<span key={i}>{value}</span>);
     }

@@ -13,6 +13,7 @@ import {
   Plus,
   Reply,
   Settings,
+  SmilePlus,
   Trash2,
   UserPlus,
   Users,
@@ -35,11 +36,11 @@ import { SettingsView } from "./settings";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { MessageContent } from "./MessageContent";
+import { EmojiPicker } from "./EmojiPicker";
+import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
 import type { ChatMessage } from "../concord/client";
 import type { CommunityState } from "../concord/types";
 import { PERM } from "../concord/types";
-
-const EMOJIS = ["👍", "❤️", "😂", "🔥", "🎉", "😮"];
 
 export function App() {
   const account = useActiveAccount();
@@ -398,8 +399,21 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   const [editText, setEditText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  // Which message's reaction picker is open (by id), or "composer" for the composer's.
+  const [picker, setPicker] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
+  const favorites = useFavoriteEmojis(client.pubkey);
+  // Quick-react buttons: lead with the user's favorites, backfill with defaults.
+  const quickReactions: (string | Emoji)[] = [
+    ...favorites.slice(0, 3),
+    ...DEFAULT_REACTIONS.slice(0, favorites.length >= 3 ? 2 : 3),
+  ];
+
+  const doReact = (m: ChatMessage, reaction: string | Emoji) =>
+    client.react(cid, channelId, { id: m.id, author: m.author }, reaction);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -423,7 +437,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
     setFiles([]);
     setSending(true);
     try {
-      await client.sendMessage(cid, channelId, value, reply, attach.length ? attach : undefined);
+      await client.sendMessage(cid, channelId, value, reply, attach.length ? attach : undefined, favorites);
     } catch (err) {
       console.error("send failed", err);
       // Restore the draft so the user doesn't lose their message/attachments.
@@ -508,7 +522,11 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                         <div className="msg-text deleted">(message deleted)</div>
                       ) : (
                         <>
-                          <MessageContent text={m.edited ?? m.content} attachments={m.attachments} />
+                          <MessageContent
+                            text={m.edited ?? m.content}
+                            attachments={m.attachments}
+                            emojiTags={m.emojiTags}
+                          />
                           {m.edited && <span className="time"> (edited)</span>}
                         </>
                       )}
@@ -518,9 +536,17 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                             <button
                               key={r.emoji}
                               className={`reaction ${r.authors.includes(client.pubkey) ? "mine" : ""}`}
-                              onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, r.emoji)}
+                              // Re-react: reconstruct the custom emoji from its URL, else the unicode content.
+                              onClick={() =>
+                                doReact(m, r.url ? { shortcode: r.emoji.replace(/^:|:$/g, ""), url: r.url } : r.emoji)
+                              }
                             >
-                              {r.emoji} {r.count}
+                              {r.url ? (
+                                <img className="inline-emoji" src={r.url} alt={r.emoji} title={r.emoji} loading="lazy" />
+                              ) : (
+                                r.emoji
+                              )}{" "}
+                              {r.count}
                             </button>
                           ))}
                         </div>
@@ -528,11 +554,34 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
                     </div>
                     {canWrite && (
                       <div className="msg-actions">
-                        {EMOJIS.slice(0, 3).map((e) => (
-                          <button key={e} onClick={() => client.react(cid, channelId, { id: m.id, author: m.author }, e)}>
-                            {e}
+                        {quickReactions.map((e) => (
+                          <button
+                            key={typeof e === "string" ? e : e.shortcode}
+                            title={typeof e === "string" ? e : `:${e.shortcode}:`}
+                            onClick={() => doReact(m, e)}
+                          >
+                            {typeof e === "string" ? (
+                              e
+                            ) : (
+                              <img className="inline-emoji" src={e.url} alt={`:${e.shortcode}:`} loading="lazy" />
+                            )}
                           </button>
                         ))}
+                        <span className="picker-anchor">
+                          <button
+                            title="React…"
+                            onClick={() => setPicker((p) => (p === m.id ? null : m.id))}
+                          >
+                            <SmilePlus size={16} />
+                          </button>
+                          {picker === m.id && (
+                            <EmojiPicker
+                              favorites={favorites}
+                              onPick={(reaction) => doReact(m, reaction)}
+                              onClose={() => setPicker(null)}
+                            />
+                          )}
+                        </span>
                         <button title="Reply" onClick={() => setReplyTo({ id: m.id, author: m.author })}>
                           <Reply size={16} />
                         </button>
@@ -597,6 +646,23 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
             <button className="attach" title="Attach files" onClick={() => fileInputRef.current?.click()}>
               <Paperclip size={20} />
             </button>
+            <span className="picker-anchor">
+              <button
+                className="attach"
+                title="Emoji"
+                onClick={() => setPicker((p) => (p === "composer" ? null : "composer"))}
+              >
+                <SmilePlus size={20} />
+              </button>
+              {picker === "composer" && (
+                <EmojiPicker
+                  favorites={favorites}
+                  align="right"
+                  onPick={(e) => setText((t) => `${t}${typeof e === "string" ? e : `:${e.shortcode}:`}`)}
+                  onClose={() => setPicker(null)}
+                />
+              )}
+            </span>
             <textarea
               rows={1}
               placeholder={`Message ${channel?.private ? "🔒" : "#"}${channel?.name ?? ""}`}

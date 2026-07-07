@@ -2,9 +2,25 @@
 // channel_id and epoch it was written for; a receiver checks both against the
 // key that opened the wrap and drops a mismatch.
 
+import { includeEmojis } from "applesauce-core/operations";
+import type { Emoji } from "applesauce-core/factories";
 import type { RumorTemplate } from "./stream";
 import { KIND } from "./types";
 import { buildImetaTag, type MediaAttachment } from "../lib/imeta";
+
+export type { Emoji };
+
+/**
+ * Add NIP-30 `["emoji", …]` tags for every `:shortcode:` in `content` that
+ * matches one of `emojis`, using applesauce's operation so the shortcode regex
+ * and pack-address handling stay spec-correct. Returns the merged tags.
+ */
+function withEmojiTags(content: string, tags: string[][], emojis?: Emoji[]): string[][] {
+  if (!emojis?.length) return tags;
+  // `includeEmojis` is synchronous; the placeholder kind/created_at are discarded.
+  const draft = includeEmojis(emojis)({ kind: 0, content, tags, created_at: 0 }) as { tags: string[][] };
+  return draft.tags;
+}
 
 function base(channelId: string, epoch: number): string[][] {
   return [
@@ -20,23 +36,29 @@ export function messageRumor(
   text: string,
   replyTo?: { id: string; author: string },
   attachments?: MediaAttachment[],
+  emojis?: Emoji[],
 ): RumorTemplate {
   const tags = base(channelId, epoch);
   if (replyTo) tags.push(["q", replyTo.id, "", replyTo.author]);
   // NIP-92: one imeta tag per attachment, carrying the per-file decryption key.
   for (const a of attachments ?? []) tags.push(buildImetaTag(a));
-  return { kind: KIND.MESSAGE, content: text, tags };
+  // NIP-30: emoji tags for each `:shortcode:` used in the text.
+  return { kind: KIND.MESSAGE, content: text, tags: withEmojiTags(text, tags, emojis) };
 }
 
 export function reactionRumor(
   channelId: string,
   epoch: number,
   target: { id: string; author: string; kind: number },
-  emoji: string,
+  reaction: string | Emoji,
 ): RumorTemplate {
   const tags = base(channelId, epoch);
   tags.push(["e", target.id], ["p", target.author], ["k", String(target.kind)]);
-  return { kind: KIND.REACTION, content: emoji, tags };
+  // NIP-25/NIP-30: a plain emoji rides in content; a custom emoji rides as a
+  // `:shortcode:` in content plus a single emoji tag naming its image.
+  if (typeof reaction === "string") return { kind: KIND.REACTION, content: reaction, tags };
+  const content = `:${reaction.shortcode}:`;
+  return { kind: KIND.REACTION, content, tags: withEmojiTags(content, tags, [reaction]) };
 }
 
 export function deleteRumor(channelId: string, epoch: number, targetId: string, targetKind = 9): RumorTemplate {
