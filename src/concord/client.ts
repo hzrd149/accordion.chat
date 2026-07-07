@@ -114,6 +114,8 @@ export interface ChatMessage {
   attachments: MediaAttachment[];
   /** The message's NIP-30 `["emoji", …]` tags, for rendering `:shortcode:` inline. */
   emojiTags: string[][];
+  /** The decoded plane event (rumor + wrapper metadata), retained for debugging ("view raw"). */
+  raw: DecodedEvent;
 }
 
 interface PlaneInfo {
@@ -1051,6 +1053,7 @@ export class ConcordClient {
             reactions: [],
             attachments: [...parseImeta(r.tags).values()],
             emojiTags: r.tags.filter((t) => t[0] === "emoji"),
+            raw: d,
           });
         } else if (r.kind === KIND.EDIT) {
           edits.push(d);

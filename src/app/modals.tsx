@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useConcord } from "./concord-context";
+import type { ChatMessage } from "../concord/client";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
@@ -9,6 +10,45 @@ export function Modal({ children, onClose }: { children: ReactNode; onClose: () 
         {children}
       </div>
     </div>
+  );
+}
+
+/** Debug view: the raw decoded rumor plus its wrapper metadata (wrap id, seal, author). */
+export function RawEventModal({ message, onClose }: { message: ChatMessage; onClose: () => void }) {
+  const { raw } = message;
+  const [copied, setCopied] = useState(false);
+
+  // The full debug payload: the inner rumor, the wrapper details, and the seal
+  // event (present unless this message was rehydrated from the local cache).
+  const debug = {
+    rumor: raw.rumor,
+    wrapId: raw.wrapId,
+    sealKind: raw.sealKind,
+    ms: raw.ms,
+    author: raw.author,
+    seal: raw.seal ?? null,
+  };
+  const json = JSON.stringify(debug, null, 2);
+
+  async function copy() {
+    await navigator.clipboard.writeText(json);
+    setCopied(true);
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <h2>Raw event</h2>
+      <p className="sub">The decoded rumor and its CORD-01 wrapper metadata, for debugging.</p>
+      <pre className="raw-json">{json}</pre>
+      <div className="modal-actions">
+        <button className="btn secondary" onClick={onClose}>
+          Close
+        </button>
+        <button className="btn" onClick={copy}>
+          {copied ? "Copied!" : "Copy JSON"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

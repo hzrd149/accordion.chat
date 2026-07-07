@@ -8,6 +8,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  MoreVertical,
   Paperclip,
   Pencil,
   Plus,
@@ -30,6 +31,7 @@ import {
   InviteModal,
   JoinModal,
   Modal,
+  RawEventModal,
 } from "./modals";
 import { clockTime, colorFor, formatTime, groupMessages } from "./util";
 import { UserAvatar, UserName } from "./User";
@@ -593,6 +595,8 @@ const Message = memo(function Message({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [rawOpen, setRawOpen] = useState(false);
 
   const react = (reaction: string | Emoji) => client.react(cid, channelId, { id: m.id, author: m.author }, reaction);
 
@@ -666,49 +670,91 @@ const Message = memo(function Message({
           </div>
         )}
       </div>
-      {canWrite && (
-        <div className="msg-actions">
-          {quickReactions.map((e) => (
-            <button
-              key={typeof e === "string" ? e : e.shortcode}
-              title={typeof e === "string" ? e : `:${e.shortcode}:`}
-              onClick={() => react(e)}
-            >
-              {reactionLabel(e)}
-            </button>
-          ))}
-          <span className="picker-anchor">
-            <button title="React…" onClick={() => setPickerOpen((v) => !v)}>
-              <SmilePlus size={16} />
-            </button>
-            {pickerOpen && (
-              <EmojiPicker favorites={favorites} onPick={react} onClose={() => setPickerOpen(false)} />
-            )}
-          </span>
-          <button title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
-            <Reply size={16} />
-          </button>
-          {m.author === myPubkey && !m.deleted && (
-            <>
+      <div className="msg-actions">
+        {canWrite && (
+          <>
+            {quickReactions.map((e) => (
               <button
-                title="Edit"
-                onClick={() => {
-                  setEditText(m.edited ?? m.content);
-                  setEditing(true);
-                }}
+                key={typeof e === "string" ? e : e.shortcode}
+                title={typeof e === "string" ? e : `:${e.shortcode}:`}
+                onClick={() => react(e)}
               >
-                <Pencil size={16} />
+                {reactionLabel(e)}
               </button>
-              <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
-                <Trash2 size={16} />
+            ))}
+            <span className="picker-anchor">
+              <button title="React…" onClick={() => setPickerOpen((v) => !v)}>
+                <SmilePlus size={16} />
               </button>
-            </>
+              {pickerOpen && (
+                <EmojiPicker favorites={favorites} onPick={react} onClose={() => setPickerOpen(false)} />
+              )}
+            </span>
+            <button title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
+              <Reply size={16} />
+            </button>
+            {m.author === myPubkey && !m.deleted && (
+              <>
+                <button
+                  title="Edit"
+                  onClick={() => {
+                    setEditText(m.edited ?? m.content);
+                    setEditing(true);
+                  }}
+                >
+                  <Pencil size={16} />
+                </button>
+                <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
+                  <Trash2 size={16} />
+                </button>
+              </>
+            )}
+          </>
+        )}
+        <span className="picker-anchor">
+          <button title="More" onClick={() => setMenuOpen((v) => !v)}>
+            <MoreVertical size={16} />
+          </button>
+          {menuOpen && (
+            <MessageMenu
+              onClose={() => setMenuOpen(false)}
+              onViewRaw={() => {
+                setMenuOpen(false);
+                setRawOpen(true);
+              }}
+            />
           )}
-        </div>
-      )}
+        </span>
+      </div>
+      {rawOpen && <RawEventModal message={m} onClose={() => setRawOpen(false)} />}
     </div>
   );
 });
+
+// The per-message "more options" dropdown. Closes on outside-click or Escape.
+function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="msg-menu right" ref={ref}>
+      <button onClick={onViewRaw}>View raw</button>
+    </div>
+  );
+}
 
 // The message composer. Owns its draft state locally so keystrokes re-render only
 // this component, not the message list above it.
