@@ -120,8 +120,25 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
       adaptiveStream: true,
       dynacast: true,
       e2ee: { keyProvider, worker },
+      // Browser mic defaults tuned for voice: cancel echo/noise so two people on
+      // one network don't feed back, and normalize levels.
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
       videoCaptureDefaults: { resolution: VideoPresets.h720.resolution },
       publishDefaults: {
+        // CRITICAL for E2EE audio: LiveKit leaves Opus RED (redundant encoding)
+        // on for mono tracks even with E2EE, but RED's redundant-frame recovery
+        // layered over the insertable-streams frame crypto delivers duplicated /
+        // reordered frames to the decoder — heard as screeching/garble. DTX
+        // (silence suppression) similarly glitches on resume under E2EE. Disable
+        // both; they only trade a little packet-loss resilience, and this is a
+        // per-publisher transport choice, so it stays interoperable with peers
+        // that keep them on.
+        red: false,
+        dtx: false,
         videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360, VideoPresets.h720],
         screenShareEncoding: VideoPresets.h1080.encoding,
       },
