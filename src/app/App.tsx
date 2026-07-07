@@ -39,6 +39,7 @@ import { SettingsView } from "./settings";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { MessageContent } from "./MessageContent";
+import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "./mentions";
 import { EmojiPicker } from "./EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
 import type { ChatMessage, ConcordClient } from "../concord/client";
@@ -445,6 +446,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
 
   const canWrite = !state.dissolved;
 
+  // Roster of pubkeys the composer's @-mention menu searches. Memoized on the
+  // Set reference so the composer's memo isn't defeated by unrelated re-renders.
+  const members = useMemo(() => [...state.members], [state.members]);
+
   const handleSend = useCallback(
     async (value: string, files: File[], reply: ReplyTarget | null) => {
       setReplyTo(null);
@@ -483,6 +488,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
           channelName={channel?.name}
           channelPrivate={Boolean(channel?.private)}
           favorites={favorites}
+          members={members}
           replyTo={replyTo}
           onClearReply={() => setReplyTo(null)}
           onSend={handleSend}
@@ -762,6 +768,7 @@ const Composer = memo(function Composer({
   channelName,
   channelPrivate,
   favorites,
+  members,
   replyTo,
   onClearReply,
   onSend,
@@ -769,6 +776,7 @@ const Composer = memo(function Composer({
   channelName: string | undefined;
   channelPrivate: boolean;
   favorites: Emoji[];
+  members: string[];
   replyTo: ReplyTarget | null;
   onClearReply: () => void;
   onSend: (text: string, files: File[], reply: ReplyTarget | null) => Promise<void>;
@@ -778,6 +786,41 @@ const Composer = memo(function Composer({
   const [sending, setSending] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // @-mention menu: `mention` holds the active `@token` (query + `@` index);
+  // `mentionIndex` is the keyboard-highlighted candidate.
+  const candidates = useMentionCandidates(members);
+  const searchMentions = useMentionSearch(candidates);
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionResults = mention ? searchMentions(mention.query) : [];
+  const mentionOpen = mention !== null && mentionResults.length > 0;
+  const activeIndex = Math.min(mentionIndex, mentionResults.length - 1);
+
+  // Re-detect the active `@token` from a value + caret and reset the highlight.
+  function syncMention(value: string, caret: number) {
+    setMention(detectMention(value, caret));
+    setMentionIndex(0);
+  }
+
+  // Replace the `@token` with a `nostr:npub…` link; `messageRumor` adds the p tag.
+  function insertMention(c: MentionCandidate) {
+    if (!mention) return;
+    const end = mention.start + 1 + mention.query.length;
+    const insert = `nostr:${c.npub} `;
+    const next = text.slice(0, mention.start) + insert + text.slice(end);
+    setText(next);
+    setMention(null);
+    const caret = mention.start + insert.length;
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      }
+    });
+  }
 
   async function send() {
     const value = text.trim();
@@ -785,6 +828,7 @@ const Composer = memo(function Composer({
     const attach = files;
     const reply = replyTo;
     setText("");
+    setMention(null);
     setFiles([]);
     setSending(true);
     try {
@@ -848,12 +892,70 @@ const Composer = memo(function Composer({
             />
           )}
         </span>
+        {mentionOpen && (
+          <ul className="mention-menu" role="listbox">
+            {mentionResults.map((c, i) => (
+              <li key={c.pubkey} role="option" aria-selected={i === activeIndex}>
+                <button
+                  type="button"
+                  className={`mention-item${i === activeIndex ? " active" : ""}`}
+                  // Keep textarea focus so `onBlur`-free selection still works.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setMentionIndex(i)}
+                  onClick={() => insertMention(c)}
+                >
+                  {c.picture ? (
+                    <img className="avatar" src={c.picture} alt="" />
+                  ) : (
+                    <span className="avatar" style={{ background: colorFor(c.pubkey) }}>
+                      {c.name.slice(0, 2).toUpperCase()}
+                    </span>
+                  )}
+                  <span className="m-name">{c.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
+          ref={textareaRef}
           rows={1}
           placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          }}
+          onClick={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
+          onKeyUp={(e) => {
+            // Track caret moves (arrows/home/end) so the menu opens/closes as the
+            // caret enters or leaves an @token — but don't fight menu-nav keys.
+            if (!mentionOpen && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key))
+              syncMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
+          }}
           onKeyDown={(e) => {
+            if (mentionOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setMentionIndex((i) => (i + 1) % mentionResults.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionIndex((i) => (i - 1 + mentionResults.length) % mentionResults.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                insertMention(mentionResults[activeIndex]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setMention(null);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();

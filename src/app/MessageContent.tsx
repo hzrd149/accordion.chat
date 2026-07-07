@@ -1,8 +1,10 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
+import { getPubkeyFromDecodeResult } from "applesauce-core/helpers";
 import { decryptToObjectURL } from "../lib/image";
 import type { MediaAttachment } from "../lib/imeta";
+import { UserName } from "./User";
 
 // Renders a chat message: applesauce-content parses the text into a NAST tree,
 // and any link whose URL matches a NIP-92 attachment is rendered as decrypted
@@ -127,6 +129,19 @@ export const MessageContent = memo(function MessageContent({
           );
         }
       });
+    } else if (node.type === "mention") {
+      // NIP-19 `nostr:` mention — render "@Name" from the resolved profile,
+      // falling back to the raw text if the pointer carries no pubkey.
+      const pubkey = getPubkeyFromDecodeResult(node.decoded);
+      if (pubkey) {
+        nodes.push(
+          <span key={i} className="mention">
+            @<UserName pubkey={pubkey} />
+          </span>,
+        );
+      } else {
+        nodes.push(<span key={i}>{node.encoded}</span>);
+      }
     } else if (node.type === "emoji") {
       // NIP-30 custom emoji — render the tagged image inline.
       const e = node as unknown as { url: string; code: string; raw: string };

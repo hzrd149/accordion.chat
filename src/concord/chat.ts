@@ -2,7 +2,7 @@
 // channel_id and epoch it was written for; a receiver checks both against the
 // key that opened the wrap and drops a mismatch.
 
-import { includeEmojis } from "applesauce-core/operations";
+import { includeEmojis, tagPubkeyMentions } from "applesauce-core/operations";
 import type { Emoji } from "applesauce-core/factories";
 import type { RumorTemplate } from "./stream";
 import { KIND } from "./types";
@@ -19,6 +19,17 @@ function withEmojiTags(content: string, tags: string[][], emojis?: Emoji[]): str
   if (!emojis?.length) return tags;
   // `includeEmojis` is synchronous; the placeholder kind/created_at are discarded.
   const draft = includeEmojis(emojis)({ kind: 0, content, tags, created_at: 0 }) as { tags: string[][] };
+  return draft.tags;
+}
+
+/**
+ * Add a NIP-C7 `["p", pubkey]` tag for every `nostr:npub…`/`nostr:nprofile…`
+ * mention in `content`, using applesauce's operation so notification-worthy
+ * mentions are tagged the same way the wider ecosystem expects. Idempotent —
+ * it won't duplicate a `p` tag already present. Returns the merged tags.
+ */
+function withMentionTags(content: string, tags: string[][]): string[][] {
+  const draft = tagPubkeyMentions()({ kind: 0, content, tags, created_at: 0 }) as { tags: string[][] };
   return draft.tags;
 }
 
@@ -42,8 +53,9 @@ export function messageRumor(
   if (replyTo) tags.push(["q", replyTo.id, "", replyTo.author]);
   // NIP-92: one imeta tag per attachment, carrying the per-file decryption key.
   for (const a of attachments ?? []) tags.push(buildImetaTag(a));
-  // NIP-30: emoji tags for each `:shortcode:` used in the text.
-  return { kind: KIND.MESSAGE, content: text, tags: withEmojiTags(text, tags, emojis) };
+  // NIP-C7: `p` tag each `nostr:` mention, then NIP-30 emoji tags for each
+  // `:shortcode:` used in the text.
+  return { kind: KIND.MESSAGE, content: text, tags: withEmojiTags(text, withMentionTags(text, tags), emojis) };
 }
 
 export function reactionRumor(
