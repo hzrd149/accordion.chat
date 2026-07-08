@@ -1183,6 +1183,19 @@ export class ConcordClient {
     this.adoptRefounding(rt, newRoot, newEpoch, this.pubkey);
   }
 
+  /**
+   * Force a community-wide epoch rotation (a no-exclude Refounding) — useful
+   * for testing the CORD-06 rotation path. Rolls `community_root` forward,
+   * re-keys every channel and voice room, and triggers a brief re-sync for
+   * other members. Same gate as `refound`: ownership or BAN.
+   */
+  async rekey(cid: string): Promise<void> {
+    const rt = this.runtimes.get(cid);
+    if (!rt) throw new Error("unknown community");
+    const members = [...rt.state$.value.members];
+    await this.refound(cid, { keep: members, exclude: [] });
+  }
+
   /** We were excluded from a Refounding: tombstone the membership and tear down. */
   private handleRemoved(rt: Runtime): void {
     const cid = rt.material.community_id;

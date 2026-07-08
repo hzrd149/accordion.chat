@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ImagePlus, Landmark, Shield, Trash2, Users, X } from "lucide-react";
+import { ImagePlus, Landmark, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
 import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./concord-context";
 import { UserAvatar, UserName } from "./User";
@@ -10,12 +10,13 @@ import type { BlobPointer, CommunityState, PermName } from "../concord/types";
 import { hasPerm, parsePermissions, resolveStanding } from "../concord/permissions";
 import { ConfirmModal } from "./modals";
 
-type PageId = "overview" | "roles" | "members";
+type PageId = "overview" | "roles" | "members" | "advanced";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <Landmark size={18} /> },
   { id: "roles", label: "Roles", icon: <Shield size={18} /> },
   { id: "members", label: "Members", icon: <Users size={18} /> },
+  { id: "advanced", label: "Advanced", icon: <RefreshCw size={18} /> },
 ];
 
 const PERM_LABELS: Record<PermName, string> = {
@@ -79,6 +80,7 @@ export function CommunitySettingsView({
           {page === "overview" && <OverviewPage cid={cid} state={state} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} state={state} />}
           {page === "members" && <MembersPage cid={cid} state={state} />}
+          {page === "advanced" && <AdvancedPage cid={cid} state={state} />}
         </div>
       </div>
     </div>
@@ -467,6 +469,82 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               <p className="settings-sub">
                 This rotates every channel key and voice room. Other members will see a brief
                 re-sync. This cannot be quietly undone.
+              </p>
+            </>
+          }
+        />
+      )}
+    </>
+  );
+}
+
+// ---- Advanced (testing/debug actions) ------------------------------------
+
+function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
+  const client = useConcord();
+  const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
+  const caller = resolveStanding(client.pubkey, state.material.owner, rolesMap, state.grants);
+  const canRekey = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function doRekey() {
+    setError(null);
+    setBusy(true);
+    try {
+      await client.rekey(cid);
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Rekey failed");
+    } finally {
+      setBusy(false);
+      setConfirm(false);
+    }
+  }
+
+  return (
+    <>
+      <h2>Advanced</h2>
+      <p className="settings-sub">Testing and maintenance actions. These are safe but disruptive.</p>
+
+      <h3>Danger zone</h3>
+      <div className="field">
+        <label>Rotate epoch (Rekey)</label>
+        <p className="settings-sub">
+          Forces a community-wide epoch rotation (a no-exclude Refounding, CORD-06). Rolls
+          <code> community_root</code> forward, re-keys every channel and voice room, and
+          triggers a brief re-sync for other members. No one is removed — useful for
+          testing the rotation path.
+        </p>
+        {canRekey ? (
+          <button className="btn danger" disabled={busy} onClick={() => setConfirm(true)}>
+            {busy ? "Rotating…" : "Rotate epoch"}
+          </button>
+        ) : (
+          <p className="settings-sub">Requires ownership or the Ban Members permission.</p>
+        )}
+        {done && <span className="settings-saved">Rotated ✓</span>}
+        {error && <span className="error-text">{error}</span>}
+      </div>
+
+      {confirm && (
+        <ConfirmModal
+          title="Rotate epoch"
+          danger
+          confirmLabel="Rotate epoch"
+          onClose={() => setConfirm(false)}
+          onConfirm={doRekey}
+          body={
+            <>
+              <p>
+                This rotates <strong>{state.metadata?.name ?? state.material.name}</strong> to
+                the next epoch. Every channel key and voice room is re-keyed; other members
+                will see a brief re-sync as they follow the rotation forward.
+              </p>
+              <p className="settings-sub">
+                No members are removed. This cannot be quietly undone.
               </p>
             </>
           }
