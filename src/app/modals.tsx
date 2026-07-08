@@ -13,6 +13,65 @@ export function Modal({ children, onClose }: { children: ReactNode; onClose: () 
   );
 }
 
+/** Reusable confirm dialog. `onConfirm` may be async; the button shows a busy
+ *  state and any thrown error is surfaced inline until dismissed. */
+export function ConfirmModal({
+  title,
+  body,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  danger = false,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  body: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  onConfirm: () => Promise<void> | void;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  return (
+    <Modal onClose={busy ? () => {} : onClose}>
+      <h2>{title}</h2>
+      <div className="modal-body">{body}</div>
+      {error && <p className="modal-error">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn ghost" disabled={busy} onClick={onClose}>
+          {cancelLabel}
+        </button>
+        <button
+          className={`btn ${danger ? "danger" : ""}`}
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await onConfirm();
+              onClose();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "…" : confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 /** Debug view: the raw decoded rumor plus its wrapper metadata (wrap id, seal, author). */
 export function RawEventModal({ message, onClose }: { message: ChatMessage; onClose: () => void }) {
   const { raw } = message;

@@ -7,7 +7,8 @@ import { UserAvatar, UserName } from "./User";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { PERM } from "../concord/types";
 import type { BlobPointer, CommunityState, PermName } from "../concord/types";
-import { parsePermissions, resolveStanding } from "../concord/permissions";
+import { hasPerm, parsePermissions, resolveStanding } from "../concord/permissions";
+import { ConfirmModal } from "./modals";
 
 type PageId = "overview" | "roles" | "members";
 
@@ -330,6 +331,22 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
   const client = useConcord();
   const members = [...state.members];
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
+  // The CALLER's standing governs which admin actions are offered, not the
+  // viewed member's. resolveStanding returns isOwner + folded permissions.
+  const caller = resolveStanding(client.pubkey, state.material.owner, rolesMap, state.grants);
+  const canBan = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
+  const canKick = caller.isOwner || hasPerm(caller.permissions, PERM.KICK);
+  const [banTarget, setBanTarget] = useState<string | null>(null);
+
+  const doBan = async (member: string) => {
+    // 1. Soft ban: banlist + strip roles (CORD-04).
+    await client.ban(cid, member);
+    // 2. Hard enforcement: Refound to sever the banned member's keys from
+    //    the control plane and every channel (CORD-06 §3). keep = everyone
+    //    still in the community except the banned member.
+    const keep = members.filter((m) => m !== member);
+    await client.refound(cid, { keep, exclude: [member] });
+  };
 
   return (
     <>
@@ -349,19 +366,28 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               {standing.isOwner && <span className="badge owner">Owner</span>}
             </div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-              {!standing.isOwner && (
+              {!standing.isOwner && (canKick || canBan) && (
                 <>
-                  <button className="btn ghost" onClick={() => client.kick(cid, m)}>
-                    Kick
-                  </button>
+                  {canKick && (
+                    <button className="btn ghost" onClick={() => client.kick(cid, m)}>
+                      Kick
+                    </button>
+                  )}
                   {banned ? (
-                    <button className="btn ghost" onClick={() => client.unban(cid, m)}>
-                      Unban
-                    </button>
+                    canBan && (
+                      <button className="btn ghost" onClick={() => client.unban(cid, m)}>
+                        Unban
+                      </button>
+                    )
                   ) : (
-                    <button className="btn danger" onClick={() => client.ban(cid, m)}>
-                      Ban
-                    </button>
+                    canBan && (
+                      <button
+                        className="btn danger"
+                        onClick={() => setBanTarget(m)}
+                      >
+                        Ban
+                      </button>
+                    )
                   )}
                 </>
               )}
@@ -392,6 +418,60 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
         );
       })}
       {members.length === 0 && <p className="settings-sub">No members yet.</p>}
+      {state.banlist.size > 0 && (
+        <>
+          <h2 style={{ marginTop: 24 }}>Banned members</h2>
+          <p className="settings-sub">
+            Banned members can't rejoin. Unban removes them from the banlist; to let them back in,
+            mint a fresh invite from the sidebar (the link carries current keys, so they rejoin
+            without access to history from before the refounding).
+          </p>
+          {[...state.banlist].sort().map((m) => (
+            <div key={m} className="role-row">
+              <UserAvatar pubkey={m} />
+              <div>
+                <div className="m-name">
+                  <UserName pubkey={m} />
+                </div>
+                <span className="badge" style={{ background: "rgba(248,113,113,0.15)", color: "#f87171" }}>
+                  Banned
+                </span>
+              </div>
+              <div style={{ marginLeft: "auto" }}>
+                {canBan && (
+                  <button className="btn ghost" onClick={() => client.unban(cid, m)}>
+                    Unban
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {banTarget && (
+        <ConfirmModal
+          title="Ban and refound"
+          danger
+          confirmLabel="Ban & sever keys"
+          onClose={() => setBanTarget(null)}
+          onConfirm={async () => {
+            await doBan(banTarget);
+          }}
+          body={
+            <>
+              <p>
+                Banning <UserName pubkey={banTarget} /> adds them to the banlist, strips their
+                roles, and <strong>refounds the community</strong> to sever their keys from the
+                control plane and every channel (CORD-06). All remaining members are re-keyed.
+              </p>
+              <p className="settings-sub">
+                This rotates every channel key and voice room. Other members will see a brief
+                re-sync. This cannot be quietly undone.
+              </p>
+            </>
+          }
+        />
+      )}
     </>
   );
 }
