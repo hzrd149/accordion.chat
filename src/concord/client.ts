@@ -202,16 +202,49 @@ export class ConcordClient {
     this.started = true;
     // Answer NIP-42 challenges from community relays so they serve our events.
     this.authSub = autoAuthenticate(this.signer, this.pubkey);
-    // Restore memberships from the local mirror first (instant, offline-safe),
-    // then reconcile with the relay-published Community List (kind 13302).
+    // Restore the Community List document (with tombstones) from the local
+    // mirror first, so a leave that hasn't propagated to relays yet still
+    // suppresses re-adding the community on reload (CORD-02 §8 liveness).
+    this.communityList = this.loadCommunityListLocal();
+    // Restore memberships from the local mirror (instant, offline-safe),
+    // skipping any whose tombstone is already known locally, then reconcile
+    // with the relay-published Community List (kind 13302).
     for (const m of this.loadMaterialsLocal()) {
-      if (!this.runtimes.has(m.community_id)) this.addRuntime(m);
+      if (this.runtimes.has(m.community_id)) continue;
+      if (!isCommunityLive(this.communityList, m.community_id)) continue;
+      this.addRuntime(m);
     }
     await this.loadCommunityList();
   }
 
   private materialsKey(): string {
     return `concord:communities:${this.pubkey}`;
+  }
+
+  private communityListKey(): string {
+    return `concord:community-list:${this.pubkey}`;
+  }
+
+  private loadCommunityListLocal(): CommunityList {
+    try {
+      const raw = localStorage.getItem(this.communityListKey());
+      if (!raw) return { entries: [], tombstones: [] };
+      const parsed = JSON.parse(raw) as CommunityList;
+      if (!parsed || !Array.isArray(parsed.entries) || !Array.isArray(parsed.tombstones)) {
+        return { entries: [], tombstones: [] };
+      }
+      return parsed;
+    } catch {
+      return { entries: [], tombstones: [] };
+    }
+  }
+
+  private saveCommunityListLocal(): void {
+    try {
+      localStorage.setItem(this.communityListKey(), JSON.stringify(this.communityList));
+    } catch (err) {
+      console.warn("failed to mirror community list locally", err);
+    }
   }
 
   private loadMaterialsLocal(): JoinMaterial[] {
@@ -718,6 +751,9 @@ export class ConcordClient {
     // Tombstone the membership so the leave propagates across devices/clients
     // (a bare omission would merge back as still-joined — CORD-02 §8).
     this.communityList = removeFromList(this.communityList, cid, Date.now());
+    // Persist the tombstone locally before the async relay publish so a reload
+    // before propagation still suppresses the community (CORD-02 §8).
+    this.saveCommunityListLocal();
     this.saveMaterialsLocal();
     this.emitCommunities();
     await this.saveCommunityList();
@@ -1207,6 +1243,7 @@ export class ConcordClient {
     clearCache(cid);
     this.runtimes.delete(cid);
     this.communityList = removeFromList(this.communityList, cid, Date.now());
+    this.saveCommunityListLocal();
     this.saveMaterialsLocal();
     this.emitCommunities();
     void this.saveCommunityList();
@@ -1344,6 +1381,9 @@ export class ConcordClient {
       // Merge into our document rather than replace — preserves tombstones,
       // other-device entries, and lowest-epoch seeds (CORD-02 §8).
       this.communityList = mergeCommunityLists(this.communityList, remote);
+      // Persist the merged document locally so tombstones learned from the
+      // relay survive a later offline reload (CORD-02 §8).
+      this.saveCommunityListLocal();
       // Liveness is DERIVED, not "present in tombstones": a leave-then-rejoin
       // (added_at > removed_at) legitimately resurrects, so a blanket tombstone
       // drop would wrongly hide re-joined communities and diverge from armada.
@@ -1352,12 +1392,32 @@ export class ConcordClient {
         if (!m?.community_id || !isCommunityLive(this.communityList, m.community_id)) continue;
         if (!this.runtimes.has(m.community_id)) this.addRuntime(m);
       }
+      // Safety net: tear down any runtime whose community is no longer live
+      // after the merge (e.g. materials existed locally but the tombstone was
+      // only learned from the relay). A rejoin resurrects via the add loop.
+      for (const cid of [...this.runtimes.keys()]) {
+        if (!isCommunityLive(this.communityList, cid)) {
+          const rt = this.runtimes.get(cid)!;
+          rt.controlSub?.unsubscribe();
+          rt.channelSub?.unsubscribe();
+          if (rt.persistTimer) clearTimeout(rt.persistTimer);
+          if (rt.refoldTimer) clearTimeout(rt.refoldTimer);
+          if (rt.rekeyTimer) clearTimeout(rt.rekeyTimer);
+          clearCache(cid);
+          this.runtimes.delete(cid);
+        }
+      }
+      this.saveMaterialsLocal();
+      this.emitCommunities();
     } catch (err) {
       console.warn("failed to load community list", err);
     }
   }
 
   private async saveCommunityList(): Promise<void> {
+    // Always persist locally first — even without nip44 (extension signing)
+    // the tombstone must survive a reload so a left community stays gone.
+    this.saveCommunityListLocal();
     if (!this.signer.nip44) return;
     try {
       // Reconcile the merged document with the live runtimes: add new joins,
