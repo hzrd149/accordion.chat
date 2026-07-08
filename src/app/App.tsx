@@ -209,7 +209,7 @@ function Shell() {
         <div className="main">
           <div className="empty">
             <div className="big app-emoji-icon" aria-hidden="true">🪗</div>
-            <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Appcordion</h2>
+            <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Accordion</h2>
             <div>Create your own community or join one with an invite link.</div>
             <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
               <button className="btn" onClick={() => setModal("create")}>

@@ -7,7 +7,7 @@ import { NostrConnectSigner } from "applesauce-signers";
 import { accounts, CONCORD_SIGNER_PERMISSIONS, NOSTR_CONNECT_RELAYS } from "../nostr";
 import { QRCode } from "./QRCode";
 
-const APP_METADATA = { name: "Appcordion", url: window.location.origin };
+const APP_METADATA = { name: "Accordion", url: window.location.origin };
 
 export function Login() {
   const [nsec, setNsec] = useState("");
@@ -64,7 +64,7 @@ export function Login() {
     <div className="login-screen">
       <div className="login-card">
         <div className="logo app-emoji-icon" aria-hidden="true">🪗</div>
-        <h1>Appcordion</h1>
+        <h1>Accordion</h1>
         <p>Discord-style communities on Nostr, end-to-end encrypted.</p>
 
         {error && <div className="error">{error}</div>}

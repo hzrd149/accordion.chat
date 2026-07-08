@@ -9,8 +9,8 @@ export default defineConfig({
 		VitePWA({
 			registerType: "autoUpdate",
 			manifest: {
-				name: "Appcordion",
-				short_name: "Appcordion",
+				name: "Accordion",
+				short_name: "Accordion",
 				icons: [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
 			},
 		}),

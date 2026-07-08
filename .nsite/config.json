@@ -12,8 +12,8 @@
 		"https://nostr.download",
 		"https://blssm.us"
 	],
-	"id": "appcordion",
-	"title": "Appcordion",
+	"id": "accordion",
+	"title": "Accordion",
 	"description": "A Concord community app built using applesauce",
 	"fallback": "index.html"
 }
