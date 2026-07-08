@@ -1174,6 +1174,22 @@ function MemberList({ state }: { state: CommunityState }) {
       <h4>Members — {roleless.length}</h4>
       {roleless.map((m) => row(m))}
       {members.length === 0 && <p className="sub" style={{ padding: 8 }}>No members yet.</p>}
+      {state.banlist.size > 0 && (
+        <>
+          <h4 style={{ marginTop: 12, color: "#f87171" }}>Banned — {state.banlist.size}</h4>
+          {[...state.banlist].sort().map((m) => (
+            <div className="member" key={m} title={m} style={{ opacity: 0.6 }}>
+              <UserAvatar pubkey={m} />
+              <span className="m-name">
+                <UserName pubkey={m} />
+              </span>
+              <span className="badge" style={{ background: "rgba(248,113,113,0.15)", color: "#f87171" }}>
+                Banned
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
