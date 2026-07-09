@@ -177,11 +177,6 @@ function Shell() {
       <button className="drawer-toggle nav" title="Menu" onClick={() => setNavOpen((v) => !v)}>
         <Menu size={22} />
       </button>
-      {activeState && (
-        <button className="drawer-toggle members" title="Members" onClick={toggleMembers}>
-          <Users size={22} />
-        </button>
-      )}
       <div className="drawer-backdrop" onClick={closeDrawers} />
 
       {/* Community rail */}
@@ -224,7 +219,6 @@ function Shell() {
             onInvite={() => setModal("invite")}
             onSettings={() => setParam("admin", "overview")}
             onLeave={() => setModal("leave")}
-            onMembers={toggleMembers}
           />
           {selectedChannel ? (
             <ChatView
@@ -232,7 +226,9 @@ function Shell() {
               channelId={selectedChannel}
               state={activeState}
               threadsOpen={panelMode === "threads"}
+              membersOpen={panelMode === "members"}
               onToggleThreads={toggleThreads}
+              onToggleMembers={toggleMembers}
               onOpenThread={openThread}
             />
           ) : (
@@ -378,7 +374,6 @@ function Sidebar({
   onInvite,
   onSettings,
   onLeave,
-  onMembers,
 }: {
   state: CommunityState;
   selectedChannel: string | null;
@@ -387,7 +382,6 @@ function Sidebar({
   onInvite: () => void;
   onSettings: () => void;
   onLeave: () => void;
-  onMembers: () => void;
 }) {
   const client = useConcord();
   const account = useActiveAccount();
@@ -401,9 +395,6 @@ function Sidebar({
       <div className={`sidebar-header${bannerUrl ? " has-banner" : ""}`}>
         <span title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
         <div className="sidebar-header-actions">
-          <button title="Members" onClick={onMembers}>
-            <Users size={18} />
-          </button>
           <button title="Community settings" onClick={onSettings}>
             <Settings size={18} />
           </button>
@@ -609,14 +600,18 @@ function ChatView({
   channelId,
   state,
   threadsOpen,
+  membersOpen,
   onToggleThreads,
+  onToggleMembers,
   onOpenThread,
 }: {
   cid: string;
   channelId: string;
   state: CommunityState;
   threadsOpen: boolean;
+  membersOpen: boolean;
   onToggleThreads: () => void;
+  onToggleMembers: () => void;
   onOpenThread: (id: string) => void;
 }) {
   const client = useConcord();
@@ -673,6 +668,9 @@ function ChatView({
         <div className="spacer" />
         <button title="Threads" className={threadsOpen ? "active" : ""} onClick={onToggleThreads}>
           <MessageSquare size={18} />
+        </button>
+        <button title="Members" className={membersOpen ? "active" : ""} onClick={onToggleMembers}>
+          <Users size={18} />
         </button>
       </div>
       {channel?.voice && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}

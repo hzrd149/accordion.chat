@@ -1340,14 +1340,10 @@ textarea {
   .drawer-toggle.nav {
     left: 8px;
   }
-  .drawer-toggle.members {
-    right: 8px;
-  }
 
-  /* Keep the chat header clear of the floating toggles. */
+  /* Keep the chat header clear of the floating nav toggle. */
   .main-header {
     padding-left: 56px;
-    padding-right: 56px;
   }
   .main-header .topic {
     display: none;
