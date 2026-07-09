@@ -49,9 +49,9 @@ import { MessageContent } from "./MessageContent";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "./mentions";
 import { EmojiPicker } from "./EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
-import type { ChatMessage, ConcordClient } from "../concord/client";
+import type { ChatMessage, ConcordClient, ThreadComment } from "../concord/client";
 import type { CommunityState, Role } from "../concord/types";
-import { PERM } from "../concord/types";
+import { KIND, PERM } from "../concord/types";
 
 export function App() {
   const account = useActiveAccount();
@@ -79,6 +79,8 @@ type ModalName = "create" | "join" | "channel" | "invite" | "addMenu" | "leave";
 // stream is still empty — otherwise a fresh `[]` each render would retrigger the
 // auto-select effect below on every render.
 const NO_COMMUNITIES: CommunityState[] = [];
+const NO_MESSAGES: ChatMessage[] = [];
+const NO_THREAD_COMMENTS: ThreadComment[] = [];
 
 function Shell() {
   const client = useConcord();
@@ -548,9 +550,11 @@ function reactionLabel(r: string | Emoji) {
 //   • Composer    — owns the draft text/files/sending/picker state locally.
 function ChatView({ cid, channelId, state }: { cid: string; channelId: string; state: CommunityState }) {
   const client = useConcord();
-  const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? []) as ChatMessage[];
+  const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? NO_MESSAGES) as ChatMessage[];
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
+  const [threadRootId, setThreadRootId] = useState<string | null>(null);
+  const [threadsOpen, setThreadsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
@@ -574,6 +578,8 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   if (channelId !== prevChannel) {
     setPrevChannel(channelId);
     setReplyTo(null);
+    setThreadRootId(null);
+    setThreadsOpen(false);
   }
 
   const canWrite = !state.dissolved;
@@ -590,6 +596,10 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
     [client, cid, channelId, favorites],
   );
 
+  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  const threadRoot = threadRootId ? messagesById.get(threadRootId) ?? null : null;
+  const threadRoots = useMemo(() => messages.filter((m) => m.threadReplyCount > 0), [messages]);
+
   return (
     <div className="main">
       <div className="main-header">
@@ -599,6 +609,9 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         <span className="title">{channel?.name}</span>
         <span className="topic">{state.metadata?.description}</span>
         <div className="spacer" />
+        <button title="Threads" onClick={() => setThreadsOpen((v) => !v)}>
+          <MessageSquare size={18} />
+        </button>
       </div>
       {channel?.voice && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
       <MessageList
@@ -614,7 +627,30 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         favorites={favorites}
         quickReactions={quickReactions}
         onReply={setReplyTo}
+        onThread={(m) => setThreadRootId(m.id)}
       />
+      {threadRoot && (
+        <ThreadDrawer
+          cid={cid}
+          channelId={channelId}
+          root={threadRoot}
+          canWrite={canWrite}
+          client={client}
+          favorites={favorites}
+          onClose={() => setThreadRootId(null)}
+        />
+      )}
+      {threadsOpen && !threadRoot && (
+        <ThreadRootsDrawer
+          roots={threadRoots}
+          channelName={channel?.name}
+          onOpen={(m) => {
+            setThreadRootId(m.id);
+            setThreadsOpen(false);
+          }}
+          onClose={() => setThreadsOpen(false)}
+        />
+      )}
       {canWrite && (
         <Composer
           key={channelId}
@@ -644,6 +680,7 @@ const MessageList = memo(function MessageList({
   favorites,
   quickReactions,
   onReply,
+  onThread,
 }: {
   ref: React.Ref<HTMLDivElement>;
   messages: ChatMessage[];
@@ -657,6 +694,7 @@ const MessageList = memo(function MessageList({
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
   onReply: (r: ReplyTarget) => void;
+  onThread: (m: ChatMessage) => void;
 }) {
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   // Collapse consecutive messages from the same author (within 2 min) into one
@@ -690,6 +728,7 @@ const MessageList = memo(function MessageList({
                 favorites={favorites}
                 quickReactions={quickReactions}
                 onReply={onReply}
+                onThread={onThread}
               />
             ))}
           </div>
@@ -717,6 +756,7 @@ const Message = memo(function Message({
   favorites,
   quickReactions,
   onReply,
+  onThread,
 }: {
   m: ChatMessage;
   showHeader: boolean;
@@ -730,6 +770,7 @@ const Message = memo(function Message({
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
   onReply: (r: ReplyTarget) => void;
+  onThread: (m: ChatMessage) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -808,6 +849,11 @@ const Message = memo(function Message({
             ))}
           </div>
         )}
+        {m.threadReplyCount > 0 && (
+          <button className="thread-count" onClick={() => onThread(m)}>
+            <MessageSquare size={14} /> {m.threadReplyCount} {m.threadReplyCount === 1 ? "reply" : "replies"}
+          </button>
+        )}
       </div>
       <div className="msg-actions">
         {canWrite && (
@@ -831,6 +877,9 @@ const Message = memo(function Message({
             </span>
             <button title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
               <Reply size={16} />
+            </button>
+            <button title="Reply in thread" onClick={() => onThread(m)}>
+              <MessageSquare size={16} />
             </button>
             {m.author === myPubkey && !m.deleted && (
               <>
@@ -891,6 +940,228 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
   return (
     <div className="msg-menu right" ref={ref}>
       <button onClick={onViewRaw}>View raw</button>
+    </div>
+  );
+}
+
+function ThreadRootsDrawer({
+  roots,
+  channelName,
+  onOpen,
+  onClose,
+}: {
+  roots: ChatMessage[];
+  channelName: string | undefined;
+  onOpen: (message: ChatMessage) => void;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="thread-drawer thread-index">
+      <div className="thread-header">
+        <div>
+          <div className="thread-title">Threads</div>
+          <div className="thread-sub">#{channelName ?? "channel"}</div>
+        </div>
+        <button title="Close threads" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </div>
+      <div className="thread-scroll">
+        {roots.length === 0 ? (
+          <div className="thread-empty">
+            <MessageSquare size={36} />
+            <div>No threads yet.</div>
+            <p>Use “Reply in thread” on a message to start one.</p>
+          </div>
+        ) : (
+          roots.map((root) => (
+            <button className="thread-root-card" key={root.id} onClick={() => onOpen(root)}>
+              <div className="msg-head">
+                <span className="name" style={{ color: colorFor(root.author) }}>
+                  <UserName pubkey={root.author} />
+                </span>
+                <span className="time">{formatTime(root.ms)}</span>
+              </div>
+              <div className="thread-root-preview">
+                {root.deleted ? "(message deleted)" : (root.edited ?? root.content).slice(0, 180) || "message"}
+              </div>
+              <div className="thread-root-meta">
+                {root.threadReplyCount} {root.threadReplyCount === 1 ? "reply" : "replies"}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function ThreadDrawer({
+  cid,
+  channelId,
+  root,
+  canWrite,
+  client,
+  favorites,
+  onClose,
+}: {
+  cid: string;
+  channelId: string;
+  root: ChatMessage;
+  canWrite: boolean;
+  client: ConcordClient;
+  favorites: Emoji[];
+  onClose: () => void;
+}) {
+  const comments = (use$(() => client.getThread$(cid, channelId, root.id), [client, cid, channelId, root.id]) ??
+    NO_THREAD_COMMENTS) as ThreadComment[];
+  const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
+  const byId = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
+  const parent = replyParent ?? { id: root.id, author: root.author, kind: KIND.MESSAGE };
+
+  const depthOf = useCallback(
+    (comment: ThreadComment): number => {
+      let depth = 0;
+      let p = comment.parent.kind === KIND.COMMENT ? byId.get(comment.parent.id) : undefined;
+      const seen = new Set<string>();
+      while (p && !seen.has(p.id)) {
+        seen.add(p.id);
+        depth += 1;
+        p = p.parent.kind === KIND.COMMENT ? byId.get(p.parent.id) : undefined;
+      }
+      return Math.min(depth, 6);
+    },
+    [byId],
+  );
+
+  async function sendThreadReply(text: string) {
+    await client.sendThreadReply(cid, channelId, text, { id: parent.id, kind: parent.kind }, favorites);
+    setReplyParent(null);
+  }
+
+  return (
+    <aside className="thread-drawer">
+      <div className="thread-header">
+        <div>
+          <div className="thread-title">Thread</div>
+          <div className="thread-sub">#{channelId.slice(0, 8)}</div>
+        </div>
+        <button title="Close thread" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </div>
+      <div className="thread-scroll">
+        <div className="thread-root">
+          <div className="msg-head">
+            <span className="name" style={{ color: colorFor(root.author) }}>
+              <UserName pubkey={root.author} />
+            </span>
+            <span className="time">{formatTime(root.ms)}</span>
+          </div>
+          {root.deleted ? (
+            <div className="msg-text deleted">(message deleted)</div>
+          ) : (
+            <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
+          )}
+        </div>
+        <div className="thread-divider">
+          {comments.length} {comments.length === 1 ? "reply" : "replies"}
+        </div>
+        {comments.map((comment) => {
+          const parentComment = comment.parent.kind === KIND.COMMENT ? byId.get(comment.parent.id) : undefined;
+          return (
+            <div className="thread-comment" key={comment.id} style={{ marginLeft: depthOf(comment) * 18 }}>
+              {parentComment && (
+                <div className="thread-parent">
+                  Replying to <UserName pubkey={parentComment.author} />: {parentComment.content.slice(0, 80)}
+                </div>
+              )}
+              <div className="msg-head">
+                <span className="name" style={{ color: colorFor(comment.author) }}>
+                  <UserName pubkey={comment.author} />
+                </span>
+                <span className="time">{formatTime(comment.ms)}</span>
+              </div>
+              {comment.deleted ? (
+                <div className="msg-text deleted">(message deleted)</div>
+              ) : (
+                <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
+              )}
+              {canWrite && (
+                <button
+                  className="thread-reply-btn"
+                  onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: KIND.COMMENT })}
+                >
+                  Reply
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {canWrite && (
+        <ThreadComposer
+          replyingTo={parent.author}
+          onClear={replyParent ? () => setReplyParent(null) : undefined}
+          onSend={sendThreadReply}
+        />
+      )}
+    </aside>
+  );
+}
+
+function ThreadComposer({
+  replyingTo,
+  onClear,
+  onSend,
+}: {
+  replyingTo: string;
+  onClear?: () => void;
+  onSend: (text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    const value = text.trim();
+    if (!value || sending) return;
+    setText("");
+    setSending(true);
+    try {
+      await onSend(value);
+    } catch (err) {
+      console.error("thread reply failed", err);
+      setText(value);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="thread-composer">
+      <div className="reply-bar">
+        <span>
+          Replying to <UserName pubkey={replyingTo} />
+        </span>
+        {onClear && <button onClick={onClear}><X size={16} /></button>}
+      </div>
+      <div className="box">
+        <textarea
+          rows={2}
+          placeholder="Reply in thread"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+        />
+        <button className="send" onClick={send} disabled={sending || !text.trim()}>
+          {sending ? "Sending…" : "Send"}
+        </button>
+      </div>
     </div>
   );
 }

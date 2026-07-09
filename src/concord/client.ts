@@ -16,6 +16,7 @@ import {
   unlockEncryptedContent,
 } from "applesauce-core/helpers";
 import { getReactionEmoji } from "applesauce-common/helpers";
+import { getCommentReplyPointer, getCommentRootPointer, type CommentPointer } from "applesauce-common/helpers";
 import { fromHex, toHex, ZERO_32 } from "../lib/bytes";
 import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "../lib/image";
@@ -77,6 +78,7 @@ import type { VoicePresenceEntry, VoicePresenceFold } from "./voice";
 import { buildEdition, computeEditionHash } from "./editions";
 import {
   messageRumor,
+  commentRumor,
   reactionRumor,
   deleteRumor,
   editRumor,
@@ -115,6 +117,7 @@ export interface ChatMessage {
   edited?: string;
   deleted: boolean;
   replyTo?: { id: string; author: string };
+  threadReplyCount: number;
   /** `emoji` is the reaction content (a unicode char or `:shortcode:`); `url` is set for NIP-30 custom emoji. */
   reactions: { emoji: string; url?: string; count: number; authors: string[] }[];
   /** Encrypted media/files parsed from the message's NIP-92 imeta tags. */
@@ -122,6 +125,18 @@ export interface ChatMessage {
   /** The message's NIP-30 `["emoji", …]` tags, for rendering `:shortcode:` inline. */
   emojiTags: string[][];
   /** The decoded plane event (rumor + wrapper metadata), retained for debugging ("view raw"). */
+  raw: DecodedEvent;
+}
+
+export interface ThreadComment {
+  id: string;
+  author: string;
+  content: string;
+  ms: number;
+  deleted: boolean;
+  root: { id: string; author: string; kind: number };
+  parent: { id: string; author: string; kind: number };
+  emojiTags: string[][];
   raw: DecodedEvent;
 }
 
@@ -154,6 +169,7 @@ interface Runtime {
   channelAuthors: string;
   state$: BehaviorSubject<CommunityState>;
   messages$: Map<string, BehaviorSubject<ChatMessage[]>>;
+  threads$: Map<string, BehaviorSubject<ThreadComment[]>>;
   /** CORD-07 §4: per voice-channel, the latest presence per author. */
   voicePresence: Map<string, Map<string, VoicePresenceEntry>>;
   /** channelId -> folded, staleness-decayed presence view. */
@@ -293,6 +309,18 @@ export class ConcordClient {
       subj = new BehaviorSubject<ChatMessage[]>([]);
       rt.messages$.set(channelId, subj);
       this.recomputeMessages(rt, channelId);
+    }
+    return subj;
+  }
+
+  getThread$(cid: string, channelId: string, rootId: string): BehaviorSubject<ThreadComment[]> {
+    const rt = this.runtimes.get(cid)!;
+    const key = this.threadKey(channelId, rootId);
+    let subj = rt.threads$.get(key);
+    if (!subj) {
+      subj = new BehaviorSubject<ThreadComment[]>([]);
+      rt.threads$.set(key, subj);
+      this.recomputeThread(rt, channelId, rootId);
     }
     return subj;
   }
@@ -539,6 +567,25 @@ export class ConcordClient {
       rt,
       this.channelKey(rt, channelId),
       messageRumor(channelId, epoch, content, replyTo, attachments, emojis),
+      {},
+    );
+  }
+
+  async sendThreadReply(
+    cid: string,
+    channelId: string,
+    text: string,
+    parent: { id: string; kind: number },
+    emojis?: Emoji[],
+  ): Promise<void> {
+    const rt = this.runtimes.get(cid)!;
+    const epoch = this.channelEpoch(rt, channelId);
+    const parentEvent = this.eventForCommentParent(rt, channelId, parent.id, parent.kind);
+    if (!parentEvent) throw new Error("thread parent not found");
+    await this.publishToPlane(
+      rt,
+      this.channelKey(rt, channelId),
+      await commentRumor(channelId, epoch, text, parentEvent, emojis),
       {},
     );
   }
@@ -820,6 +867,7 @@ export class ConcordClient {
       channelAuthors: "",
       state$: new BehaviorSubject<CommunityState>(emptyState(material)),
       messages$: new Map(),
+      threads$: new Map(),
       voicePresence: new Map(),
       presence$: new Map(),
       voiceHeartbeats: new Map(),
@@ -985,6 +1033,10 @@ export class ConcordClient {
         }
         ch.set(event.id, decoded);
         this.recomputeMessages(rt, channelId);
+        for (const key of rt.threads$.keys()) {
+          const parsed = this.parseThreadKey(key);
+          if (parsed?.channelId === channelId) this.recomputeThread(rt, channelId, parsed.rootId);
+        }
         this.schedulePersist(rt);
         break;
       }
@@ -1051,6 +1103,10 @@ export class ConcordClient {
     this.reconcileChannelSub(rt); // pick up any newly-revealed channels
     // Recompute any open channel views (channel keys may have changed epoch).
     for (const channelId of rt.messages$.keys()) this.recomputeMessages(rt, channelId);
+    for (const key of rt.threads$.keys()) {
+      const parsed = this.parseThreadKey(key);
+      if (parsed) this.recomputeThread(rt, parsed.channelId, parsed.rootId);
+    }
     this.emitCommunities();
   }
 
@@ -1251,6 +1307,42 @@ export class ConcordClient {
 
   // ---- message assembly ---------------------------------------------------
 
+  private threadKey(channelId: string, rootId: string): string {
+    return `${channelId}:${rootId}`;
+  }
+
+  private parseThreadKey(key: string): { channelId: string; rootId: string } | null {
+    const i = key.indexOf(":");
+    if (i < 0) return null;
+    return { channelId: key.slice(0, i), rootId: key.slice(i + 1) };
+  }
+
+  private asNostrEvent(d: DecodedEvent): NostrEvent {
+    return {
+      id: d.rumor.id,
+      pubkey: d.author,
+      created_at: d.rumor.created_at,
+      kind: d.rumor.kind,
+      tags: d.rumor.tags,
+      content: d.rumor.content,
+      sig: "",
+    };
+  }
+
+  private eventForCommentParent(rt: Runtime, channelId: string, id: string, kind: number): NostrEvent | null {
+    const events = rt.channelEvents.get(channelId);
+    if (!events) return null;
+    for (const d of events.values()) {
+      if (d.rumor.id === id && d.rumor.kind === kind) return this.asNostrEvent(d);
+    }
+    return null;
+  }
+
+  private eventPointer(pointer: CommentPointer | null): { id: string; author: string; kind: number } | null {
+    if (!pointer || pointer.type !== "event") return null;
+    return { id: pointer.id, author: pointer.pubkey ?? "", kind: pointer.kind };
+  }
+
   private recomputeMessages(rt: Runtime, channelId: string): void {
     const subj = rt.messages$.get(channelId);
     if (!subj) return;
@@ -1259,6 +1351,7 @@ export class ConcordClient {
     // target -> reaction content -> { url?, authors }. A custom emoji reaction's
     // content is `:shortcode:` and carries the image URL from its own emoji tag.
     const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
+    const threadCounts = new Map<string, number>();
     const edits: DecodedEvent[] = [];
     const deletes: DecodedEvent[] = [];
 
@@ -1275,11 +1368,15 @@ export class ConcordClient {
             ms: d.ms,
             deleted: false,
             replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
+            threadReplyCount: 0,
             reactions: [],
             attachments: [...parseImeta(r.tags).values()],
             emojiTags: r.tags.filter((t) => t[0] === "emoji"),
             raw: d,
           });
+        } else if (r.kind === KIND.COMMENT) {
+          const root = this.eventPointer(getCommentRootPointer(this.asNostrEvent(d)));
+          if (root?.kind === KIND.MESSAGE) threadCounts.set(root.id, (threadCounts.get(root.id) ?? 0) + 1);
         } else if (r.kind === KIND.EDIT) {
           edits.push(d);
         } else if (r.kind === KIND.DELETE) {
@@ -1328,8 +1425,43 @@ export class ConcordClient {
         authors: [...authors],
       }));
     }
+    for (const [target, count] of threadCounts) {
+      const msg = byId.get(target);
+      if (msg) msg.threadReplyCount = count;
+    }
 
     subj.next([...byId.values()].sort((a, b) => a.ms - b.ms));
+  }
+
+  private recomputeThread(rt: Runtime, channelId: string, rootId: string): void {
+    const subj = rt.threads$.get(this.threadKey(channelId, rootId));
+    if (!subj) return;
+    const events = rt.channelEvents.get(channelId);
+    const comments: ThreadComment[] = [];
+
+    if (events) {
+      const sorted = [...events.values()].sort((a, b) => a.ms - b.ms);
+      for (const d of sorted) {
+        if (d.rumor.kind !== KIND.COMMENT) continue;
+        const event = this.asNostrEvent(d);
+        const root = this.eventPointer(getCommentRootPointer(event));
+        const parent = this.eventPointer(getCommentReplyPointer(event));
+        if (!root || !parent || root.id !== rootId || root.kind !== KIND.MESSAGE) continue;
+        comments.push({
+          id: d.rumor.id,
+          author: d.author,
+          content: d.rumor.content,
+          ms: d.ms,
+          deleted: false,
+          root,
+          parent,
+          emojiTags: d.rumor.tags.filter((t) => t[0] === "emoji"),
+          raw: d,
+        });
+      }
+    }
+
+    subj.next(comments);
   }
 
   // ---- publishing ---------------------------------------------------------

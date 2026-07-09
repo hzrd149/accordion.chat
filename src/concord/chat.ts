@@ -4,6 +4,9 @@
 
 import { includeEmojis, tagPubkeyMentions } from "applesauce-core/operations";
 import type { Emoji } from "applesauce-core/factories";
+import { CommentFactory } from "applesauce-common/factories";
+import type { CommentPointer } from "applesauce-common/helpers";
+import type { NostrEvent } from "nostr-tools";
 import type { RumorTemplate } from "./stream";
 import { KIND } from "./types";
 import { buildImetaTag, type MediaAttachment } from "../lib/imeta";
@@ -56,6 +59,17 @@ export function messageRumor(
   // NIP-C7: `p` tag each `nostr:` mention, then NIP-30 emoji tags for each
   // `:shortcode:` used in the text.
   return { kind: KIND.MESSAGE, content: text, tags: withEmojiTags(text, withMentionTags(text, tags), emojis) };
+}
+
+export async function commentRumor(
+  channelId: string,
+  epoch: number,
+  text: string,
+  parent: NostrEvent | CommentPointer,
+  emojis?: Emoji[],
+): Promise<RumorTemplate> {
+  const draft = await CommentFactory.reply(parent, text).modifyPublicTags((tags) => [...tags, ...base(channelId, epoch)]);
+  return { ...draft, tags: withEmojiTags(text, withMentionTags(text, draft.tags), emojis) };
 }
 
 export function reactionRumor(
