@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:concord": "pnpm --dir ../applesauce/packages/concord test"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.21",
@@ -17,6 +18,7 @@
     "applesauce-accounts": "^6.2.0",
     "applesauce-actions": "^6.2.0",
     "applesauce-common": "^6.2.0",
+    "applesauce-concord": "link:../applesauce/packages/concord",
     "applesauce-content": "^6.2.0",
     "applesauce-core": "^6.2.0",
     "applesauce-loaders": "^6.2.0",

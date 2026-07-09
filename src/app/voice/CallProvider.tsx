@@ -13,6 +13,7 @@ import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useConcord } from "../concord-context";
+import { voiceEngineFor } from "../../voice/registry";
 import { resolveVoiceBroker } from "./brokers";
 import { CallContext, type ActiveCall, type CallRequest } from "./call-context";
 
@@ -38,14 +39,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const join = useCallback(
     (req: CallRequest) => {
-      const voice = client.voiceKeys(req.cid, req.channelId);
+      const community = client.getCommunity(req.cid);
+      if (!community) return;
+      const engine = voiceEngineFor(community);
+      const voice = engine.voiceKeys(req.channelId);
       if (!voice) return; // not a voice channel
       const seq = ++joinSeq.current;
       setError(null);
       setActive(null);
       setPending(req);
       void (async () => {
-        const fold = client.getVoicePresence$(req.cid, req.channelId).value;
+        const fold = engine.getVoicePresence$(req.channelId).value;
         const broker = await resolveVoiceBroker(voice.room.pk, fold);
         if (seq !== joinSeq.current) return; // superseded
         setPending(null);

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useConcord } from "./concord-context";
-import type { ChatMessage } from "../concord/client";
+import { useCommunity } from "./use-community";
+import { rumorMs } from "applesauce-concord/helpers";
+import type { ChatMessage } from "./chat/fold";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
@@ -72,20 +74,18 @@ export function ConfirmModal({
   );
 }
 
-/** Debug view: the raw decoded rumor plus its wrapper metadata (wrap id, seal, author). */
+/** Debug view: the decoded chat rumor and its derived ordering metadata. */
 export function RawEventModal({ message, onClose }: { message: ChatMessage; onClose: () => void }) {
   const { raw } = message;
   const [copied, setCopied] = useState(false);
 
-  // The full debug payload: the inner rumor, the wrapper details, and the seal
-  // event (present unless this message was rehydrated from the local cache).
+  // The decoded plane rumor plus the CORD-02 ms ordering basis. (The 1059 wrapper
+  // details — wrap id, seal kind, seal event — aren't exposed by the store, which
+  // holds decoded rumors, not raw giftwraps.)
   const debug = {
-    rumor: raw.rumor,
-    wrapId: raw.wrapId,
-    sealKind: raw.sealKind,
-    ms: raw.ms,
-    author: raw.author,
-    seal: raw.seal ?? null,
+    rumor: raw,
+    author: raw.pubkey,
+    ms: rumorMs(raw),
   };
   const json = JSON.stringify(debug, null, 2);
 
@@ -206,7 +206,7 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
 }
 
 export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () => void }) {
-  const client = useConcord();
+  const community = useCommunity(cid);
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
   const [voice, setVoice] = useState(false);
@@ -215,7 +215,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   async function create() {
     setBusy(true);
     try {
-      await client.createChannel(cid, name.trim().toLowerCase().replace(/\s+/g, "-"), priv, voice);
+      await community?.createChannel(name.trim().toLowerCase().replace(/\s+/g, "-"), priv, voice);
       onClose();
     } catch {
       setBusy(false);
@@ -254,26 +254,27 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
 }
 
 export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void }) {
-  const client = useConcord();
+  const community = useCommunity(cid);
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const started = useRef(false);
 
   useEffect(() => {
-    if (started.current) return; // mint one link per modal open (StrictMode-safe)
+    // Wait for the community engine to resolve, then mint one link per modal open.
+    if (started.current || !community) return;
     started.current = true;
     (async () => {
       try {
         const base = window.location.origin;
-        setLink(await client.createInvite(cid, base));
+        setLink(await community.createInvite(base));
       } catch (e) {
         setError((e as Error).message);
       } finally {
         setBusy(false);
       }
     })();
-  }, [cid, client]);
+  }, [community]);
 
   return (
     <Modal onClose={onClose}>

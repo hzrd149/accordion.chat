@@ -1,25 +1,34 @@
-// Concord voice — CORD-07.
+// Concord voice — CORD-07 (app-side).
+//
+// applesauce-concord ships no CORD-07 runtime: its ConcordCommunity ingest funnel
+// *drops* voice-presence rumors, and the package exposes only the key derivations
+// (voiceKeysFor / voiceSenderKey) + the VOICE_PRESENCE_KIND constant. So the whole
+// broker-token flow, presence fold, and sole-claimant verification live here in
+// the app, on top of the package's crypto helpers.
 //
 // A voice Channel is any Channel whose metadata carries `"voice": true`. Two
-// sub-keys derive from the Channel's secret (CORD-07 §1, see crypto.ts):
-// `voice_key` (its pk is the SFU room name, its sk signs token grants) and
-// `voice_media_key` (the root of per-sender media encryption). Anyone holding
-// the Channel's key can fetch a short-lived token from a **blind broker** and
-// connect to the SFU; media is end-to-end encrypted under keys only members can
-// derive, so the broker and SFU only ever forward ciphertext.
+// sub-keys derive from the Channel's secret (CORD-07 §1): `voice_key` (its pk is
+// the SFU room name, its sk signs token grants) and `voice_media_key` (the root
+// of per-sender media encryption). Anyone holding the Channel's key can fetch a
+// short-lived token from a **blind broker** and connect to the SFU; media is
+// end-to-end encrypted under keys only members can derive, so the broker and SFU
+// only ever forward ciphertext.
 //
 // Who is in a call is announced over the Channel itself (§4): ephemeral
-// kind-23313 rumors in 21059 wraps at the Channel's own address, sealed
-// encrypted like everything else on the Chat Plane, so relays and brokers stay
-// blind. The `broker` tag on live presence is the rendezvous hint (§5).
+// kind-23313 rumors in 21059 wraps at the Channel's own address, sealed encrypted
+// like everything else on the Chat Plane, so relays and brokers stay blind. The
+// `broker` tag on live presence is the rendezvous hint (§5).
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { finalizeEvent } from "nostr-tools";
 
 import { fromHex, toHex, utf8 } from "../lib/bytes";
-import type { GroupKey } from "./crypto";
-import { KIND } from "./types";
-import type { DecodedEvent } from "./types";
+import type { DecodedEvent } from "applesauce-concord";
+import type { GroupKey } from "applesauce-concord/helpers";
+import { VOICE_PRESENCE_KIND } from "applesauce-concord/helpers";
+
+/** NIP-98 HTTP-auth kind — the blind-broker token grant (§2). */
+const HTTP_AUTH_KIND = 27235;
 
 // ── Protocol constants (CORD-07) ─────────────────────────────────────────────
 
@@ -102,7 +111,7 @@ export interface AvToken {
 export function signAvGrant(voice: GroupKey, url: string): string {
   const event = finalizeEvent(
     {
-      kind: KIND.HTTP_AUTH,
+      kind: HTTP_AUTH_KIND,
       content: "",
       tags: [
         ["u", url],
@@ -181,7 +190,7 @@ export function presenceTags(status: "joined" | "left", identity?: string, broke
  */
 export function parsePresence(decoded: DecodedEvent): VoicePresenceEntry | null {
   const { rumor } = decoded;
-  if (rumor.kind !== KIND.VOICE_PRESENCE) return null;
+  if (rumor.kind !== VOICE_PRESENCE_KIND) return null;
   if (rumor.content !== "joined" && rumor.content !== "left") return null;
   const status = rumor.content;
   const rawIdentity = rumor.tags.find((t) => t[0] === "identity")?.[1];

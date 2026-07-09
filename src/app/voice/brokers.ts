@@ -13,7 +13,7 @@ import {
   probeAvBroker,
   rendezvousCandidates,
   type VoicePresenceFold,
-} from "../../concord/voice";
+} from "../../voice/presence";
 
 /** The public Armada broker: a blind CORD-07 token endpoint + LiveKit SFU. */
 const DEFAULT_PUBLIC_AV_SERVER = "https://armada.buzz";

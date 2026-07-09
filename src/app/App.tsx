@@ -29,8 +29,12 @@ import { accounts } from "../nostr";
 import { ConcordProvider } from "./context";
 import { CallProvider } from "./voice/CallProvider";
 import { useCall } from "./voice/call-context";
-import { verifiedAuthorOf, type VoicePresenceFold } from "../concord/voice";
+import { verifiedAuthorOf, type VoicePresenceFold } from "../voice/presence";
+import { useVoiceEngine } from "../voice/registry";
 import { useConcord } from "./concord-context";
+import { useCommunity } from "./use-community";
+import { useMessages, useThread } from "./chat/useMessages";
+import { sendThreadReply as sendThreadReplyAction } from "./chat/actions";
 import { Login } from "./Login";
 import {
   CreateChannelModal,
@@ -49,9 +53,13 @@ import { MessageContent } from "./MessageContent";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "./mentions";
 import { EmojiPicker } from "./EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
-import type { ChatMessage, ConcordClient, ThreadComment } from "../concord/client";
-import type { CommunityState, Role } from "../concord/types";
-import { KIND, PERM } from "../concord/types";
+import type { ChatMessage, ThreadComment } from "./chat/fold";
+import type { CommunityState, Role, ConcordCommunity } from "applesauce-concord";
+import { PERM } from "applesauce-concord";
+import { kinds } from "nostr-tools";
+
+/** NIP-22 comment kind — the app's thread replies (rooted on chat messages). */
+const COMMENT_KIND = 1111;
 
 export function App() {
   const account = useActiveAccount();
@@ -79,8 +87,6 @@ type ModalName = "create" | "join" | "channel" | "invite" | "addMenu" | "leave";
 // stream is still empty — otherwise a fresh `[]` each render would retrigger the
 // auto-select effect below on every render.
 const NO_COMMUNITIES: CommunityState[] = [];
-const NO_MESSAGES: ChatMessage[] = [];
-const NO_THREAD_COMMENTS: ThreadComment[] = [];
 
 function Shell() {
   const client = useConcord();
@@ -383,10 +389,10 @@ function Sidebar({
   onSettings: () => void;
   onLeave: () => void;
 }) {
-  const client = useConcord();
+  const community = useCommunity(state.material.community_id);
   const account = useActiveAccount();
-  const canManageChannels = client.canDo(state.material.community_id, PERM.MANAGE_CHANNELS);
-  const canInvite = client.canDo(state.material.community_id, PERM.CREATE_INVITE);
+  const canManageChannels = community?.canDo(PERM.MANAGE_CHANNELS) ?? false;
+  const canInvite = community?.canDo(PERM.CREATE_INVITE) ?? false;
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
 
   return (
@@ -471,8 +477,8 @@ const EMPTY_FOLD: VoicePresenceFold = { present: [], claims: new Map<string, str
 
 /** Roster entries (identity → verified author) for a channel's live call (§4). */
 function useRoster(cid: string, channelId: string) {
-  const client = useConcord();
-  const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? EMPTY_FOLD;
+  const engine = useVoiceEngine(cid);
+  const fold = use$(() => (engine ? engine.getVoicePresence$(channelId) : undefined), [engine, channelId]) ?? EMPTY_FOLD;
   return {
     fold,
     roster: fold.present.map((p) => ({ identity: p.identity, author: verifiedAuthorOf(fold, p.identity) })),
@@ -615,7 +621,8 @@ function ChatView({
   onOpenThread: (id: string) => void;
 }) {
   const client = useConcord();
-  const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? NO_MESSAGES) as ChatMessage[];
+  const community = useCommunity(cid);
+  const messages = useMessages(community, channelId);
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -652,9 +659,9 @@ function ChatView({
   const handleSend = useCallback(
     async (value: string, files: File[], reply: ReplyTarget | null) => {
       setReplyTo(null);
-      await client.sendMessage(cid, channelId, value, reply ?? undefined, files.length ? files : undefined, favorites);
+      await community?.sendMessage(channelId, value, reply ?? undefined, files.length ? files : undefined, favorites);
     },
-    [client, cid, channelId, favorites],
+    [community, channelId, favorites],
   );
 
   return (
@@ -681,8 +688,7 @@ function ChatView({
         ownerPubkey={state.material.owner}
         myPubkey={client.pubkey}
         canWrite={canWrite}
-        client={client}
-        cid={cid}
+        community={community}
         channelId={channelId}
         favorites={favorites}
         quickReactions={quickReactions}
@@ -712,8 +718,7 @@ const MessageList = memo(function MessageList({
   ownerPubkey,
   myPubkey,
   canWrite,
-  client,
-  cid,
+  community,
   channelId,
   favorites,
   quickReactions,
@@ -726,8 +731,7 @@ const MessageList = memo(function MessageList({
   ownerPubkey: string;
   myPubkey: string;
   canWrite: boolean;
-  client: ConcordClient;
-  cid: string;
+  community: ConcordCommunity | undefined;
   channelId: string;
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
@@ -760,8 +764,7 @@ const MessageList = memo(function MessageList({
                 ownerPubkey={ownerPubkey}
                 myPubkey={myPubkey}
                 canWrite={canWrite}
-                client={client}
-                cid={cid}
+                community={community}
                 channelId={channelId}
                 favorites={favorites}
                 quickReactions={quickReactions}
@@ -788,8 +791,7 @@ const Message = memo(function Message({
   ownerPubkey,
   myPubkey,
   canWrite,
-  client,
-  cid,
+  community,
   channelId,
   favorites,
   quickReactions,
@@ -802,8 +804,7 @@ const Message = memo(function Message({
   ownerPubkey: string;
   myPubkey: string;
   canWrite: boolean;
-  client: ConcordClient;
-  cid: string;
+  community: ConcordCommunity | undefined;
   channelId: string;
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
@@ -816,12 +817,12 @@ const Message = memo(function Message({
   const [menuOpen, setMenuOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
 
-  const react = (reaction: string | Emoji) => client.react(cid, channelId, { id: m.id, author: m.author }, reaction);
+  const react = (reaction: string | Emoji) => community?.react(channelId, { id: m.id, author: m.author }, reaction);
 
   async function saveEdit() {
     const value = editText.trim();
     setEditing(false);
-    if (value) await client.editMessage(cid, channelId, m.id, value);
+    if (value) await community?.editMessage(channelId, m.id, value);
   }
 
   return (
@@ -930,7 +931,7 @@ const Message = memo(function Message({
                 >
                   <Pencil size={16} />
                 </button>
-                <button title="Delete" onClick={() => client.deleteMessage(cid, channelId, m.id)}>
+                <button title="Delete" onClick={() => community?.deleteMessage(channelId, m.id)}>
                   <Trash2 size={16} />
                 </button>
               </>
@@ -1061,8 +1062,8 @@ function ThreadsPanel({
   onOpenThread: (id: string) => void;
   onCloseThread: () => void;
 }) {
-  const client = useConcord();
-  const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? NO_MESSAGES) as ChatMessage[];
+  const community = useCommunity(cid);
+  const messages = useMessages(community, channelId);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const roots = useMemo(() => messages.filter((m) => m.threadReplyCount > 0), [messages]);
   const root = threadRootId ? byId.get(threadRootId) ?? null : null;
@@ -1128,22 +1129,21 @@ function ThreadView({
   favorites: Emoji[];
   onBack: () => void;
 }) {
-  const client = useConcord();
-  const comments = (use$(() => client.getThread$(cid, channelId, root.id), [client, cid, channelId, root.id]) ??
-    NO_THREAD_COMMENTS) as ThreadComment[];
+  const community = useCommunity(cid);
+  const comments = useThread(community, channelId, root.id);
   const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
   const byId = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
-  const parent = replyParent ?? { id: root.id, author: root.author, kind: KIND.MESSAGE };
+  const parent = replyParent ?? { id: root.id, author: root.author, kind: kinds.ChatMessage };
 
   const depthOf = useCallback(
     (comment: ThreadComment): number => {
       let depth = 0;
-      let p = comment.parent.kind === KIND.COMMENT ? byId.get(comment.parent.id) : undefined;
+      let p = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
       const seen = new Set<string>();
       while (p && !seen.has(p.id)) {
         seen.add(p.id);
         depth += 1;
-        p = p.parent.kind === KIND.COMMENT ? byId.get(p.parent.id) : undefined;
+        p = p.parent.kind === COMMENT_KIND ? byId.get(p.parent.id) : undefined;
       }
       return Math.min(depth, 6);
     },
@@ -1151,7 +1151,8 @@ function ThreadView({
   );
 
   async function sendThreadReply(text: string) {
-    await client.sendThreadReply(cid, channelId, text, { id: parent.id, kind: parent.kind }, favorites);
+    if (!community) return;
+    await sendThreadReplyAction(community, channelId, parent, text, favorites);
     setReplyParent(null);
   }
 
@@ -1178,7 +1179,7 @@ function ThreadView({
           {comments.length} {comments.length === 1 ? "reply" : "replies"}
         </div>
         {comments.map((comment) => {
-          const parentComment = comment.parent.kind === KIND.COMMENT ? byId.get(comment.parent.id) : undefined;
+          const parentComment = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
           return (
             <div className="thread-comment" key={comment.id} style={{ marginLeft: depthOf(comment) * 18 }}>
               {parentComment && (
@@ -1200,7 +1201,7 @@ function ThreadView({
               {canWrite && (
                 <button
                   className="thread-reply-btn"
-                  onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: KIND.COMMENT })}
+                  onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
                 >
                   Reply
                 </button>

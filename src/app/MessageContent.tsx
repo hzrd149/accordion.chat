@@ -3,7 +3,7 @@ import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
 import { getPubkeyFromDecodeResult } from "applesauce-core/helpers";
 import { decryptToObjectURL } from "../lib/image";
-import type { MediaAttachment } from "../lib/imeta";
+import type { MediaAttachment } from "applesauce-concord/helpers";
 import { UserName } from "./User";
 
 // Renders a chat message: applesauce-content parses the text into a NAST tree,
@@ -14,12 +14,15 @@ const MAX_CACHED = 256;
 const inflight = new Map<string, Promise<string>>();
 const resolved = new Map<string, string>();
 
-function attKey(a: MediaAttachment): string {
+/** A media attachment with a resolved URL (the only kind we render). */
+type UrlAttachment = MediaAttachment & { url: string };
+
+function attKey(a: UrlAttachment): string {
   return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
 }
 
 /** Decrypt an attachment to an object URL (or pass through a plaintext URL). */
-function useAttachmentSrc(a: MediaAttachment): string | null {
+function useAttachmentSrc(a: UrlAttachment): string | null {
   // Plaintext URLs pass straight through; encrypted ones resolve through the
   // module cache, which is the source of truth. `src` is derived from it each
   // render; `bump` only re-renders once the async decrypt lands (in a callback),
@@ -34,8 +37,8 @@ function useAttachmentSrc(a: MediaAttachment): string | null {
     let promise = inflight.get(ck);
     if (!promise) {
       promise = decryptToObjectURL(a.url, a.encryption.key, a.encryption.nonce, {
-        hash: a.originalHash,
-        mime: a.mime,
+        hash: a.originalSha256,
+        mime: a.type,
       });
       inflight.set(ck, promise);
       promise
@@ -61,9 +64,9 @@ function useAttachmentSrc(a: MediaAttachment): string | null {
   return cached;
 }
 
-function AttachmentView({ att }: { att: MediaAttachment }) {
+function AttachmentView({ att }: { att: UrlAttachment }) {
   const src = useAttachmentSrc(att);
-  const kind = att.mime?.split("/")[0];
+  const kind = att.type?.split("/")[0];
 
   if (!src) return <div className="attachment loading" />;
   if (kind === "video") return <video className="attachment" src={src} controls />;
@@ -78,7 +81,7 @@ function AttachmentView({ att }: { att: MediaAttachment }) {
   // Non-previewable file — offer a download.
   return (
     <a href={src} target="_blank" rel="noreferrer" download className="attachment file">
-      📎 {att.mime ?? "file"}
+      📎 {att.type ?? "file"}
     </a>
   );
 }
@@ -98,7 +101,11 @@ export const MessageContent = memo(function MessageContent({
     () => getParsedContent({ kind: 9, content: text, tags: emojiTags ?? [], created_at: 0 }),
     [text, emojiTags],
   );
-  const byUrl = useMemo(() => new Map(attachments.map((a) => [a.url, a])), [attachments]);
+  const withUrl = useMemo(
+    () => attachments.filter((a): a is UrlAttachment => Boolean(a.url)),
+    [attachments],
+  );
+  const byUrl = useMemo(() => new Map(withUrl.map((a) => [a.url, a])), [withUrl]);
   const rendered = new Set<string>();
 
   const nodes: React.ReactNode[] = [];
@@ -155,7 +162,7 @@ export const MessageContent = memo(function MessageContent({
 
   // Attachments whose URL never appeared in the text (e.g. other clients) get
   // appended so they're never silently dropped.
-  const leftover = attachments.filter((a) => !rendered.has(a.url));
+  const leftover = withUrl.filter((a) => !rendered.has(a.url));
 
   return (
     <div className="msg-text">

@@ -3,11 +3,12 @@ import type { ReactNode } from "react";
 import { ImagePlus, Landmark, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
 import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./concord-context";
+import { useCommunity } from "./use-community";
 import { UserAvatar, UserName } from "./User";
 import { useDecryptedImage } from "./useDecryptedImage";
-import { PERM } from "../concord/types";
-import type { BlobPointer, CommunityState, PermName } from "../concord/types";
-import { hasPerm, parsePermissions, resolveStanding } from "../concord/permissions";
+import { PERM } from "applesauce-concord";
+import type { BlobPointer, CommunityState, PermName } from "applesauce-concord";
+import { hasPerm, parsePermissions, resolveStanding } from "applesauce-concord/helpers";
 import { ConfirmModal } from "./modals";
 
 type PageId = "overview" | "roles" | "members" | "advanced";
@@ -100,13 +101,13 @@ function CommunityIcon({ state }: { state: CommunityState }) {
 // ---- Overview (metadata + images + dissolve) -----------------------------
 
 function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: CommunityState; isOwner: boolean; onClose: () => void }) {
-  const client = useConcord();
+  const community = useCommunity(cid);
   const [name, setName] = useState(state.metadata?.name ?? state.material.name);
   const [description, setDescription] = useState(state.metadata?.description ?? "");
   const [blossom, setBlossom] = useState((state.metadata?.blossom_servers ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const canManageMetadata = client.canDo(cid, PERM.MANAGE_METADATA);
+  const canManageMetadata = community?.canDo(PERM.MANAGE_METADATA) ?? false;
 
   async function save() {
     setBusy(true);
@@ -115,7 +116,7 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
       .split(/[\n,]/)
       .map((s) => s.trim())
       .filter(Boolean);
-    await client.editMetadata(cid, { name: name.trim(), description: description.trim(), blossom_servers });
+    await community?.editMetadata({ name: name.trim(), description: description.trim(), blossom_servers });
     setBusy(false);
     setSaved(true);
   }
@@ -169,7 +170,7 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
           className="btn danger"
           onClick={async () => {
             if (confirm("Dissolve this community permanently? This cannot be undone.")) {
-              await client.dissolve(cid);
+              await community?.dissolve();
               onClose();
             }
           }}
@@ -192,7 +193,7 @@ function ImageField({
   pointer: BlobPointer | undefined;
   disabled: boolean;
 }) {
-  const client = useConcord();
+  const community = useCommunity(cid);
   const url = useDecryptedImage(pointer);
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -202,7 +203,7 @@ function ImageField({
     setError(null);
     setBusy(true);
     try {
-      await client.setCommunityImage(cid, which, file);
+      await community?.setCommunityImage(which, file);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -229,7 +230,7 @@ function ImageField({
             className="icon-btn"
             title={`Remove ${which}`}
             disabled={disabled}
-            onClick={() => client.removeCommunityImage(cid, which)}
+            onClick={() => community?.removeCommunityImage(which)}
           >
             <Trash2 size={16} />
           </button>
@@ -255,7 +256,7 @@ function ImageField({
 // ---- Roles ---------------------------------------------------------------
 
 function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
-  const client = useConcord();
+  const community = useCommunity(cid);
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -272,7 +273,7 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
     let bits = 0n;
     for (const p of perms) bits |= PERM[p];
     const position = state.roles.length + 1;
-    await client.createRole(cid, name.trim(), position, bits);
+    await community?.createRole(name.trim(), position, bits);
     setName("");
     setPerms(new Set());
     setBusy(false);
@@ -331,6 +332,7 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
 
 function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
   const client = useConcord();
+  const community = useCommunity(cid);
   const members = [...state.members];
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
   // The CALLER's standing governs which admin actions are offered, not the
@@ -342,12 +344,12 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   const doBan = async (member: string) => {
     // 1. Soft ban: banlist + strip roles (CORD-04).
-    await client.ban(cid, member);
+    await community?.ban(member);
     // 2. Hard enforcement: Refound to sever the banned member's keys from
     //    the control plane and every channel (CORD-06 §3). keep = everyone
     //    still in the community except the banned member.
     const keep = members.filter((m) => m !== member);
-    await client.refound(cid, { keep, exclude: [member] });
+    await community?.refound({ keep, exclude: [member] });
   };
 
   return (
@@ -371,13 +373,13 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               {!standing.isOwner && (canKick || canBan) && (
                 <>
                   {canKick && (
-                    <button className="btn ghost" onClick={() => client.kick(cid, m)}>
+                    <button className="btn ghost" onClick={() => community?.kick(m)}>
                       Kick
                     </button>
                   )}
                   {banned ? (
                     canBan && (
-                      <button className="btn ghost" onClick={() => client.unban(cid, m)}>
+                      <button className="btn ghost" onClick={() => community?.unban(m)}>
                         Unban
                       </button>
                     )
@@ -407,7 +409,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
                         const next = new Set(held);
                         if (on) next.delete(r.role_id);
                         else next.add(r.role_id);
-                        client.grantRoles(cid, m, [...next]);
+                        community?.grantRoles(m, [...next]);
                       }}
                     >
                       {r.name}
@@ -441,7 +443,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               </div>
               <div style={{ marginLeft: "auto" }}>
                 {canBan && (
-                  <button className="btn ghost" onClick={() => client.unban(cid, m)}>
+                  <button className="btn ghost" onClick={() => community?.unban(m)}>
                     Unban
                   </button>
                 )}
@@ -482,6 +484,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
 
 function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
   const client = useConcord();
+  const community = useCommunity(cid);
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
   const caller = resolveStanding(client.pubkey, state.material.owner, rolesMap, state.grants);
   const canRekey = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
@@ -494,7 +497,9 @@ function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
     setError(null);
     setBusy(true);
     try {
-      await client.rekey(cid);
+      // A community-wide epoch rotation is a no-exclude Refounding (CORD-06):
+      // keep every current member, remove no one.
+      await community?.refound({ keep: [...state.members] });
       setDone(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rekey failed");

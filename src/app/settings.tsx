@@ -7,7 +7,7 @@ import { AddInboxRelay, AddOutboxRelay, RemoveInboxRelay, RemoveOutboxRelay } fr
 import { AddDirectMessageRelay, RemoveDirectMessageRelay } from "applesauce-actions/actions/direct-message-relays";
 import { AddBlossomServer, RemoveBlossomServer, SetDefaultBlossomServer } from "applesauce-actions/actions/blossom";
 import type { ProfileContent } from "applesauce-core/helpers/profile";
-import type { Signer } from "../concord/stream";
+import type { ISigner } from "applesauce-signers";
 import { createSettingsRunner, saveRelayList, userFor } from "./settings-actions";
 import { UserAvatar } from "./User";
 
@@ -55,7 +55,7 @@ export function SettingsView({
   }, [onClose]);
 
   if (!account) return null;
-  const signer = account.signer as Signer;
+  const signer = account.signer as ISigner;
   const pubkey = account.pubkey;
 
   return (
@@ -88,7 +88,7 @@ export function SettingsView({
   );
 }
 
-type PageProps = { signer: Signer; pubkey: string };
+type PageProps = { signer: ISigner; pubkey: string };
 
 // ---- Profile (kind 0) ----------------------------------------------------
 

@@ -1,18 +1,24 @@
 // Applesauce singletons — one EventStore and one RelayPool for the whole app.
 
+// Side-effect: registers NIP-44 hidden-content decryption for the self-encrypted
+// Community/Invite lists (13302/13303) and the User.concord* casts. Must run
+// before any list decrypt, so import it here where the app first loads nostr I/O.
+import "applesauce-concord";
 import { EventStore } from "applesauce-core";
-import {
-	persistEventsToCache,
-	setEncryptedContentEncryptionMethod,
-} from "applesauce-core/helpers";
+import { persistEventsToCache } from "applesauce-core/helpers";
 import { RelayPool } from "applesauce-relay";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
 import { registerCommonAccountTypes } from "applesauce-accounts/accounts";
 import { NostrConnectSigner } from "applesauce-signers";
+import {
+	ENCRYPTED_SEAL_KIND,
+	PLAINTEXT_SEAL_KIND,
+	COMMUNITY_LIST_KIND,
+	INVITE_LIST_KIND,
+} from "applesauce-concord/helpers";
 import { NostrIDB } from "nostr-idb";
 import type { Filter } from "nostr-tools";
-import { KIND } from "./concord/types";
 
 export const eventStore = new EventStore();
 export const pool = new RelayPool();
@@ -64,10 +70,10 @@ export const NOSTR_CONNECT_RELAYS =
 // lists (13302/13303 use NIP-44), so we also need nip44 encrypt/decrypt.
 export const CONCORD_SIGNER_PERMISSIONS = [
 	...NostrConnectSigner.buildSigningPermissions([
-		KIND.SEAL_ENCRYPTED,
-		KIND.SEAL_PLAINTEXT,
-		KIND.COMMUNITY_LIST,
-		KIND.INVITE_LIST,
+		ENCRYPTED_SEAL_KIND,
+		PLAINTEXT_SEAL_KIND,
+		COMMUNITY_LIST_KIND,
+		INVITE_LIST_KIND,
 	]),
 	"nip44_encrypt",
 	"nip44_decrypt",
@@ -94,10 +100,9 @@ createEventLoaderForStore(eventStore, pool, {
 export const accounts = new AccountManager();
 registerCommonAccountTypes(accounts);
 
-// The self-encrypted Community List / Invite List use NIP-44; register so the
-// applesauce encrypted-content cache (unlockEncryptedContent) knows the method.
-setEncryptedContentEncryptionMethod(KIND.COMMUNITY_LIST, "nip44");
-setEncryptedContentEncryptionMethod(KIND.INVITE_LIST, "nip44");
+// NIP-44 registration for the self-encrypted Community/Invite lists (13302/13303)
+// is handled by applesauce-concord's register.ts (imported for its side effect at
+// the top of this file), via setHiddenContentEncryptionMethod.
 
 // Persist accounts across reloads.
 const STORAGE_KEY = "concord:accounts";

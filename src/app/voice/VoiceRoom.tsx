@@ -30,9 +30,10 @@ import {
   verifiedAuthorOf,
   type AvToken,
   type VoicePresenceFold,
-} from "../../concord/voice";
+} from "../../voice/presence";
+import { useVoiceEngine } from "../../voice/registry";
 import { useCall } from "./call-context";
-import { voiceSenderKey } from "../../concord/crypto";
+import { voiceSenderKey } from "applesauce-concord/helpers";
 import { randomBytes } from "../../lib/bytes";
 import { CallStage } from "./CallStage";
 import { CallBar } from "./CallBar";
@@ -71,9 +72,11 @@ class SenderKeyProvider extends BaseKeyProvider {
 export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => void }) {
   const client = useConcord();
   const { cid, channelId, broker } = call;
+  const engine = useVoiceEngine(cid);
 
-  const voice = useMemo(() => client.voiceKeys(cid, channelId), [client, cid, channelId]);
-  const fold = use$(() => client.getVoicePresence$(cid, channelId), [cid, channelId]) ?? EMPTY_FOLD;
+  const voice = useMemo(() => engine?.voiceKeys(channelId), [engine, channelId]);
+  const fold =
+    use$(() => (engine ? engine.getVoicePresence$(channelId) : undefined), [engine, channelId]) ?? EMPTY_FOLD;
 
   // Token from the blind broker (§2). Fetched exactly once per (room, broker) and
   // NEVER refetched: the identity is baked into the token and drives the frame
@@ -108,12 +111,12 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // every 30s, left on teardown. Driven by ConcordClient so the fold that keys
   // this very room also carries our own heartbeat to everyone else.
   useEffect(() => {
-    if (!tokenData) return;
-    void client.joinVoice(cid, channelId, tokenData.identity, broker);
+    if (!tokenData || !engine) return;
+    void engine.joinVoice(channelId, tokenData.identity, broker);
     return () => {
-      void client.leaveVoice(cid, channelId);
+      void engine.leaveVoice(channelId);
     };
-  }, [client, cid, channelId, tokenData, broker]);
+  }, [engine, channelId, tokenData, broker]);
 
   // Build the E2EE-enabled Room once per mount (the component remounts per
   // room/epoch/broker via its key in CallProvider).

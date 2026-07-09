@@ -7,7 +7,7 @@
 // kind-24242 auth event signed by the user's own key.
 
 import { Actions, createUploadAuth, type Signer as BlossomSigner } from "blossom-client-sdk";
-import type { Signer } from "../concord/stream";
+import type { ISigner } from "applesauce-signers";
 
 /**
  * Last-resort Blossom servers, used only when neither the community nor the
@@ -37,7 +37,7 @@ export function dedupeServers(servers: string[]): string[] {
  * Upload ciphertext bytes to the given Blossom servers, returning the blob's
  * URL from the first server that accepted it. Throws if every server rejects.
  */
-export async function uploadBlob(bytes: Uint8Array, servers: string[], signer: Signer): Promise<string> {
+export async function uploadBlob(bytes: Uint8Array, servers: string[], signer: ISigner): Promise<string> {
   // Adapt our Concord Signer to the SDK's `(draft) => SignedEvent` shape, and
   // sign a fresh upload auth per (server, blob-hash) request.
   const sign: BlossomSigner = (draft) => signer.signEvent(draft);

@@ -12,7 +12,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { toHex, fromHex, randomBytes } from "./bytes";
-import type { BlobPointer } from "../concord/types";
+import type { BlobPointer } from "applesauce-concord";
 
 /** 16-byte (128-bit) AES-GCM nonce. */
 const NONCE_BYTES = 16;

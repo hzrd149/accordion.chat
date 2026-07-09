@@ -8,3 +8,19 @@ minimumReleaseAgeExclude:
 
 allowBuilds:
   esbuild: true
+
+overrides:
+  applesauce-accounts: link:../applesauce/packages/accounts
+  applesauce-actions: link:../applesauce/packages/actions
+  applesauce-common: link:../applesauce/packages/common
+  applesauce-concord: link:../applesauce/packages/concord
+  applesauce-content: link:../applesauce/packages/content
+  applesauce-core: link:../applesauce/packages/core
+  applesauce-extra: link:../applesauce/packages/extra
+  applesauce-loaders: link:../applesauce/packages/loaders
+  applesauce-react: link:../applesauce/packages/react
+  applesauce-relay: link:../applesauce/packages/relay
+  applesauce-signers: link:../applesauce/packages/signers
+  applesauce-sqlite: link:../applesauce/packages/sqlite
+  applesauce-wallet: link:../applesauce/packages/wallet
+  applesauce-wallet-connect: link:../applesauce/packages/wallet-connect

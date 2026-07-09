@@ -13,7 +13,7 @@ import { castUser } from "applesauce-common/casts";
 import type { User } from "applesauce-common/casts";
 import { getOutboxes } from "applesauce-core/helpers";
 import { eventStore, pool, LOOKUP_RELAYS } from "../nostr";
-import type { Signer } from "../concord/stream";
+import type { ISigner } from "applesauce-signers";
 
 const RELAY_LIST_KIND = 10002;
 
@@ -29,7 +29,7 @@ export function publishTargets(pubkey: string, extra?: string[]): string[] {
 }
 
 /** An ActionRunner bound to `signer`/`pubkey` that publishes to `publishTargets`. */
-export function createSettingsRunner(signer: Signer, pubkey: string): ActionRunner {
+export function createSettingsRunner(signer: ISigner, pubkey: string): ActionRunner {
   return new ActionRunner(eventStore, signer, (event, relays) => {
     // Fire-and-forget: the ActionRunner already saved the event to the store
     // (optimistic UI), so don't block `run()` on relay round-trips.
@@ -48,7 +48,7 @@ export function userFor(pubkey: string): User {
  * kind-10086 indexer/lookup list, which has no pre-built applesauce action.
  */
 export async function saveRelayList(
-  signer: Signer,
+  signer: ISigner,
   pubkey: string,
   kind: number,
   relays: string[],

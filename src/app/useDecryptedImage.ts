@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { decryptImagePointer } from "../lib/image";
-import type { BlobPointer } from "../concord/types";
+import type { BlobPointer } from "applesauce-concord";
 
 // Resolve an encrypted {@link BlobPointer} (icon / banner) to a displayable
 // object URL. Decrypt-once cache keyed on (url, key, nonce); the resolved map
