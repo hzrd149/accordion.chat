@@ -114,21 +114,51 @@ function Shell() {
   const [leaving, setLeaving] = useState(false);
   // Mobile off-canvas drawers (ignored by CSS above the tablet breakpoint).
   const [navOpen, setNavOpen] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
+  // The right-hand side panel: opened with either the member roster or the
+  // channel's threads, closed via its own close button (or the mobile toggle).
+  type PanelMode = null | "members" | "threads";
+  const [panelMode, setPanelMode] = useState<PanelMode>(null);
+  const [threadRootId, setThreadRootId] = useState<string | null>(null);
   const closeDrawers = () => {
     setNavOpen(false);
-    setMembersOpen(false);
+    setPanelMode(null);
   };
 
-  // Auto-select a community and channel as they arrive, reflecting the choice
-  // into the URL (replace, so it doesn't clutter history).
+  const toggleMembers = () => {
+    setPanelMode((prev) => (prev === "members" ? null : "members"));
+    setThreadRootId(null);
+  };
+  const toggleThreads = () => {
+    setPanelMode((prev) => (prev === "threads" ? null : "threads"));
+    setThreadRootId(null);
+  };
+  const openThread = (id: string) => {
+    setThreadRootId(id);
+    setPanelMode("threads");
+  };
+
+  // Reset the active thread when the channel (or community) changes — a root
+  // id from the old channel won't resolve in the new one. Keep the panel itself
+  // open so a members/threads view survives navigation.
+  const [prevChannel, setPrevChannel] = useState(selectedChannel);
+  const [prevCid, setPrevCid] = useState(selectedCid);
+  if (selectedChannel !== prevChannel || selectedCid !== prevCid) {
+    setPrevChannel(selectedChannel);
+    setPrevCid(selectedCid);
+    setThreadRootId(null);
+  }
+
+  // The user's NIP-30 favorite custom emojis — feeds the thread composer in
+  // the side panel.
+  const favorites = useFavoriteEmojis(client.pubkey);
+
+  // Auto-select a community and channel only when the URL has not already made
+  // a choice. Deep links may point at communities/channels that are still being
+  // restored from the local mirror or relay list, so don't replace them just
+  // because the current fold has not surfaced them yet.
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
   useEffect(() => {
-    if (communities.length === 0) {
-      if (selectedCid) navigate("/", { replace: true });
-      return;
-    }
-    if (!selectedCid || !communities.some((c) => c.material.community_id === selectedCid)) {
+    if (communities.length > 0 && !selectedCid) {
       navigate(`/c/${communities[0].material.community_id}`, { replace: true });
     }
   }, [communities, selectedCid, navigate]);
@@ -136,19 +166,19 @@ function Shell() {
   useEffect(() => {
     if (!activeState) return;
     const channels = activeState.channels;
-    if (channels.length && (!selectedChannel || !channels.some((c) => c.channel_id === selectedChannel))) {
+    if (channels.length && !selectedChannel) {
       navigate(`/c/${activeState.material.community_id}/${channels[0].channel_id}`, { replace: true });
     }
   }, [activeState, selectedChannel, navigate]);
 
   return (
-    <div className={`app${navOpen ? " nav-open" : ""}${membersOpen ? " members-open" : ""}`}>
+    <div className={`app${navOpen ? " nav-open" : ""}${panelMode ? " panel-open" : ""}`}>
       {/* Mobile-only drawer controls (hidden by CSS on larger screens). */}
       <button className="drawer-toggle nav" title="Menu" onClick={() => setNavOpen((v) => !v)}>
         <Menu size={22} />
       </button>
       {activeState && (
-        <button className="drawer-toggle members" title="Members" onClick={() => setMembersOpen((v) => !v)}>
+        <button className="drawer-toggle members" title="Members" onClick={toggleMembers}>
           <Users size={22} />
         </button>
       )}
@@ -194,9 +224,17 @@ function Shell() {
             onInvite={() => setModal("invite")}
             onSettings={() => setParam("admin", "overview")}
             onLeave={() => setModal("leave")}
+            onMembers={toggleMembers}
           />
           {selectedChannel ? (
-            <ChatView cid={activeState.material.community_id} channelId={selectedChannel} state={activeState} />
+            <ChatView
+              cid={activeState.material.community_id}
+              channelId={selectedChannel}
+              state={activeState}
+              threadsOpen={panelMode === "threads"}
+              onToggleThreads={toggleThreads}
+              onOpenThread={openThread}
+            />
           ) : (
             <div className="main">
               <div className="empty">
@@ -205,7 +243,20 @@ function Shell() {
               </div>
             </div>
           )}
-          <MemberList state={activeState} />
+          {panelMode && (
+            <SidePanel
+              mode={panelMode}
+              state={activeState}
+              cid={activeState.material.community_id}
+              channelId={selectedChannel}
+              threadRootId={threadRootId}
+              favorites={favorites}
+              canWrite={!activeState.dissolved}
+              onOpenThread={openThread}
+              onCloseThread={() => setThreadRootId(null)}
+              onClose={() => setPanelMode(null)}
+            />
+          )}
         </>
       ) : (
         <div className="main">
@@ -327,6 +378,7 @@ function Sidebar({
   onInvite,
   onSettings,
   onLeave,
+  onMembers,
 }: {
   state: CommunityState;
   selectedChannel: string | null;
@@ -335,6 +387,7 @@ function Sidebar({
   onInvite: () => void;
   onSettings: () => void;
   onLeave: () => void;
+  onMembers: () => void;
 }) {
   const client = useConcord();
   const account = useActiveAccount();
@@ -348,6 +401,9 @@ function Sidebar({
       <div className={`sidebar-header${bannerUrl ? " has-banner" : ""}`}>
         <span title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
         <div className="sidebar-header-actions">
+          <button title="Members" onClick={onMembers}>
+            <Users size={18} />
+          </button>
           <button title="Community settings" onClick={onSettings}>
             <Settings size={18} />
           </button>
@@ -548,13 +604,25 @@ function reactionLabel(r: string | Emoji) {
 //   • ChatView    — owns the message stream, scroll, and shared reply target.
 //   • MessageList — memoized; re-renders only when the messages/groups change.
 //   • Composer    — owns the draft text/files/sending/picker state locally.
-function ChatView({ cid, channelId, state }: { cid: string; channelId: string; state: CommunityState }) {
+function ChatView({
+  cid,
+  channelId,
+  state,
+  threadsOpen,
+  onToggleThreads,
+  onOpenThread,
+}: {
+  cid: string;
+  channelId: string;
+  state: CommunityState;
+  threadsOpen: boolean;
+  onToggleThreads: () => void;
+  onOpenThread: (id: string) => void;
+}) {
   const client = useConcord();
   const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? NO_MESSAGES) as ChatMessage[];
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
-  const [threadRootId, setThreadRootId] = useState<string | null>(null);
-  const [threadsOpen, setThreadsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
@@ -578,8 +646,6 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
   if (channelId !== prevChannel) {
     setPrevChannel(channelId);
     setReplyTo(null);
-    setThreadRootId(null);
-    setThreadsOpen(false);
   }
 
   const canWrite = !state.dissolved;
@@ -596,10 +662,6 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
     [client, cid, channelId, favorites],
   );
 
-  const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
-  const threadRoot = threadRootId ? messagesById.get(threadRootId) ?? null : null;
-  const threadRoots = useMemo(() => messages.filter((m) => m.threadReplyCount > 0), [messages]);
-
   return (
     <div className="main">
       <div className="main-header">
@@ -609,7 +671,7 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         <span className="title">{channel?.name}</span>
         <span className="topic">{state.metadata?.description}</span>
         <div className="spacer" />
-        <button title="Threads" onClick={() => setThreadsOpen((v) => !v)}>
+        <button title="Threads" className={threadsOpen ? "active" : ""} onClick={onToggleThreads}>
           <MessageSquare size={18} />
         </button>
       </div>
@@ -627,30 +689,8 @@ function ChatView({ cid, channelId, state }: { cid: string; channelId: string; s
         favorites={favorites}
         quickReactions={quickReactions}
         onReply={setReplyTo}
-        onThread={(m) => setThreadRootId(m.id)}
+        onThread={(m) => onOpenThread(m.id)}
       />
-      {threadRoot && (
-        <ThreadDrawer
-          cid={cid}
-          channelId={channelId}
-          root={threadRoot}
-          canWrite={canWrite}
-          client={client}
-          favorites={favorites}
-          onClose={() => setThreadRootId(null)}
-        />
-      )}
-      {threadsOpen && !threadRoot && (
-        <ThreadRootsDrawer
-          roots={threadRoots}
-          channelName={channel?.name}
-          onOpen={(m) => {
-            setThreadRootId(m.id);
-            setThreadsOpen(false);
-          }}
-          onClose={() => setThreadsOpen(false)}
-        />
-      )}
       {canWrite && (
         <Composer
           key={channelId}
@@ -944,75 +984,153 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
   );
 }
 
-function ThreadRootsDrawer({
-  roots,
-  channelName,
-  onOpen,
+/**
+ * The right-hand side panel: hosts either the member roster or the channel's
+ * threads/thread view. Opened from the sidebar (members) or the chat header
+ * (threads); closed via its own close button. Replaces the old always-on
+ * member list and the floating thread overlay.
+ */
+function SidePanel({
+  mode,
+  state,
+  cid,
+  channelId,
+  threadRootId,
+  favorites,
+  canWrite,
+  onOpenThread,
+  onCloseThread,
   onClose,
 }: {
-  roots: ChatMessage[];
-  channelName: string | undefined;
-  onOpen: (message: ChatMessage) => void;
+  mode: "members" | "threads";
+  state: CommunityState;
+  cid: string;
+  channelId: string | null;
+  threadRootId: string | null;
+  favorites: Emoji[];
+  canWrite: boolean;
+  onOpenThread: (id: string) => void;
+  onCloseThread: () => void;
   onClose: () => void;
 }) {
+  const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
-    <aside className="thread-drawer thread-index">
-      <div className="thread-header">
-        <div>
-          <div className="thread-title">Threads</div>
-          <div className="thread-sub">#{channelName ?? "channel"}</div>
-        </div>
-        <button title="Close threads" onClick={onClose}>
+    <aside className="side-panel">
+      <div className="side-panel-header">
+        <span className="side-panel-title">{title}</span>
+        <button title="Close panel" onClick={onClose}>
           <X size={18} />
         </button>
       </div>
-      <div className="thread-scroll">
-        {roots.length === 0 ? (
+      <div className="side-panel-body">
+        {mode === "members" ? (
+          <MemberList state={state} />
+        ) : channelId ? (
+          <ThreadsPanel
+            cid={cid}
+            channelId={channelId}
+            threadRootId={threadRootId}
+            canWrite={canWrite}
+            favorites={favorites}
+            onOpenThread={onOpenThread}
+            onCloseThread={onCloseThread}
+          />
+        ) : (
           <div className="thread-empty">
             <MessageSquare size={36} />
-            <div>No threads yet.</div>
-            <p>Use “Reply in thread” on a message to start one.</p>
+            <div>Select a channel to see its threads.</div>
           </div>
-        ) : (
-          roots.map((root) => (
-            <button className="thread-root-card" key={root.id} onClick={() => onOpen(root)}>
-              <div className="msg-head">
-                <span className="name" style={{ color: colorFor(root.author) }}>
-                  <UserName pubkey={root.author} />
-                </span>
-                <span className="time">{formatTime(root.ms)}</span>
-              </div>
-              <div className="thread-root-preview">
-                {root.deleted ? "(message deleted)" : (root.edited ?? root.content).slice(0, 180) || "message"}
-              </div>
-              <div className="thread-root-meta">
-                {root.threadReplyCount} {root.threadReplyCount === 1 ? "reply" : "replies"}
-              </div>
-            </button>
-          ))
         )}
       </div>
     </aside>
   );
 }
 
-function ThreadDrawer({
+function ThreadsPanel({
+  cid,
+  channelId,
+  threadRootId,
+  canWrite,
+  favorites,
+  onOpenThread,
+  onCloseThread,
+}: {
+  cid: string;
+  channelId: string;
+  threadRootId: string | null;
+  canWrite: boolean;
+  favorites: Emoji[];
+  onOpenThread: (id: string) => void;
+  onCloseThread: () => void;
+}) {
+  const client = useConcord();
+  const messages = (use$(() => client.getMessages$(cid, channelId), [cid, channelId]) ?? NO_MESSAGES) as ChatMessage[];
+  const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  const roots = useMemo(() => messages.filter((m) => m.threadReplyCount > 0), [messages]);
+  const root = threadRootId ? byId.get(threadRootId) ?? null : null;
+
+  if (root) {
+    return (
+      <ThreadView
+        cid={cid}
+        channelId={channelId}
+        root={root}
+        canWrite={canWrite}
+        favorites={favorites}
+        onBack={onCloseThread}
+      />
+    );
+  }
+  return <ThreadIndex roots={roots} onOpen={(m) => onOpenThread(m.id)} />;
+}
+
+function ThreadIndex({ roots, onOpen }: { roots: ChatMessage[]; onOpen: (m: ChatMessage) => void }) {
+  return (
+    <div className="thread-scroll">
+      {roots.length === 0 ? (
+        <div className="thread-empty">
+          <MessageSquare size={36} />
+          <div>No threads yet.</div>
+          <p>Use “Reply in thread” on a message to start one.</p>
+        </div>
+      ) : (
+        roots.map((root) => (
+          <button className="thread-root-card" key={root.id} onClick={() => onOpen(root)}>
+            <div className="msg-head">
+              <span className="name" style={{ color: colorFor(root.author) }}>
+                <UserName pubkey={root.author} />
+              </span>
+              <span className="time">{formatTime(root.ms)}</span>
+            </div>
+            <div className="thread-root-preview">
+              {root.deleted ? "(message deleted)" : (root.edited ?? root.content).slice(0, 180) || "message"}
+            </div>
+            <div className="thread-root-meta">
+              {root.threadReplyCount} {root.threadReplyCount === 1 ? "reply" : "replies"}
+            </div>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ThreadView({
   cid,
   channelId,
   root,
   canWrite,
-  client,
   favorites,
-  onClose,
+  onBack,
 }: {
   cid: string;
   channelId: string;
   root: ChatMessage;
   canWrite: boolean;
-  client: ConcordClient;
   favorites: Emoji[];
-  onClose: () => void;
+  onBack: () => void;
 }) {
+  const client = useConcord();
   const comments = (use$(() => client.getThread$(cid, channelId, root.id), [client, cid, channelId, root.id]) ??
     NO_THREAD_COMMENTS) as ThreadComment[];
   const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
@@ -1040,16 +1158,10 @@ function ThreadDrawer({
   }
 
   return (
-    <aside className="thread-drawer">
-      <div className="thread-header">
-        <div>
-          <div className="thread-title">Thread</div>
-          <div className="thread-sub">#{channelId.slice(0, 8)}</div>
-        </div>
-        <button title="Close thread" onClick={onClose}>
-          <X size={18} />
-        </button>
-      </div>
+    <>
+      <button className="thread-back" onClick={onBack}>
+        <Reply size={14} /> Back to threads
+      </button>
       <div className="thread-scroll">
         <div className="thread-root">
           <div className="msg-head">
@@ -1106,7 +1218,7 @@ function ThreadDrawer({
           onSend={sendThreadReply}
         />
       )}
-    </aside>
+    </>
   );
 }
 
