@@ -33,6 +33,7 @@ import { verifiedAuthorOf, type VoicePresenceFold } from "../voice/presence";
 import { useVoiceEngine } from "../voice/registry";
 import { useConcord } from "./concord-context";
 import { useCommunity } from "./use-community";
+import { deleteCommunityRumorCache } from "./rumor-cache";
 import { useMessages, useThread } from "./chat/useMessages";
 import { sendThreadReply as sendThreadReplyAction } from "./chat/actions";
 import { Login } from "./Login";
@@ -321,6 +322,8 @@ function Shell() {
                 setLeaving(true);
                 try {
                   await client.leave(cid);
+                  // Purge the decrypted rumor caches for the community we left.
+                  await deleteCommunityRumorCache(cid);
                   navigate("/");
                 } finally {
                   setLeaving(false);

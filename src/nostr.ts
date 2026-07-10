@@ -35,9 +35,10 @@ void enableWasmVerification(eventStore);
 // instantly on the next load without a round-trip. This is a *cache* in front of
 // the loaders, not an event database: the EventStore itself stays in-memory.
 //
-// Note: this is orthogonal to src/concord/cache.ts, which persists *decoded*
-// Concord rumors (never raw 1059 giftwraps) per community. nostr-idb caches the
-// public Nostr events (profiles etc.) the UI renders alongside them.
+// Note: this is orthogonal to src/app/rumor-cache.ts, which persists the
+// *decoded* Concord rumors (never raw 1059 giftwraps) per community+plane in
+// their own IndexedDB databases. This cache holds the public Nostr events
+// (profiles etc.) the UI renders alongside them.
 const nostrIDB = new NostrIDB();
 // start() kicks off the write-flush cycle; add()ed events queue until it runs.
 // getDb() opens the database lazily, so we don't need to await this — reads and

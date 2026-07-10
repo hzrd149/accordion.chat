@@ -5,6 +5,7 @@ import { ConcordClient } from "applesauce-concord";
 import type { ISigner } from "applesauce-signers";
 import { pool, eventStore } from "../nostr";
 import { createConcordUploader } from "./concord-uploader";
+import { createRumorStoreFactory } from "./rumor-cache";
 import { attachVoiceGc } from "../voice/registry";
 import { ClientContext } from "./concord-context";
 
@@ -28,6 +29,10 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       pool,
       eventStore,
       uploader,
+      // Back each per-plane RumorStore with a nostr-idb cache so a community's
+      // decoded chat/control/guestbook history survives reload without refetching
+      // (or depending on) relays. See src/app/rumor-cache.ts.
+      storeFactory: createRumorStoreFactory(),
       // Auto-decrypt the self-encrypted Community/Invite lists when they arrive
       // (matches the app's prior behaviour of folding them without a prompt).
       autoUnlock: true,
