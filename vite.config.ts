@@ -4,6 +4,14 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // https://vite.dev/config/
 export default defineConfig({
+	build: {
+		rollupOptions: {
+			input: {
+				main: new URL("./index.html", import.meta.url).pathname,
+				404: new URL("./404.html", import.meta.url).pathname,
+			},
+		},
+	},
 	// The applesauce-* packages are linked from a local monorepo (see
 	// pnpm-workspace.yaml overrides), and applesauce-react's symlinked location
 	// carries its own nested node_modules/react — so without deduping, the app and
