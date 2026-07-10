@@ -19,9 +19,15 @@ import {
 } from "applesauce-concord/helpers";
 import { NostrIDB } from "nostr-idb";
 import type { Filter } from "nostr-tools";
+import { enableWasmVerification } from "./crypto-wasm";
 
 export const eventStore = new EventStore();
 export const pool = new RelayPool();
+
+// Route Schnorr verification through nostr-wasm (WASM libsecp256k1) instead of the
+// pure-JS default — the hot path when decoding the Concord planes. Non-blocking:
+// the first few ms of verification use the JS fallback until the WASM is live.
+void enableWasmVerification(eventStore);
 
 // Local IndexedDB event cache (nostr-idb). Everything the EventStore ingests —
 // profiles (kind 0), relay lists, and any other event the automatic loader

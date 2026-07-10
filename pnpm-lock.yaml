@@ -84,6 +84,9 @@ importers:
       nostr-tools:
         specifier: ^2.23.9
         version: 2.23.9(typescript@6.0.3)
+      nostr-wasm:
+        specifier: ^0.1.0
+        version: 0.1.0
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
