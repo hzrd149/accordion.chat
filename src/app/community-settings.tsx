@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ImagePlus, Landmark, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
+import { Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
 import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./concord-context";
 import { useCommunity } from "./use-community";
@@ -10,13 +10,15 @@ import { PERM } from "applesauce-concord";
 import type { BlobPointer, CommunityState, PermName } from "applesauce-concord";
 import { hasPerm, parsePermissions, resolveStanding } from "applesauce-concord/helpers";
 import { ConfirmModal } from "./modals";
+import { channelRoleId, channelRoster } from "./chat/channel-roles";
 
-type PageId = "overview" | "roles" | "members" | "advanced";
+type PageId = "overview" | "roles" | "members" | "channels" | "advanced";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <Landmark size={18} /> },
   { id: "roles", label: "Roles", icon: <Shield size={18} /> },
   { id: "members", label: "Members", icon: <Users size={18} /> },
+  { id: "channels", label: "Channels", icon: <Hash size={18} /> },
   { id: "advanced", label: "Advanced", icon: <RefreshCw size={18} /> },
 ];
 
@@ -81,6 +83,7 @@ export function CommunitySettingsView({
           {page === "overview" && <OverviewPage cid={cid} state={state} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} state={state} />}
           {page === "members" && <MembersPage cid={cid} state={state} />}
+          {page === "channels" && <ChannelsPage cid={cid} state={state} />}
           {page === "advanced" && <AdvancedPage cid={cid} state={state} />}
         </div>
       </div>
@@ -473,6 +476,170 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
                 re-sync. This cannot be quietly undone.
               </p>
             </>
+          }
+        />
+      )}
+    </>
+  );
+}
+
+// ---- Channels (private-channel membership) -------------------------------
+
+function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
+  const community = useCommunity(cid);
+  const canManage = community?.canDo(PERM.MANAGE_CHANNELS) ?? false;
+  const owner = state.material.owner;
+  const privateChannels = state.channels.filter((c) => c.private && !c.deleted);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [kickTarget, setKickTarget] = useState<{ channelId: string; member: string; name: string } | null>(null);
+
+  async function addMember(channelId: string, member: string) {
+    if (!community) return;
+    setBusy(true);
+    setError("");
+    try {
+      // Grant the channel-scoped role first (the observable roster), then deliver
+      // the current channel key — CORD-03 "delivered on grant", no rotation.
+      const rid = channelRoleId(channelId, state);
+      if (rid) {
+        const grants = new Set(state.grants.get(member) ?? []);
+        grants.add(rid);
+        await community.grantRoles(member, [...grants]);
+      }
+      await community.grantChannelAccess(channelId, member);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function kickMember(channelId: string, member: string) {
+    if (!community) return;
+    // Remove them from the roster, then rekey the channel excluding them — the
+    // only removal that enforces (CORD-06). rotateChannel requires we outrank them.
+    const rid = channelRoleId(channelId, state);
+    if (rid) {
+      const grants = new Set(state.grants.get(member) ?? []);
+      grants.delete(rid);
+      await community.grantRoles(member, [...grants]);
+    }
+    const keep = channelRoster(channelId, state).filter((m) => m !== member);
+    await community.rotateChannel(channelId, { keep, exclude: [member] });
+  }
+
+  return (
+    <>
+      <h2>Channels</h2>
+      <p className="settings-sub">
+        Private channels and who can read them. Adding a member hands over the channel key; removing
+        one rotates the key so they lose access to everything sent afterward.
+      </p>
+      {error && <div className="error">{error}</div>}
+      {privateChannels.length === 0 && (
+        <p className="settings-sub">
+          No private channels yet. Create one from the sidebar (check “Private channel”).
+        </p>
+      )}
+      {privateChannels.map((ch) => {
+        const roster = channelRoster(ch.channel_id, state);
+        const rosterSet = new Set(roster);
+        const outsiders = [...state.members].filter((m) => !rosterSet.has(m)).sort();
+        return (
+          <div key={ch.channel_id} style={{ marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Lock size={16} />
+              <strong>{ch.name}</strong>
+              <span className="settings-sub" style={{ margin: 0 }}>
+                {roster.length} member{roster.length === 1 ? "" : "s"}
+              </span>
+              {canManage && (
+                <button
+                  className="btn danger"
+                  style={{ marginLeft: "auto" }}
+                  onClick={() => setDeleteTarget({ id: ch.channel_id, name: ch.name })}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
+            </div>
+            {roster.map((m) => (
+              <div key={m} className="role-row">
+                <UserAvatar pubkey={m} />
+                <div>
+                  <div className="m-name">
+                    <UserName pubkey={m} />
+                  </div>
+                  {m === owner && <span className="badge owner">Owner</span>}
+                </div>
+                {canManage && m !== owner && (
+                  <div style={{ marginLeft: "auto" }}>
+                    <button
+                      className="btn ghost"
+                      disabled={busy}
+                      onClick={() => setKickTarget({ channelId: ch.channel_id, member: m, name: ch.name })}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {canManage && outsiders.length > 0 && (
+              <div className="field" style={{ marginTop: 8 }}>
+                <select
+                  value=""
+                  disabled={busy}
+                  onChange={(e) => {
+                    if (e.target.value) void addMember(ch.channel_id, e.target.value);
+                  }}
+                >
+                  <option value="">Add a member…</option>
+                  {outsiders.map((m) => (
+                    <option key={m} value={m}>
+                      {m.slice(0, 12)}…
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {deleteTarget && (
+        <ConfirmModal
+          title={`Delete #${deleteTarget.name}`}
+          danger
+          confirmLabel="Delete channel"
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={async () => {
+            await community?.deleteChannel(deleteTarget.id);
+          }}
+          body={
+            <p>
+              Delete <strong>#{deleteTarget.name}</strong> for everyone. Its message history stops
+              syncing and the channel disappears from the sidebar. This cannot be undone.
+            </p>
+          }
+        />
+      )}
+      {kickTarget && (
+        <ConfirmModal
+          title="Remove from channel"
+          danger
+          confirmLabel="Remove & rekey"
+          onClose={() => setKickTarget(null)}
+          onConfirm={async () => {
+            await kickMember(kickTarget.channelId, kickTarget.member);
+          }}
+          body={
+            <p>
+              Remove <UserName pubkey={kickTarget.member} /> from <strong>#{kickTarget.name}</strong> and
+              rotate its key. They keep whatever they already synced, but nothing sent afterward will
+              decrypt for them. Remaining members re-sync automatically.
+            </p>
           }
         />
       )}

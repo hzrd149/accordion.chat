@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { use$ } from "applesauce-react/hooks";
 import { useConcord } from "./concord-context";
 import { useCommunity } from "./use-community";
 import { rumorMs } from "applesauce-concord/helpers";
+import type { CommunityState } from "applesauce-concord";
 import type { ChatMessage } from "./chat/fold";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
@@ -206,16 +208,32 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
 }
 
 export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () => void }) {
+  const client = useConcord();
   const community = useCommunity(cid);
+  const state = use$(() => client.getState$(cid), [cid]) as CommunityState | undefined;
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
   const [voice, setVoice] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function create() {
+    if (!community) return;
     setBusy(true);
     try {
-      await community?.createChannel(name.trim().toLowerCase().replace(/\s+/g, "-"), priv, voice);
+      const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
+      const channelId = await community.createChannel(slug, priv, voice);
+      // A private channel's membership is a channel-scoped role (CORD-04 §2, see
+      // chat/channel-roles.ts): mint it and self-grant so the creator is roster
+      // member #1. Public channels ride the community root — no role needed.
+      if (priv && channelId && state) {
+        const roleId = await community.createRole(`#${slug}`, state.roles.length + 1, 0n, {
+          kind: "channel",
+          channel_id: channelId,
+        });
+        const mine = new Set(state.grants.get(client.pubkey) ?? []);
+        mine.add(roleId);
+        await community.grantRoles(client.pubkey, [...mine]);
+      }
       onClose();
     } catch {
       setBusy(false);
