@@ -29,7 +29,7 @@
     "fuse.js": "^7.4.2",
     "livekit-client": "2.19.2",
     "lucide-react": "^1.23.0",
-    "nostr-idb": "^5.0.0",
+    "nostr-idb": "^5.1.0",
     "nostr-tools": "^2.23.9",
     "nostr-wasm": "^0.1.0",
     "qrcode": "^1.5.4",

@@ -14,7 +14,10 @@
 //
 // Rumors are *unsigned* (verified by re-hashing their id via `verifyRumor`, not a
 // signature) and are decrypted plaintext, so they must never share the public
-// event cache DB. We give each (community, plane) its own IndexedDB database —
+// event cache DB. nostr-idb ≥5.1 stores these first-class via its `RumorEvent`
+// type (its `validateEvent` requires only NIP-01 fields, not `sig`), so they go
+// in and out without the sig-shim casts the old signed-only API forced.
+// We give each (community, plane) its own IndexedDB database —
 // a rumor carries nothing that identifies its plane, and we can't tag it without
 // changing its id, so per-plane databases are the only clean namespacing.
 
@@ -29,6 +32,11 @@ import {
   type NostrIDBDatabase,
 } from "nostr-idb";
 import type { NostrEvent } from "nostr-tools";
+
+// nostr-idb ≥5.1 is generic over `StoredEvent = NostrEvent | RumorEvent`; a
+// `Rumor` (applesauce's unsigned-with-id shape) satisfies `RumorEvent`, so we
+// parameterise the store helpers with it and let the rows type as rumors end
+// to end — no signed-event casts.
 import { bufferTime, filter } from "rxjs";
 
 // Cap cached rumors per plane so a busy channel can't grow the DB without bound.
@@ -77,10 +85,10 @@ export function createRumorStoreFactory(): (communityId: string, planeKey: strin
     void dbReady.then(async (db) => {
       if (!db) return;
       try {
-        const cached = await getEventsForFilters(db, [{ since: 0 }]);
+        const cached = await getEventsForFilters<Rumor>(db, [{ since: 0 }]);
         for (const event of cached) {
-          markFromCache(event);
-          store.add(event as unknown as Rumor);
+          markFromCache(event as unknown as NostrEvent);
+          store.add(event);
         }
       } catch (err) {
         console.warn(`[concord] rumor cache: hydrate(${name}) failed`, err);
@@ -89,7 +97,7 @@ export function createRumorStoreFactory(): (communityId: string, planeKey: strin
 
     // Persist newly-arrived rumors (skip the ones we just hydrated). Subscribed
     // synchronously so nothing added during the open is missed; the handler waits
-    // on dbReady. nostr-idb stores by id and doesn't check signatures, so the
+    // on dbReady. nostr-idb stores rumors by id without a signature check, so the
     // sig-less rumors persist as-is.
     store.insert$
       .pipe(
@@ -101,7 +109,7 @@ export function createRumorStoreFactory(): (communityId: string, planeKey: strin
         const db = await dbReady;
         if (!db) return;
         try {
-          await addEvents(db, batch as unknown as NostrEvent[]);
+          await addEvents<Rumor>(db, batch);
           await enforceCap(db);
         } catch (err) {
           console.warn(`[concord] rumor cache: write(${name}) failed`, err);

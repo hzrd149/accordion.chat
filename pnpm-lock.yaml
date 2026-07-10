@@ -79,8 +79,8 @@ importers:
         specifier: ^1.23.0
         version: 1.23.0(react@19.2.7)
       nostr-idb:
-        specifier: ^5.0.0
-        version: 5.0.0
+        specifier: ^5.1.0
+        version: 5.1.0
       nostr-tools:
         specifier: ^2.23.9
         version: 2.23.9(typescript@6.0.3)
@@ -2271,8 +2271,8 @@ packages:
     resolution: {integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==}
     engines: {node: '>=18'}
 
-  nostr-idb@5.0.0:
-    resolution: {integrity: sha512-w5y4AnHefZIwCCL11NryfM2xp3U0Ka4qVNQEYAjnQbPwyoV+bZTdwuPXHCdRDWvhOFP2bZr1WBegcsAmkBjrxQ==}
+  nostr-idb@5.1.0:
+    resolution: {integrity: sha512-uJKLZPXVMlGg6etyK/RWuV3vTWMOjIo1qNhre59kHZHl0/oOcAUcj6Y/ZgutEA9++9fLcgbr4EJFqauuczAm1A==}
 
   nostr-tools@2.23.9:
     resolution: {integrity: sha512-PBN3TpGh+EszlTZWpQdvcqEMqhcKcY1vTw0Xkkccg+TyP7y/icu9/iXJw72aFZ/ETm35ehU0hneGTXLaTSkImw==}
@@ -5068,7 +5068,7 @@ snapshots:
 
   node-releases@2.0.50: {}
 
-  nostr-idb@5.0.0:
+  nostr-idb@5.1.0:
     dependencies:
       debug: 4.4.3
       idb: 8.0.3

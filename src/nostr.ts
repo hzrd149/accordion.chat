@@ -18,7 +18,7 @@ import {
 	INVITE_LIST_KIND,
 } from "applesauce-concord/helpers";
 import { NostrIDB } from "nostr-idb";
-import type { Filter } from "nostr-tools";
+import type { Filter, NostrEvent } from "nostr-tools";
 import { enableWasmVerification } from "./crypto-wasm";
 
 export const eventStore = new EventStore();
@@ -39,7 +39,11 @@ void enableWasmVerification(eventStore);
 // *decoded* Concord rumors (never raw 1059 giftwraps) per community+plane in
 // their own IndexedDB databases. This cache holds the public Nostr events
 // (profiles etc.) the UI renders alongside them.
-const nostrIDB = new NostrIDB();
+// Parameterised with the signed NostrEvent shape: nostr-idb ≥5.1 defaults its
+// generic to `StoredEvent` (which also admits sig-less rumors), but this public
+// cache only ever holds signed events, and the EventStore loader's CacheRequest
+// requires `NostrEvent[]`. The per-plane rumor cache is the sig-less counterpart.
+const nostrIDB = new NostrIDB<NostrEvent>();
 // start() kicks off the write-flush cycle; add()ed events queue until it runs.
 // getDb() opens the database lazily, so we don't need to await this — reads and
 // writes before it resolves simply see an empty cache.

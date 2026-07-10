@@ -5,6 +5,7 @@
 # other dependency.
 minimumReleaseAgeExclude:
   - applesauce-relay
+  - nostr-idb@5.1.0
 
 allowBuilds:
   esbuild: true
