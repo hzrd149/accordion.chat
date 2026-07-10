@@ -64,17 +64,36 @@ function useAttachmentSrc(a: UrlAttachment): string | null {
   return cached;
 }
 
-function AttachmentView({ att }: { att: UrlAttachment }) {
+/** Images and videos tile into a gallery grid; audio/files always stand alone. */
+function isGalleryMedia(att: UrlAttachment): boolean {
+  const kind = att.type?.split("/")[0];
+  return kind === "image" || kind === "video" || kind === undefined;
+}
+
+function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolean }) {
   const src = useAttachmentSrc(att);
   const kind = att.type?.split("/")[0];
 
-  if (!src) return <div className="attachment loading" />;
-  if (kind === "video") return <video className="attachment" src={src} controls />;
+  if (!src) return <div className={gallery ? "attachment-tile loading" : "attachment loading"} />;
+  if (kind === "video") {
+    if (gallery)
+      return (
+        <div className="attachment-tile">
+          <video src={src} controls playsInline />
+        </div>
+      );
+    return <video className="attachment" src={src} controls />;
+  }
   if (kind === "audio") return <audio className="attachment audio" src={src} controls />;
   if (kind === "image" || kind === undefined) {
     return (
-      <a href={src} target="_blank" rel="noreferrer" className="attachment-link">
-        <img className="attachment" src={src} alt="" loading="lazy" />
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        className={gallery ? "attachment-tile" : "attachment-link"}
+      >
+        <img className={gallery ? undefined : "attachment"} src={src} alt="" loading="lazy" />
       </a>
     );
   }
@@ -108,32 +127,39 @@ export const MessageContent = memo(function MessageContent({
   const byUrl = useMemo(() => new Map(withUrl.map((a) => [a.url, a])), [withUrl]);
   const rendered = new Set<string>();
 
-  const nodes: React.ReactNode[] = [];
+  // Build an interleaved list of text nodes and media attachments; a second pass
+  // coalesces consecutive runs of image/video media into a gallery grid.
+  type Item = { media: UrlAttachment } | { node: React.ReactNode };
+  const items: Item[] = [];
   root.children.forEach((node: Content, i: number) => {
     if (node.type === "link") {
       const att = byUrl.get(node.href);
       if (att) {
         rendered.add(att.url);
-        nodes.push(<AttachmentView key={i} att={att} />);
+        items.push({ media: att });
       } else {
-        nodes.push(
-          <a key={i} href={node.href} target="_blank" rel="noreferrer">
-            {node.value}
-          </a>,
-        );
+        items.push({
+          node: (
+            <a key={i} href={node.href} target="_blank" rel="noreferrer">
+              {node.value}
+            </a>
+          ),
+        });
       }
     } else if (node.type === "gallery") {
       node.links.forEach((href, j) => {
         const att = byUrl.get(href);
         if (att) {
           rendered.add(att.url);
-          nodes.push(<AttachmentView key={`${i}-${j}`} att={att} />);
+          items.push({ media: att });
         } else {
-          nodes.push(
-            <a key={`${i}-${j}`} href={href} target="_blank" rel="noreferrer">
-              {href}
-            </a>,
-          );
+          items.push({
+            node: (
+              <a key={`${i}-${j}`} href={href} target="_blank" rel="noreferrer">
+                {href}
+              </a>
+            ),
+          });
         }
       });
     } else if (node.type === "mention") {
@@ -141,35 +167,64 @@ export const MessageContent = memo(function MessageContent({
       // falling back to the raw text if the pointer carries no pubkey.
       const pubkey = getPubkeyFromDecodeResult(node.decoded);
       if (pubkey) {
-        nodes.push(
-          <span key={i} className="mention">
-            @<UserName pubkey={pubkey} />
-          </span>,
-        );
+        items.push({
+          node: (
+            <span key={i} className="mention">
+              @<UserName pubkey={pubkey} />
+            </span>
+          ),
+        });
       } else {
-        nodes.push(<span key={i}>{node.encoded}</span>);
+        items.push({ node: <span key={i}>{node.encoded}</span> });
       }
     } else if (node.type === "emoji") {
       // NIP-30 custom emoji — render the tagged image inline.
       const e = node as unknown as { url: string; code: string; raw: string };
-      nodes.push(<img key={i} className="inline-emoji" src={e.url} alt={e.raw} title={e.code} loading="lazy" />);
+      items.push({
+        node: <img key={i} className="inline-emoji" src={e.url} alt={e.raw} title={e.code} loading="lazy" />,
+      });
     } else {
       // text / mention / hashtag — render the raw written form.
       const value = "value" in node ? (node as { value?: string }).value : undefined;
-      if (value) nodes.push(<span key={i}>{value}</span>);
+      if (value) items.push({ node: <span key={i}>{value}</span> });
     }
   });
 
   // Attachments whose URL never appeared in the text (e.g. other clients) get
   // appended so they're never silently dropped.
-  const leftover = withUrl.filter((a) => !rendered.has(a.url));
+  withUrl.filter((a) => !rendered.has(a.url)).forEach((att) => items.push({ media: att }));
 
-  return (
-    <div className="msg-text">
-      {nodes}
-      {leftover.map((att, i) => (
-        <AttachmentView key={`extra-${i}`} att={att} />
-      ))}
-    </div>
-  );
+  // Coalesce consecutive image/video media into gallery grids. Text between two
+  // images breaks the run, so only truly adjacent media tile together.
+  const out: React.ReactNode[] = [];
+  let run: UrlAttachment[] = [];
+  let key = 0;
+  const flushRun = () => {
+    if (run.length === 0) return;
+    if (run.length === 1) {
+      out.push(<AttachmentView key={`m${key++}`} att={run[0]} />);
+    } else {
+      const group = run;
+      out.push(
+        <div className="msg-gallery" data-count={Math.min(group.length, 4)} key={`g${key++}`}>
+          {group.map((att, j) => (
+            <AttachmentView key={j} att={att} gallery />
+          ))}
+        </div>,
+      );
+    }
+    run = [];
+  };
+  for (const it of items) {
+    if ("media" in it && isGalleryMedia(it.media)) {
+      run.push(it.media);
+    } else {
+      flushRun();
+      if ("media" in it) out.push(<AttachmentView key={`m${key++}`} att={it.media} />);
+      else out.push(it.node);
+    }
+  }
+  flushRun();
+
+  return <div className="msg-text">{out}</div>;
 });

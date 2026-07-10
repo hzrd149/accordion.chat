@@ -775,6 +775,41 @@ textarea {
   }
 }
 
+/* ---- Media gallery ---- */
+/* Consecutive images/videos tile into a grid instead of stacking. */
+.msg-text .msg-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+  max-width: min(420px, 100%);
+}
+.msg-gallery .attachment-tile {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 8px;
+  aspect-ratio: 1 / 1;
+  background: var(--bg-input);
+  cursor: zoom-in;
+}
+.msg-gallery .attachment-tile img,
+.msg-gallery .attachment-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  margin: 0;
+}
+.msg-gallery .attachment-tile.loading {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+/* An odd item count leaves a lone last tile — let it span the full row. */
+.msg-gallery .attachment-tile:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 9;
+}
+
 .reply-bar {
   background: var(--bg-sidebar);
   border-radius: 8px 8px 0 0;
