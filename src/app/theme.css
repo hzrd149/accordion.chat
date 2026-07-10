@@ -1328,17 +1328,24 @@ textarea {
     align-items: center;
     justify-content: center;
     position: fixed;
-    top: 8px;
+    top: 0;
     z-index: 45;
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    background: var(--bg-sidebar);
+    /* Flush into the 48px header bar so it reads as a real top-nav button. */
+    width: 48px;
+    height: 48px;
+    background: none;
+    color: var(--text-muted);
+  }
+  .drawer-toggle:active {
     color: var(--text-bright);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   }
   .drawer-toggle.nav {
-    left: 8px;
+    left: 0;
+  }
+  /* The toggle belongs to the collapsed top nav only — once the drawer is open
+     the rail is on top of it, so hide it to avoid covering the first community. */
+  .app.nav-open .drawer-toggle.nav {
+    display: none;
   }
 
   /* Keep the chat header clear of the floating nav toggle. */
