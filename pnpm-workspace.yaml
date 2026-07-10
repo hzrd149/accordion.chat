@@ -6,22 +6,15 @@
 minimumReleaseAgeExclude:
   - applesauce-relay
   - nostr-idb@5.1.0
+  - applesauce-concord@0.0.0-concord-20260710175615 || 0.0.0-concord-20260710182908
+  - applesauce-accounts@0.0.0-concord-20260710182908
+  - applesauce-actions@0.0.0-concord-20260710182908
+  - applesauce-common@0.0.0-concord-20260710182908
+  - applesauce-content@0.0.0-concord-20260710182908
+  - applesauce-core@0.0.0-concord-20260710182908
+  - applesauce-loaders@0.0.0-concord-20260710182908
+  - applesauce-react@0.0.0-concord-20260710182908
+  - applesauce-signers@0.0.0-concord-20260710182908
 
 allowBuilds:
   esbuild: true
-
-overrides:
-  applesauce-accounts: link:../applesauce/packages/accounts
-  applesauce-actions: link:../applesauce/packages/actions
-  applesauce-common: link:../applesauce/packages/common
-  applesauce-concord: link:../applesauce/packages/concord
-  applesauce-content: link:../applesauce/packages/content
-  applesauce-core: link:../applesauce/packages/core
-  applesauce-extra: link:../applesauce/packages/extra
-  applesauce-loaders: link:../applesauce/packages/loaders
-  applesauce-react: link:../applesauce/packages/react
-  applesauce-relay: link:../applesauce/packages/relay
-  applesauce-signers: link:../applesauce/packages/signers
-  applesauce-sqlite: link:../applesauce/packages/sqlite
-  applesauce-wallet: link:../applesauce/packages/wallet
-  applesauce-wallet-connect: link:../applesauce/packages/wallet-connect
