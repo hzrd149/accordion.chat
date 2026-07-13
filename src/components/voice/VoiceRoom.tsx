@@ -37,6 +37,7 @@ import { voiceSenderKey } from "applesauce-concord/helpers";
 import { randomBytes } from "../../lib/bytes";
 import { CallStage } from "./CallStage";
 import { CallBar } from "./CallBar";
+import { FloatingCallBox } from "./FloatingCallBox";
 import { playJoinSound, playLeaveSound } from "./callSounds";
 import { VoiceIdentityContext, useVoiceIdentity, type VoiceIdentityResolver } from "./identity";
 import type { ActiveCall } from "./call-context";
@@ -319,10 +320,12 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   };
 
   // The visible call surface renders into the current voice channel's slot
-  // (`stageEl`, center-top with chat below) when that channel is on screen, or a
-  // compact bar (fixed, top-center) when you're browsing elsewhere. Either way
-  // it's a portal, so the LiveKit connection stays mounted here at the root.
-  const host = (node: ReactNode) => {
+  // (`stageEl`, center-top with chat below) when that channel is on screen, full
+  // screen when expanded, or a draggable/resizable floating box when you're
+  // browsing elsewhere (`draggable`; transient error/connecting states use a
+  // simple fixed bar instead). Either way it's a portal, so the LiveKit
+  // connection stays mounted here at the root.
+  const host = (node: ReactNode, draggable = false) => {
     if (expanded) {
       return createPortal(
         <div className="fixed inset-0 z-[70] flex min-h-0 flex-col overflow-hidden bg-base-100 text-base-content">
@@ -339,6 +342,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
         stageEl,
       );
     }
+    if (draggable) return createPortal(<FloatingCallBox>{node}</FloatingCallBox>, document.body);
     return createPortal(
       <div className="fixed left-1/2 top-3 z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
         {node}
@@ -406,11 +410,13 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
             <CallStage
               channelName={call.channelName}
               expanded={expanded}
+              fill={!expanded && !stageEl}
               volumes={participantVolumes}
               onVolumeChange={setParticipantVolume}
             />
             <CallBar expanded={expanded} onToggleExpanded={() => setExpanded(!expanded)} onLeave={onLeave} />
           </>,
+          true,
         )}
       </LiveKitRoom>
     </VoiceIdentityContext.Provider>

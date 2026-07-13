@@ -141,11 +141,15 @@ function AvatarTile({
 export function CallStage({
   channelName,
   expanded,
+  fill = false,
   volumes,
   onVolumeChange,
 }: {
   channelName: string;
   expanded: boolean;
+  /** Fill the parent's height (flex-1) instead of capping at 42vh — used by the
+   *  resizable floating box so the tile grid grows/scrolls with the box. */
+  fill?: boolean;
   volumes: Record<string, number>;
   onVolumeChange: (key: string, volume: number) => void;
 }) {
@@ -160,7 +164,7 @@ export function CallStage({
   const avatarParticipants = participants.filter((p) => !videoIdentities.has(p.identity));
 
   return (
-    <div className={expanded ? "min-h-0 flex-1 overflow-y-auto p-4" : "max-h-[42vh] overflow-y-auto p-3"}>
+    <div className={expanded ? "min-h-0 flex-1 overflow-y-auto p-4" : fill ? "min-h-0 flex-1 overflow-y-auto p-3" : "max-h-[42vh] overflow-y-auto p-3"}>
       <div className={expanded ? "mb-4 text-sm font-semibold text-base-content/70" : "mb-2 text-xs font-semibold text-base-content/60"}>
         #{channelName} · {participants.length} in call
       </div>
