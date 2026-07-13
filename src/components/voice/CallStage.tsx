@@ -10,7 +10,7 @@ import {
   type TrackReference,
 } from "@livekit/components-react";
 import { Track, type Participant } from "livekit-client";
-import { MicOff, ShieldQuestion } from "lucide-react";
+import { MicOff, MoreVertical, ShieldQuestion, Volume1, VolumeX } from "lucide-react";
 
 import { UserAvatar, UserName } from "../User";
 import { useVoiceIdentity } from "./identity";
@@ -31,17 +31,85 @@ function TileLabel({ identity }: { identity: string }) {
   );
 }
 
-function VideoTile({ track }: { track: TrackReference }) {
+function ParticipantMenu({
+  participant,
+  volume,
+  onVolumeChange,
+}: {
+  participant: Participant;
+  volume: number;
+  onVolumeChange: (identity: string, volume: number) => void;
+}) {
+  if (participant.isLocal) return null;
+  const Icon = volume === 0 ? VolumeX : Volume1;
+  return (
+    <div className="dropdown dropdown-end absolute right-1.5 top-1.5">
+      <button className="btn btn-circle btn-xs border-0 bg-black/55 text-white hover:bg-black/70" title="Participant options">
+        <MoreVertical size={14} />
+      </button>
+      <ul className="menu dropdown-content z-10 mt-1 w-52 overflow-hidden rounded-box border border-base-300 bg-base-100 p-0 text-base-content shadow-xl">
+        <li>
+          <button
+            className="rounded-none"
+            onClick={() => onVolumeChange(participant.identity, volume === 0 ? 1 : 0)}
+          >
+            {volume === 0 ? <Volume1 size={14} /> : <VolumeX size={14} />}
+            {volume === 0 ? "Unmute" : "Mute"}
+          </button>
+        </li>
+        <li>
+          <label className="flex flex-col items-stretch gap-2 rounded-none text-xs font-semibold text-base-content/70">
+            <span className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5">
+                <Icon size={13} /> Volume
+              </span>
+              <span>{Math.round(volume * 100)}%</span>
+            </span>
+            <input
+              className="range range-primary range-xs"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              title={`Volume ${Math.round(volume * 100)}%`}
+              onChange={(e) => onVolumeChange(participant.identity, Number(e.currentTarget.value))}
+            />
+          </label>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function VideoTile({
+  track,
+  volume,
+  onVolumeChange,
+}: {
+  track: TrackReference;
+  volume: number;
+  onVolumeChange: (identity: string, volume: number) => void;
+}) {
   const identity = track.participant.identity;
   return (
     <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-lg bg-base-300 [&_video]:h-full [&_video]:w-full [&_video]:object-cover">
       <VideoTrack trackRef={track} />
       <TileLabel identity={identity} />
+      <ParticipantMenu participant={track.participant} volume={volume} onVolumeChange={onVolumeChange} />
     </div>
   );
 }
 
-function AvatarTile({ participant }: { participant: Participant }) {
+function AvatarTile({
+  participant,
+  volume,
+  onVolumeChange,
+}: {
+  participant: Participant;
+  volume: number;
+  onVolumeChange: (identity: string, volume: number) => void;
+}) {
   const resolve = useVoiceIdentity();
   const info = resolve(participant.identity);
   return (
@@ -61,11 +129,22 @@ function AvatarTile({ participant }: { participant: Participant }) {
         </span>
       )}
       <TileLabel identity={participant.identity} />
+      <ParticipantMenu participant={participant} volume={volume} onVolumeChange={onVolumeChange} />
     </div>
   );
 }
 
-export function CallStage({ channelName }: { channelName: string }) {
+export function CallStage({
+  channelName,
+  expanded,
+  volumes,
+  onVolumeChange,
+}: {
+  channelName: string;
+  expanded: boolean;
+  volumes: Record<string, number>;
+  onVolumeChange: (identity: string, volume: number) => void;
+}) {
   const participants = useParticipants();
   const videoTracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], {
     onlySubscribed: true,
@@ -77,16 +156,26 @@ export function CallStage({ channelName }: { channelName: string }) {
   const avatarParticipants = participants.filter((p) => !videoIdentities.has(p.identity));
 
   return (
-    <div className="max-h-[42vh] overflow-y-auto p-3">
-      <div className="mb-2 text-xs font-semibold text-base-content/60">
+    <div className={expanded ? "min-h-0 flex-1 overflow-y-auto p-4" : "max-h-[42vh] overflow-y-auto p-3"}>
+      <div className={expanded ? "mb-4 text-sm font-semibold text-base-content/70" : "mb-2 text-xs font-semibold text-base-content/60"}>
         #{channelName} · {participants.length} in call
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2.5">
+      <div className={expanded ? "grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3" : "grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2.5"}>
         {videoTracks.map((t) => (
-          <VideoTile key={`${t.participant.identity}:${t.source}`} track={t} />
+          <VideoTile
+            key={`${t.participant.identity}:${t.source}`}
+            track={t}
+            volume={volumes[t.participant.identity] ?? 1}
+            onVolumeChange={onVolumeChange}
+          />
         ))}
         {avatarParticipants.map((p) => (
-          <AvatarTile key={p.identity} participant={p} />
+          <AvatarTile
+            key={p.identity}
+            participant={p}
+            volume={volumes[p.identity] ?? 1}
+            onVolumeChange={onVolumeChange}
+          />
         ))}
       </div>
     </div>

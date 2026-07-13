@@ -24,6 +24,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [active, setActive] = useState<ActiveCall | null>(null);
   const [pending, setPending] = useState<CallRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [stageEl, setStageEl] = useState<HTMLElement | null>(null);
   // Guards against a stale broker-resolution completing after a newer join/leave.
   const joinSeq = useRef(0);
@@ -33,6 +34,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setPending(null);
     setActive(null);
     setError(null);
+    setExpanded(false);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -46,6 +48,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (!voice) return; // not a voice channel
       const seq = ++joinSeq.current;
       setError(null);
+      setExpanded(false);
       setActive(null);
       setPending(req);
       void (async () => {
@@ -72,8 +75,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const controller = useMemo(
-    () => ({ active, pending, error, join, migrate, leave, clearError, stageEl, setStageEl }),
-    [active, pending, error, join, migrate, leave, clearError, stageEl],
+    () => ({ active, pending, error, join, migrate, leave, clearError, expanded, setExpanded, stageEl, setStageEl }),
+    [active, pending, error, join, migrate, leave, clearError, expanded, stageEl],
   );
 
   return (

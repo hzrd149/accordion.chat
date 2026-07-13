@@ -3,11 +3,19 @@
 // only (no enforceable server-side mute), so these govern our own publishing.
 
 import { useLocalParticipant } from "@livekit/components-react";
-import { Mic, MicOff, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
+import { Maximize2, Mic, MicOff, Minimize2, PhoneOff, ScreenShare, ScreenShareOff, Video, VideoOff } from "lucide-react";
 
 import { playMuteSound, playScreenShareSound, playUnmuteSound } from "./callSounds";
 
-export function CallBar({ onLeave }: { onLeave: () => void }) {
+export function CallBar({
+  expanded,
+  onToggleExpanded,
+  onLeave,
+}: {
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onLeave: () => void;
+}) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
     useLocalParticipant();
 
@@ -40,6 +48,9 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
         }}
       >
         {isScreenShareEnabled ? <ScreenShareOff size={18} /> : <ScreenShare size={18} />}
+      </button>
+      <button className="btn btn-circle" title={expanded ? "Exit full screen" : "Full screen"} onClick={onToggleExpanded}>
+        {expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
       </button>
       <button className="btn btn-error btn-circle" title="Leave call" onClick={onLeave}>
         <PhoneOff size={18} />

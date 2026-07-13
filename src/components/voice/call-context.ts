@@ -31,6 +31,9 @@ export interface CallController {
   leave(): void;
   /** Dismiss the last error. */
   clearError(): void;
+  /** Whether the call UI is expanded into a Zoom-style overlay. */
+  expanded: boolean;
+  setExpanded(expanded: boolean): void;
   /**
    * The DOM node the live call surface renders into — set by the voice channel's
    * view so the (persistently-mounted) call renders center-top of that channel,

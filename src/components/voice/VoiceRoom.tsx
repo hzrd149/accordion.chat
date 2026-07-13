@@ -7,10 +7,10 @@
 // does the AES-256-GCM frame crypto; a custom key provider feeds it the
 // externally-derived per-identity key material.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { LiveKitRoom, RoomAudioRenderer } from "@livekit/components-react";
+import { AudioTrack, LiveKitRoom, useTracks, type TrackReference } from "@livekit/components-react";
 import { Loader2, PhoneOff } from "lucide-react";
 import {
   AudioPresets,
@@ -18,6 +18,7 @@ import {
   DisconnectReason,
   Room,
   RoomEvent,
+  Track,
   VideoPresets,
   type RoomOptions,
 } from "livekit-client";
@@ -41,6 +42,30 @@ import { VoiceIdentityContext, type VoiceIdentityResolver } from "./identity";
 import type { ActiveCall } from "./call-context";
 
 const EMPTY_FOLD: VoicePresenceFold = { present: [], claims: new Map() };
+
+type ParticipantVolumes = Record<string, number>;
+
+function ParticipantAudioRenderer({ volumes }: { volumes: ParticipantVolumes }) {
+  const tracks = useTracks([Track.Source.Microphone, Track.Source.ScreenShareAudio, Track.Source.Unknown], {
+    updateOnlyOn: [],
+    onlySubscribed: true,
+  }).filter(
+    (ref): ref is TrackReference =>
+      ref.publication !== undefined && !ref.participant.isLocal && ref.publication.kind === Track.Kind.Audio,
+  );
+
+  return (
+    <div style={{ display: "none" }}>
+      {tracks.map((trackRef) => (
+        <AudioTrack
+          key={`${trackRef.participant.identity}:${trackRef.publication.trackSid}`}
+          trackRef={trackRef}
+          volume={volumes[trackRef.participant.identity] ?? 1}
+        />
+      ))}
+    </div>
+  );
+}
 
 /**
  * A per-sender key provider for Concord AV (CORD-07 §3): every publisher
@@ -85,6 +110,11 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // anti-replay would 401 the second (e.g. React StrictMode's double-invoke).
   const [tokenData, setTokenData] = useState<AvToken | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [participantVolumes, setParticipantVolumes] = useState<ParticipantVolumes>({});
+  const setParticipantVolume = useCallback((identity: string, volume: number) => {
+    const next = Math.min(1, Math.max(0, volume));
+    setParticipantVolumes((current) => ({ ...current, [identity]: next }));
+  }, []);
   const tokenReq = useRef<{ key: string; promise: Promise<AvToken> } | null>(null);
   useEffect(() => {
     if (!voice) return;
@@ -231,7 +261,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // beats ours in the tie-break, migrate there — once per mount (the remount key
   // includes the broker, so a migration builds a fresh room). Guards on someone
   // ELSE being there, so two simultaneous joiners converge on one winner.
-  const { migrate, stageEl } = useCall();
+  const { migrate, stageEl, expanded, setExpanded } = useCall();
   const migrated = useRef(false);
   useEffect(() => {
     if (!tokenData || !voice || migrated.current) return;
@@ -256,20 +286,30 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // (`stageEl`, center-top with chat below) when that channel is on screen, or a
   // compact bar (fixed, top-center) when you're browsing elsewhere. Either way
   // it's a portal, so the LiveKit connection stays mounted here at the root.
-  const host = (node: ReactNode) =>
-    stageEl
-      ? createPortal(
-          <div className="mx-auto mt-2.5 mb-1 flex w-[min(860px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-lg">
-            {node}
-          </div>,
-          stageEl,
-        )
-      : createPortal(
-          <div className="fixed left-1/2 top-3 z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
-            {node}
-          </div>,
-          document.body,
-        );
+  const host = (node: ReactNode) => {
+    if (expanded) {
+      return createPortal(
+        <div className="fixed inset-0 z-[70] flex min-h-0 flex-col overflow-hidden bg-base-100 text-base-content">
+          {node}
+        </div>,
+        document.body,
+      );
+    }
+    if (stageEl) {
+      return createPortal(
+        <div className="mx-auto mt-2.5 mb-1 flex w-[min(860px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-lg">
+          {node}
+        </div>,
+        stageEl,
+      );
+    }
+    return createPortal(
+      <div className="fixed left-1/2 top-3 z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
+        {node}
+      </div>,
+      document.body,
+    );
+  };
 
   if (error) {
     return host(
@@ -310,10 +350,10 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
           onLeave();
         }}
       >
-        <RoomAudioRenderer />
+        <ParticipantAudioRenderer volumes={participantVolumes} />
         {host(
           <>
-            {!stageEl && (
+            {(!stageEl || expanded) && (
               <div className="flex items-center gap-2.5 border-b border-base-300 px-3 py-2">
                 <span className="flex-1 text-sm font-semibold text-base-content">
                   In call · #{call.channelName}
@@ -327,8 +367,13 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
                 </button>
               </div>
             )}
-            <CallStage channelName={call.channelName} />
-            <CallBar onLeave={onLeave} />
+            <CallStage
+              channelName={call.channelName}
+              expanded={expanded}
+              volumes={participantVolumes}
+              onVolumeChange={setParticipantVolume}
+            />
+            <CallBar expanded={expanded} onToggleExpanded={() => setExpanded(!expanded)} onLeave={onLeave} />
           </>,
         )}
       </LiveKitRoom>
