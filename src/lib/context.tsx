@@ -1,13 +1,12 @@
-import { useEffect, useMemo } from "react";
-import type { ReactNode } from "react";
-import { useActiveAccount } from "applesauce-react/hooks";
 import { ConcordClient } from "applesauce-concord";
-import type { ISigner } from "applesauce-signers";
-import { pool, eventStore } from "../nostr";
-import { createConcordUploader } from "./concord-uploader";
-import { createRumorStoreFactory } from "./rumor-cache";
+import { useActiveAccount } from "applesauce-react/hooks";
+import type { ReactNode } from "react";
+import { useEffect, useMemo } from "react";
+import { eventStore, pool } from "../nostr";
 import { attachVoiceGc } from "../voice/registry";
 import { ClientContext } from "./concord-context";
+import { createConcordUploader } from "./concord-uploader";
+import { createRumorStoreFactory } from "./rumor-cache";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();
@@ -16,15 +15,14 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
   // state in the effect avoids a cascading render on every login.
   const client = useMemo(() => {
     if (!account) return null;
-    const signer = account.signer as ISigner;
     // The uploader resolves a community's own Blossom servers lazily at upload
     // time (well after the client exists), so a mutable holder is safe here.
     let ref: ConcordClient | null = null;
-    const uploader = createConcordUploader(signer, account.pubkey, (cid) =>
+    const uploader = createConcordUploader(account, account.pubkey, (cid) =>
       ref?.getCommunity(cid)?.state$.value.metadata?.blossom_servers,
     );
     ref = new ConcordClient({
-      signer,
+      signer: account,
       pool,
       eventStore,
       uploader,
@@ -50,7 +48,12 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
 
   useEffect(() => {
     if (!client) return;
-    void client.start();
+
+    // Delay start by 100ms so that nos2x-fox has time to inject the
+    setTimeout(() => {
+
+      void client.start();
+    }, 100)
     const detachVoice = attachVoiceGc(client);
     return () => {
       detachVoice();
