@@ -23,7 +23,7 @@ import {
 } from "livekit-client";
 import { use$ } from "applesauce-react/hooks";
 
-import { useConcord } from "../concord-context";
+import { useConcord } from "../../lib/concord-context";
 import {
   fetchAvToken,
   rendezvousCandidates,

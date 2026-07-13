@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
 import { use$ } from "applesauce-react/hooks";
-import { useConcord } from "./concord-context";
-import { useCommunity } from "./use-community";
-import { UserAvatar, UserName } from "./User";
-import { useDecryptedImage } from "./useDecryptedImage";
+import { useConcord } from "../lib/concord-context";
+import { useCommunity } from "../hooks/use-community";
+import { UserAvatar, UserName } from "../components/User";
+import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { PERM } from "applesauce-concord";
 import type { BlobPointer, CommunityState, PermName } from "applesauce-concord";
 import { hasPerm, parsePermissions, resolveStanding } from "applesauce-concord/helpers";
-import { ConfirmModal } from "./modals";
-import { channelRoleId, channelRoster } from "./chat/channel-roles";
+import { ConfirmModal } from "../components/modals";
+import { channelRoleId, channelRoster } from "../chat/channel-roles";
 
 type PageId = "overview" | "roles" | "members" | "channels" | "advanced";
 

@@ -4,7 +4,7 @@
 // registry keyed by the ConcordCommunity object.
 
 import type { ConcordClient, ConcordCommunity } from "applesauce-concord";
-import { useCommunity } from "../app/use-community";
+import { useCommunity } from "../hooks/use-community";
 import { VoiceEngine } from "./engine";
 
 const engines = new Map<ConcordCommunity, VoiceEngine>();

@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useTheme } from "./theme";
+import { useTheme } from "../lib/theme";
 
 /**
  * Compact account-bar toggle: flips between light and dark. Since the default

@@ -3,7 +3,7 @@ import { use$ } from "applesauce-react/hooks";
 import { castUser, Profile } from "applesauce-common/casts";
 import { castEventStream } from "applesauce-common/observable";
 import { eventStore } from "../nostr";
-import { colorFor, initials, shortNpub } from "./util";
+import { colorFor, initials, shortNpub } from "../lib/util";
 
 // Subscribe to a pubkey's kind-0 Profile cast. Reading `user.replaceable(0)`
 // queries the EventStore; on a miss it triggers the eventLoader wired in

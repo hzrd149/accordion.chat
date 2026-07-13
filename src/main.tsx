@@ -2,8 +2,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { EventStoreProvider, AccountsProvider } from "applesauce-react/providers";
 import { eventStore, accounts, loadAccounts } from "./nostr";
-import { App } from "./app/App";
-import "./app/index.css";
+import { App } from "./views/App";
+import "./index.css";
 
 loadAccounts();
 

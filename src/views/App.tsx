@@ -26,16 +26,16 @@ import {
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { accounts } from "../nostr";
-import { ConcordProvider } from "./context";
-import { CallProvider } from "./voice/CallProvider";
-import { useCall } from "./voice/call-context";
+import { ConcordProvider } from "../lib/context";
+import { CallProvider } from "../components/voice/CallProvider";
+import { useCall } from "../components/voice/call-context";
 import { verifiedAuthorOf, type VoicePresenceFold } from "../voice/presence";
 import { useVoiceEngine } from "../voice/registry";
-import { useConcord } from "./concord-context";
-import { useCommunity } from "./use-community";
-import { deleteCommunityRumorCache } from "./rumor-cache";
-import { useMessages, useThread } from "./chat/useMessages";
-import { sendThreadReply as sendThreadReplyAction } from "./chat/actions";
+import { useConcord } from "../lib/concord-context";
+import { useCommunity } from "../hooks/use-community";
+import { deleteCommunityRumorCache } from "../lib/rumor-cache";
+import { useMessages, useThread } from "../chat/useMessages";
+import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
 import { Login } from "./Login";
 import {
   ConfirmModal,
@@ -45,18 +45,18 @@ import {
   JoinModal,
   Modal,
   RawEventModal,
-} from "./modals";
-import { clockTime, colorFor, formatTime, groupMessages } from "./util";
-import { UserAvatar, UserName } from "./User";
+} from "../components/modals";
+import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
+import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { CommunitySettingsView } from "./community-settings";
-import { useDecryptedImage } from "./useDecryptedImage";
-import { MessageContent } from "./MessageContent";
-import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "./mentions";
-import { EmojiPicker } from "./EmojiPicker";
-import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "./emoji";
-import type { ChatMessage, ThreadComment } from "./chat/fold";
+import { useDecryptedImage } from "../hooks/useDecryptedImage";
+import { MessageContent } from "../components/MessageContent";
+import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
+import { EmojiPicker } from "../components/EmojiPicker";
+import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
+import type { ChatMessage, ThreadComment } from "../chat/fold";
 import type { CommunityState, Role, ConcordCommunity } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
 import { kinds } from "nostr-tools";

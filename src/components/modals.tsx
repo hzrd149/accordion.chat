@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
-import { useConcord } from "./concord-context";
-import { useCommunity } from "./use-community";
+import { useConcord } from "../lib/concord-context";
+import { useCommunity } from "../hooks/use-community";
 import { rumorMs } from "applesauce-concord/helpers";
 import type { CommunityState } from "applesauce-concord";
-import type { ChatMessage } from "./chat/fold";
+import type { ChatMessage } from "../chat/fold";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (

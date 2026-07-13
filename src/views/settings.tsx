@@ -8,9 +8,9 @@ import { AddDirectMessageRelay, RemoveDirectMessageRelay } from "applesauce-acti
 import { AddBlossomServer, RemoveBlossomServer, SetDefaultBlossomServer } from "applesauce-actions/actions/blossom";
 import type { ProfileContent } from "applesauce-core/helpers/profile";
 import type { ISigner } from "applesauce-signers";
-import { createSettingsRunner, saveRelayList, userFor } from "./settings-actions";
-import { UserAvatar } from "./User";
-import { useTheme, type ThemePref } from "./theme";
+import { createSettingsRunner, saveRelayList, userFor } from "../lib/settings-actions";
+import { UserAvatar } from "../components/User";
+import { useTheme, type ThemePref } from "../lib/theme";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 

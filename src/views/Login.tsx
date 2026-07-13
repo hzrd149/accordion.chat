@@ -5,7 +5,7 @@ import { ExtensionAccount, PrivateKeyAccount, NostrConnectAccount } from "apples
 import type { IAccount } from "applesauce-accounts";
 import { NostrConnectSigner } from "applesauce-signers";
 import { accounts, CONCORD_SIGNER_PERMISSIONS, NOSTR_CONNECT_RELAYS } from "../nostr";
-import { QRCode } from "./QRCode";
+import { QRCode } from "../components/QRCode";
 
 const APP_METADATA = { name: "Accordion", url: window.location.origin };
 

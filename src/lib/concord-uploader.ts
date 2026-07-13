@@ -11,8 +11,8 @@ import type { ISigner } from "applesauce-signers";
 import type { Storage } from "applesauce-concord";
 import type { MediaAttachment } from "applesauce-concord/helpers";
 import { castUser } from "applesauce-core";
-import { encryptImageBlob } from "../lib/image";
-import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "../lib/blossom";
+import { encryptImageBlob } from "./image";
+import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "./blossom";
 import { eventStore } from "../nostr";
 
 type ConcordUploader = Storage.ConcordUploader;

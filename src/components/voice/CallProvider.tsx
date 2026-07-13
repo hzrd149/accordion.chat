@@ -12,7 +12,7 @@
 import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { useConcord } from "../concord-context";
+import { useConcord } from "../../lib/concord-context";
 import { voiceEngineFor } from "../../voice/registry";
 import { resolveVoiceBroker } from "./brokers";
 import { CallContext, type ActiveCall, type CallRequest } from "./call-context";
