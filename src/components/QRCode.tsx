@@ -19,9 +19,9 @@ export function QRCode({ value, size = 224 }: { value: string; size?: number }) 
   if (error) return <div className="alert alert-error text-sm">{error}</div>;
   return (
     <div
-      style={{ width: size, height: size, borderRadius: 8, background: "#fff", display: "block" }}
+      style={{ width: size, maxWidth: "100%", aspectRatio: "1 / 1", borderRadius: 8, background: "#fff", display: "block" }}
     >
-      {src && <img src={src} width={size} height={size} alt="QR code" />}
+      {src && <img src={src} width={size} height={size} alt="QR code" style={{ width: "100%", height: "100%" }} />}
     </div>
   );
 }

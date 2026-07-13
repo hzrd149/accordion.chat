@@ -42,11 +42,13 @@ const PERM_LABELS: Record<PermName, string> = {
 export function CommunitySettingsView({
   cid,
   page: pageParam,
+  mobileNav,
   onSelectPage,
   onClose,
 }: {
   cid: string;
   page: string;
+  mobileNav: ReactNode;
   onSelectPage: (page: PageId) => void;
   onClose: () => void;
 }) {
@@ -66,7 +68,8 @@ export function CommunitySettingsView({
 
   return (
     <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
-      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pl-14">
+      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300">
+        {mobileNav}
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
           <CommunityIcon state={state} />
           <span className="max-md:hidden">{name}</span>
@@ -147,7 +150,7 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
       {canManageMetadata && (
         <div className="mb-4">
           <label className="label text-xs font-semibold uppercase opacity-70">Images</label>
-          <div className="flex gap-5 items-start">
+          <div className="flex flex-wrap gap-5 items-start">
             <ImageField cid={cid} which="icon" pointer={state.metadata?.icon} disabled={state.dissolved} />
             <ImageField cid={cid} which="banner" pointer={state.metadata?.banner} disabled={state.dissolved} />
           </div>
@@ -253,7 +256,7 @@ function ImageField({
     }
   }
 
-  const previewSize = which === "icon" ? "w-16 h-16 rounded-xl" : "w-40 h-16 rounded-lg";
+  const previewSize = which === "icon" ? "w-16 h-16 rounded-xl" : "w-40 h-16 rounded-lg max-sm:w-32";
   return (
     <div className={`flex flex-col gap-1.5 ${which === "banner" ? "flex-1" : ""}`}>
       <span className="text-xs opacity-60">{which === "icon" ? "Icon" : "Banner"}</span>
@@ -502,10 +505,10 @@ function RolePanel({ cid, state, role }: { cid: string; state: CommunityState; r
             <div className="p-3 text-sm opacity-70">No matching members.</div>
           ) : (
             results.map((c) => (
-              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left" onClick={() => addMember(c.pubkey)}>
+              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left min-w-0" onClick={() => addMember(c.pubkey)}>
                 <UserAvatar pubkey={c.pubkey} />
                 <span className="font-medium truncate">{c.name}</span>
-                <span className="text-xs opacity-60 ml-auto truncate">{c.npub}</span>
+                <span className="text-xs opacity-60 ml-auto truncate max-sm:hidden">{c.npub}</span>
               </button>
             ))
           )}
@@ -562,7 +565,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
         const held = new Set(state.grants.get(m) ?? []);
         const banned = state.banlist.has(m);
         return (
-          <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 flex-wrap">
+          <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 flex-wrap max-sm:items-start">
             <UserAvatar pubkey={m} />
             <div>
               <div className="font-medium">
@@ -570,7 +573,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               </div>
               {standing.isOwner && <span className="badge badge-warning badge-sm">Owner</span>}
             </div>
-            <div className="ml-auto flex gap-1.5">
+            <div className="ml-auto flex gap-1.5 max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:flex-wrap max-sm:justify-end">
               {!standing.isOwner && (canKick || canBan) && (
                 <>
                   {canKick && (
@@ -598,7 +601,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               )}
             </div>
             {!standing.isOwner && canManageRoles && serverRoles.length > 0 && (
-              <div className="w-full flex gap-1.5 flex-wrap pl-[42px]">
+              <div className="w-full flex gap-1.5 flex-wrap pl-[42px] max-sm:pl-0">
                 {serverRoles.map((r) => {
                   const on = held.has(r.role_id);
                   return (
@@ -631,7 +634,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
             without access to history from before the refounding).
           </p>
           {[...state.banlist].sort().map((m) => (
-            <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
+            <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 max-sm:flex-wrap">
               <UserAvatar pubkey={m} />
               <div>
                 <div className="font-medium">
@@ -641,7 +644,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
                   Banned
                 </span>
               </div>
-              <div className="ml-auto">
+              <div className="ml-auto max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:text-right">
                 {canBan && (
                   <button className="btn btn-ghost btn-sm" onClick={() => community?.unban(m)}>
                     Unban
@@ -746,7 +749,7 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
         const outsiders = [...state.members].filter((m) => !rosterSet.has(m)).sort();
         return (
           <div key={ch.channel_id} className="mb-7">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Lock size={16} />
               <strong>{ch.name}</strong>
               <span className="text-sm opacity-70">
@@ -754,7 +757,7 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
               </span>
               {canManage && (
                 <button
-                  className="btn btn-error btn-sm ml-auto"
+                  className="btn btn-error btn-sm ml-auto max-sm:ml-0"
                   onClick={() => setDeleteTarget({ id: ch.channel_id, name: ch.name })}
                 >
                   <Trash2 size={14} /> Delete
@@ -762,7 +765,7 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
               )}
             </div>
             {roster.map((m) => (
-              <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
+              <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 max-sm:flex-wrap">
                 <UserAvatar pubkey={m} />
                 <div>
                   <div className="font-medium">
@@ -771,7 +774,7 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
                   {m === owner && <span className="badge badge-warning badge-sm">Owner</span>}
                 </div>
                 {canManage && m !== owner && (
-                  <div className="ml-auto">
+                  <div className="ml-auto max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:text-right">
                     <button
                       className="btn btn-ghost btn-sm"
                       disabled={busy}

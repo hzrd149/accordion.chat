@@ -44,7 +44,7 @@ export function EmojiPicker({
   return (
     <div
       ref={ref}
-      className={`absolute ${direction === "up" ? "bottom-full mb-1.5" : "top-full mt-1.5"} z-50 w-58 max-h-65 overflow-y-auto p-2 bg-base-200 border border-base-300 rounded-box shadow-lg ${
+      className={`absolute ${direction === "up" ? "bottom-full mb-1.5" : "top-full mt-1.5"} z-50 w-58 max-w-[calc(100vw-1rem)] max-h-65 overflow-y-auto p-2 bg-base-200 border border-base-300 rounded-box shadow-lg ${
         align === "right" ? "right-0" : "left-0"
       }`}
       role="menu"

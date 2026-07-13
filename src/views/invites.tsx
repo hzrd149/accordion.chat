@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { Inbox, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { ConcordDirectInvite } from "applesauce-concord/casts";
@@ -15,7 +16,7 @@ import { UserAvatar, UserName } from "../components/User";
  * spec — decline = forget). The watcher syncs in the background; the Sync button
  * forces a fresh fetch.
  */
-export function InvitesView() {
+export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
   const { watcher, invites, needsAuth, status } = useInvites();
   const [syncing, setSyncing] = useState(false);
 
@@ -32,7 +33,8 @@ export function InvitesView() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100">
-      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0 max-md:pl-14">
+      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+        {mobileNav}
         <Inbox size={20} className="text-base-content/60" />
         <span className="font-semibold text-base-content">Invites</span>
         {invites.length > 0 && <span className="badge badge-primary badge-sm">{invites.length}</span>}
@@ -126,22 +128,24 @@ function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
   }
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-box bg-base-200 border border-base-300">
-      <div className="w-12 h-12 shrink-0 rounded-2xl bg-base-300 overflow-hidden flex items-center justify-center font-semibold text-lg">
-        {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-semibold truncate flex items-center gap-1.5">
-          <ShieldCheck size={15} className="text-success shrink-0" />
-          {name}
+    <div className="flex items-center gap-3 p-3 rounded-box bg-base-200 border border-base-300 max-sm:flex-col max-sm:items-stretch">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="w-12 h-12 shrink-0 rounded-2xl bg-base-300 overflow-hidden flex items-center justify-center font-semibold text-lg">
+          {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
         </div>
-        <div className="text-[11px] opacity-60 truncate flex items-center gap-1 mt-0.5">
-          <UserAvatar pubkey={invite.inviter} className="w-4 h-4" />
-          invited by <UserName pubkey={invite.inviter} />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold truncate flex items-center gap-1.5">
+            <ShieldCheck size={15} className="text-success shrink-0" />
+            {name}
+          </div>
+          <div className="text-[11px] opacity-60 truncate flex items-center gap-1 mt-0.5">
+            <UserAvatar pubkey={invite.inviter} className="w-4 h-4" />
+            invited by <UserName pubkey={invite.inviter} />
+          </div>
+          {error && <div className="text-error text-[11px] mt-0.5">{error}</div>}
         </div>
-        {error && <div className="text-error text-[11px] mt-0.5">{error}</div>}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-2 shrink-0 max-sm:justify-end">
         <button className="btn btn-ghost btn-sm" onClick={dismiss} disabled={busy !== null}>
           {busy === "dismiss" ? "…" : "Dismiss"}
         </button>

@@ -86,7 +86,7 @@ function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolea
         className={
           gallery
             ? `${TILE} animate-pulse`
-            : "block mt-1.5 rounded-lg w-[240px] h-[160px] bg-base-200 animate-pulse"
+            : "block mt-1.5 rounded-lg w-full max-w-[240px] h-[160px] bg-base-200 animate-pulse"
         }
       />
     );
@@ -106,7 +106,7 @@ function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolea
     );
   }
   if (kind === "audio")
-    return <audio className="block mt-1.5 rounded-lg w-[320px] h-[40px]" src={src} controls />;
+    return <audio className="block mt-1.5 rounded-lg w-full max-w-[320px] h-[40px]" src={src} controls />;
   if (kind === "image" || kind === undefined) {
     return (
       <a href={src} target="_blank" rel="noreferrer" className={gallery ? TILE : undefined}>

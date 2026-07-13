@@ -215,16 +215,6 @@ function Shell() {
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
-      {/* Mobile-only drawer controls (rendered off-canvas above the tablet breakpoint). */}
-      {!navOpen && (
-        <button
-          className="btn btn-ghost btn-sm btn-circle fixed top-1 left-1 z-[45] md:hidden"
-          title="Menu"
-          onClick={() => setNavOpen((v) => !v)}
-        >
-          <Menu size={22} />
-        </button>
-      )}
       {(navOpen || panelMode) && (
         <div className="fixed inset-0 z-[35] bg-black/50 md:hidden" onClick={closeDrawers} />
       )}
@@ -305,16 +295,25 @@ function Shell() {
       </div>
 
       {onInvites ? (
-        <InvitesView />
+        <InvitesView mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />} />
       ) : onSettings ? (
-        <SettingsView page={settingsPage} onSelectPage={(p) => navigate(`/settings/${p}`)} />
+        <SettingsView
+          page={settingsPage}
+          mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
+          onSelectPage={(p) => navigate(`/settings/${p}`)}
+        />
       ) : onDev ? (
-        <DevView page={devPage} onSelectPage={(p) => navigate(`/dev/${p}`)} />
+        <DevView
+          page={devPage}
+          mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
+          onSelectPage={(p) => navigate(`/dev/${p}`)}
+        />
       ) : activeState ? (
         onCommunitySettings ? (
           <CommunitySettingsView
             cid={activeState.material.community_id}
             page={communitySettingsPage}
+            mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
             onSelectPage={(p) => navigate(`/c/${activeState.material.community_id}/settings/${p}`)}
             onClose={() => navigate(`/c/${activeState.material.community_id}`)}
           />
@@ -343,6 +342,7 @@ function Shell() {
               cid={activeState.material.community_id}
               channelId={selectedChannel}
               state={activeState}
+              mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
               threadsOpen={panelMode === "threads"}
               membersOpen={panelMode === "members"}
               onToggleThreads={toggleThreads}
@@ -375,11 +375,14 @@ function Shell() {
         )
       ) : (
         <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
+          <div className="h-12 flex items-center px-4 border-b border-base-300 shadow-sm shrink-0 md:hidden">
+            <MobileNavButton onClick={() => setNavOpen(true)} />
+          </div>
           <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
             <div className="text-5xl leading-none" aria-hidden="true">🪗</div>
             <h2 className="text-2xl font-bold text-base-content m-0">Welcome to Accordion</h2>
             <div>Create your own community or join one with an invite link.</div>
-            <div className="flex gap-3 mt-3">
+            <div className="flex flex-wrap justify-center gap-3 mt-3">
               <button className="btn btn-primary" onClick={() => setModal("create")}>
                 Create a community
               </button>
@@ -452,6 +455,14 @@ function Shell() {
       )}
 
     </div>
+  );
+}
+
+function MobileNavButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button className="btn btn-ghost btn-sm btn-circle shrink-0 md:hidden" title="Menu" onClick={onClick}>
+      <Menu size={22} />
+    </button>
   );
 }
 
@@ -678,7 +689,7 @@ function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: stri
   if (isActiveHere) return <div ref={setStageEl} />;
 
   return (
-    <div className="flex items-center gap-3 flex-wrap mx-auto mt-2.5 mb-1 w-[min(860px,calc(100%-24px))] bg-base-200 border border-base-300 rounded-xl px-3.5 py-2.5">
+    <div className="flex items-center gap-3 flex-wrap mx-auto mt-2.5 mb-1 w-[min(860px,calc(100%-24px))] bg-base-200 border border-base-300 rounded-xl px-3.5 py-2.5 max-sm:items-stretch">
       <div className="flex items-center gap-2.5 text-sm text-base-content flex-1 min-w-0">
         <Volume2 size={18} />
         <span>{roster.length ? `${roster.length} in the call` : "No one's in the call yet"}</span>
@@ -694,7 +705,7 @@ function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: stri
           )}
         </div>
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 max-sm:w-full max-sm:justify-end">
         {error && !isPendingHere && <span className="text-error text-[13px]">{error}</span>}
         {isPendingHere ? (
           <button className="btn btn-primary" disabled>
@@ -730,6 +741,7 @@ function ChatView({
   cid,
   channelId,
   state,
+  mobileNav,
   threadsOpen,
   membersOpen,
   onToggleThreads,
@@ -739,6 +751,7 @@ function ChatView({
   cid: string;
   channelId: string;
   state: CommunityState;
+  mobileNav: React.ReactNode;
   threadsOpen: boolean;
   membersOpen: boolean;
   onToggleThreads: () => void;
@@ -800,7 +813,8 @@ function ChatView({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
-      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0 max-md:pl-14">
+      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+        {mobileNav}
         <span className="inline-flex items-center text-base-content/60">
           {channel?.voice ? <Volume2 size={20} /> : channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
@@ -972,9 +986,42 @@ const Message = memo(function Message({
   const [editText, setEditText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const react = (reaction: string | Emoji) => community?.react(channelId, { id: m.id, author: m.author }, reaction);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, []);
+
+  function closeLongPressTimer() {
+    if (!longPressTimer.current) return;
+    clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  }
+
+  function isMobileActionsViewport() {
+    return window.matchMedia("(max-width: 767px)").matches;
+  }
+
+  function startLongPress(e: React.PointerEvent<HTMLDivElement>) {
+    if (!isMobileActionsViewport() || e.pointerType === "mouse") return;
+    if ((e.target as Element).closest("button,a,input,textarea,select")) return;
+    closeLongPressTimer();
+    longPressTimer.current = setTimeout(() => {
+      longPressTimer.current = null;
+      setDrawerOpen(true);
+    }, 450);
+  }
+
+  function actionAndClose(action: () => void) {
+    action();
+    setDrawerOpen(false);
+  }
 
   async function saveEdit() {
     const value = editText.trim();
@@ -984,13 +1031,23 @@ const Message = memo(function Message({
 
   return (
     <div
-      className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 ${showHeader ? "py-0.5" : "py-px"}`}
+      className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 max-sm:gap-2.5 max-sm:px-3 ${showHeader ? "py-0.5" : "py-px"}`}
       tabIndex={-1}
+      onPointerDown={startLongPress}
+      onPointerUp={closeLongPressTimer}
+      onPointerCancel={closeLongPressTimer}
+      onPointerLeave={closeLongPressTimer}
+      onContextMenu={(e) => {
+        if (!isMobileActionsViewport()) return;
+        e.preventDefault();
+        closeLongPressTimer();
+        setDrawerOpen(true);
+      }}
     >
       {showHeader ? (
-        <UserAvatar pubkey={m.author} className="w-10 h-10 mt-0.5" />
+        <UserAvatar pubkey={m.author} className="w-10 h-10 mt-0.5 max-sm:w-8 max-sm:h-8" />
       ) : (
-        <div className="w-10 shrink-0 flex items-center justify-end">
+        <div className="w-10 shrink-0 flex items-center justify-end max-sm:w-8">
           <span className="text-[10px] text-base-content/60 opacity-0 group-hover:opacity-100 whitespace-nowrap">{clockTime(m.ms)}</span>
         </div>
       )}
@@ -1060,7 +1117,7 @@ const Message = memo(function Message({
           </button>
         )}
       </div>
-      <div className="absolute -top-3 right-3 hidden group-hover:flex group-focus-within:flex bg-base-200 border border-base-300 rounded-md">
+      <div className="absolute -top-3 right-3 hidden group-hover:flex group-focus-within:flex bg-base-200 border border-base-300 rounded-md max-md:hidden">
         {canWrite && (
           <>
             {quickReactions.map((e) => (
@@ -1121,6 +1178,84 @@ const Message = memo(function Message({
           )}
         </span>
       </div>
+      {drawerOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex items-end bg-black/45" onClick={() => setDrawerOpen(false)}>
+          <div className="w-full rounded-t-2xl bg-base-100 border-t border-base-300 p-4 shadow-2xl" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold truncate" style={{ color: colorFor(m.author) }}>
+                  <UserName pubkey={m.author} />
+                </div>
+                <div className="text-sm text-base-content/70 line-clamp-2">{m.deleted ? "(message deleted)" : m.edited ?? m.content}</div>
+              </div>
+              <button className="btn btn-ghost btn-sm btn-circle shrink-0" title="Close" onClick={() => setDrawerOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            {canWrite && (
+              <>
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {quickReactions.map((e) => (
+                    <button
+                      key={typeof e === "string" ? e : e.shortcode}
+                      className="btn btn-ghost btn-sm btn-circle"
+                      title={typeof e === "string" ? e : `:${e.shortcode}:`}
+                      onClick={() => actionAndClose(() => react(e))}
+                    >
+                      {reactionLabel(e)}
+                    </button>
+                  ))}
+                  <span className="relative inline-flex">
+                    <button className="btn btn-ghost btn-sm btn-circle" title="React…" onClick={() => setPickerOpen((v) => !v)}>
+                      <SmilePlus size={16} />
+                    </button>
+                    {pickerOpen && (
+                      <EmojiPicker
+                        favorites={favorites}
+                        align="left"
+                        direction="up"
+                        onPick={(reaction) => actionAndClose(() => react(reaction))}
+                        onClose={() => setPickerOpen(false)}
+                      />
+                    )}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => onReply({ id: m.id, author: m.author }))}>
+                    <Reply size={18} /> Reply
+                  </button>
+                  <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => onThread(m))}>
+                    <MessageSquare size={18} /> Reply in thread
+                  </button>
+                  {m.author === myPubkey && !m.deleted && (
+                    <>
+                      <button
+                        className="btn btn-ghost justify-start"
+                        onClick={() =>
+                          actionAndClose(() => {
+                            setEditText(m.edited ?? m.content);
+                            setEditing(true);
+                          })
+                        }
+                      >
+                        <Pencil size={18} /> Edit
+                      </button>
+                      <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => community?.deleteMessage(channelId, m.id))}>
+                        <Trash2 size={18} /> Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+            <div className="mt-1 flex flex-col gap-1">
+              <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => setRawOpen(true))}>
+                <MoreVertical size={18} /> View raw
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {rawOpen && <RawEventModal message={m} onClose={() => setRawOpen(false)} />}
     </div>
   );
@@ -1187,7 +1322,7 @@ function SidePanel({
 }) {
   const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
-    <aside className="w-75 shrink-0 flex flex-col bg-base-200 border-l border-base-300 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(340px,90vw)]">
+    <aside className="w-75 shrink-0 flex flex-col bg-base-200 border-l border-base-300 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(340px,90vw)] max-md:shadow-2xl">
       <div className="h-12 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-base-300 shadow-sm">
         <span className="font-bold text-base-content">{title}</span>
         <button className="btn btn-ghost btn-sm btn-circle" title="Close panel" onClick={onClose}>
@@ -1429,8 +1564,8 @@ function ThreadComposer({
   }
 
   return (
-    <div className="shrink-0 px-4 pb-4 border-t border-base-300 bg-base-200">
-      <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1">
+    <div className="shrink-0 px-4 pb-4 border-t border-base-300 bg-base-200 max-sm:px-2">
+      <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
         <span>
           Replying to <UserName pubkey={replyingTo} />
         </span>
@@ -1440,9 +1575,9 @@ function ThreadComposer({
           </button>
         )}
       </div>
-      <div className="flex items-end gap-2 bg-base-300 rounded-lg p-2">
+      <div className="flex items-end gap-2 bg-base-300 rounded-lg p-2 max-sm:flex-col max-sm:items-stretch">
         <textarea
-          className="flex-1 min-h-10 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
+          className="flex-1 min-w-0 min-h-10 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
           rows={2}
           placeholder="Reply in thread"
           value={text}
@@ -1454,7 +1589,7 @@ function ThreadComposer({
             }
           }}
         />
-        <button className="btn btn-primary btn-sm" onClick={send} disabled={sending || !text.trim()}>
+        <button className="btn btn-primary btn-sm max-sm:self-end" onClick={send} disabled={sending || !text.trim()}>
           {sending ? "Sending…" : "Send"}
         </button>
       </div>
@@ -1544,9 +1679,9 @@ const Composer = memo(function Composer({
   }
 
   return (
-    <div className="px-4 pb-5 shrink-0">
+    <div className="px-4 pb-5 shrink-0 max-sm:px-2">
       {replyTo && (
-        <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1">
+        <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
           <span>
             Replying to <UserName pubkey={replyTo.author} />
           </span>
@@ -1571,7 +1706,7 @@ const Composer = memo(function Composer({
           ))}
         </div>
       )}
-      <div className="relative flex items-center gap-1 bg-base-200 rounded-lg px-4">
+      <div className="relative flex items-center gap-1 bg-base-200 rounded-lg px-4 max-sm:px-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -1635,7 +1770,7 @@ const Composer = memo(function Composer({
         <textarea
           ref={textareaRef}
           rows={1}
-          className="flex-1 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
+          className="flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
           placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
           value={text}
           onChange={(e) => {
@@ -1678,8 +1813,9 @@ const Composer = memo(function Composer({
             }
           }}
         />
-        <button className="btn btn-primary btn-sm" onClick={send} disabled={sending}>
-          {sending ? "Sending…" : "Send"}
+        <button className="btn btn-primary btn-sm max-[380px]:btn-square" onClick={send} disabled={sending}>
+          <span className="max-[380px]:hidden">{sending ? "Sending…" : "Send"}</span>
+          <span className="hidden max-[380px]:inline">Go</span>
         </button>
       </div>
     </div>

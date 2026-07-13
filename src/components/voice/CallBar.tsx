@@ -20,7 +20,7 @@ export function CallBar({
     useLocalParticipant();
 
   return (
-    <div className="flex items-center justify-center gap-2.5 p-2.5 bg-base-300 border-t border-base-100">
+    <div className="flex flex-wrap items-center justify-center gap-2.5 p-2.5 bg-base-300 border-t border-base-100 max-sm:gap-1.5">
       <button
         className={isMicrophoneEnabled ? "btn btn-circle btn-primary" : "btn btn-circle"}
         title={isMicrophoneEnabled ? "Mute" : "Unmute"}

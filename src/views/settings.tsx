@@ -41,9 +41,11 @@ function normalizeUrl(input: string, scheme: "wss" | "https"): string | null {
 
 export function SettingsView({
   page: pageParam,
+  mobileNav,
   onSelectPage,
 }: {
   page: string;
+  mobileNav: ReactNode;
   onSelectPage: (page: PageId) => void;
 }) {
   const account = useActiveAccount();
@@ -56,7 +58,8 @@ export function SettingsView({
 
   return (
     <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
-      <nav className="w-58 shrink-0 bg-base-200 p-3 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pl-14">
+      <nav className="w-58 shrink-0 bg-base-200 p-3 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300">
+        {mobileNav}
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide text-base-content/60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
           <UserAvatar pubkey={pubkey} className="w-7 h-7" />
           <span className="max-md:hidden">Settings</span>
@@ -314,7 +317,7 @@ function RelayListEditor({
 
   return (
     <>
-      <div className="flex gap-2.5">
+      <div className="flex gap-2.5 max-sm:flex-col">
         <input
           className="input input-bordered flex-1"
           value={input}
@@ -322,7 +325,7 @@ function RelayListEditor({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
-        <button className="btn btn-primary" onClick={add} disabled={busy || !input.trim()}>
+        <button className="btn btn-primary max-sm:self-end" onClick={add} disabled={busy || !input.trim()}>
           Add
         </button>
       </div>
@@ -332,7 +335,7 @@ function RelayListEditor({
       ) : (
         <ul className="mt-3.5 flex flex-col gap-1">
           {items.map((url, i) => (
-            <li key={url} className="flex items-center gap-2.5 px-3 py-2 bg-base-200 rounded-md">
+            <li key={url} className="flex items-center gap-2.5 px-3 py-2 bg-base-200 rounded-md min-w-0">
               <span className="flex-1 font-mono text-[13px] overflow-hidden text-ellipsis whitespace-nowrap">{url.replace(/^(wss|https?):\/\//, "")}</span>
               {renderExtra?.(url, i)}
               <button className="btn btn-ghost btn-sm btn-circle hover:text-error" title="Remove" onClick={() => onRemove(url)}>

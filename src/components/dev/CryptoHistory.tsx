@@ -283,8 +283,8 @@ function shortNpub(pubkey: string): string {
 function Row({ label, value, changed }: { label: string; value: string; changed?: boolean }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="w-32 shrink-0 text-xs opacity-60">{label}</span>
-      <code className={`text-xs break-all font-mono ${changed ? "text-warning font-semibold" : "opacity-80"}`}>
+      <span className="w-32 shrink-0 opacity-60">{label}</span>
+      <code className={`break-all font-mono ${changed ? "text-warning font-semibold" : "opacity-80"}`}>
         {value}
       </code>
       {changed && <span className="badge badge-warning badge-xs">rolled</span>}
@@ -358,16 +358,16 @@ function EpochCard({ snap, prev }: { snap: EpochSnapshot; prev?: EpochSnapshot }
 
       {snap.state.channels.length > 0 && (
         <div className="border-t border-base-300 mt-1 pt-2 flex flex-col gap-1">
-          <span className="text-xs opacity-60">channels</span>
+          <span className="opacity-60">channels</span>
           {snap.state.channels.map((c) => (
             <div key={c.channel_id} className="flex items-baseline gap-2">
-              <span className="w-32 shrink-0 text-xs flex items-center gap-1">
+              <span className="w-32 shrink-0 flex items-center gap-1">
                 #{c.name}
                 <span className={`badge badge-xs ${c.private ? "badge-secondary" : "badge-ghost"}`}>
                   {c.private ? "private" : "public"}
                 </span>
               </span>
-              <code className="text-xs font-mono break-all opacity-80">
+              <code className="font-mono break-all opacity-80">
                 {shortHex(k.channels.get(c.channel_id)?.pk ?? "")}
               </code>
             </div>
@@ -375,7 +375,7 @@ function EpochCard({ snap, prev }: { snap: EpochSnapshot; prev?: EpochSnapshot }
         </div>
       )}
 
-      <div className="border-t border-base-300 mt-1 pt-2 flex flex-wrap gap-2 text-xs">
+      <div className="border-t border-base-300 mt-1 pt-2 flex flex-wrap gap-2 ">
         <span className="badge badge-ghost">{snap.counts.control} control</span>
         <span className="badge badge-ghost">{snap.counts.guestbook} guestbook</span>
         <span className="badge badge-ghost">{snap.counts.channels} channel msgs</span>
@@ -467,13 +467,13 @@ function Walker({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-bold text-lg flex-1">{material.name || "Community"}</h2>
-        <button className="btn btn-sm btn-ghost" onClick={onReset}>
+        <button className="btn btn-ghost" onClick={onReset}>
           ← New source
         </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <code className="text-xs opacity-60 break-all">{material.community_id}</code>
+        <code className="opacity-60 break-all">{material.community_id}</code>
         <div className="flex-1" />
         <span className="badge badge-outline">
           {snaps.length} / {chain.length}
@@ -486,7 +486,7 @@ function Walker({
       <div className="flex flex-col gap-2">
         {snaps.map((snap, idx) => (
           <div key={snap.epoch} className="flex flex-col gap-2">
-            {idx > 0 && <div className="text-center text-xs opacity-40">↓</div>}
+            {idx > 0 && <div className="text-center opacity-40">↓</div>}
             <EpochCard snap={snap} prev={idx > 0 ? snaps[idx - 1] : undefined} />
           </div>
         ))}
@@ -535,7 +535,7 @@ function SourceEntry({ onPick }: { onPick: (material: JoinMaterial) => void }) {
       {communities.length > 0 && (
         <section className="border border-base-300 rounded-box p-4 flex flex-col gap-3">
           <h2 className="font-bold">Your communities</h2>
-          <p className="text-sm opacity-70 leading-relaxed">
+          <p className="opacity-70 leading-relaxed">
             Walk the crypto history of a community you're already a member of.
           </p>
           <div className="flex flex-col gap-1">
@@ -546,7 +546,7 @@ function SourceEntry({ onPick }: { onPick: (material: JoinMaterial) => void }) {
                 onClick={() => onPick(c.material)}
               >
                 <span className="flex-1 text-left truncate">{c.material.name || "Community"}</span>
-                <code className="text-xs opacity-50">{shortHex(c.material.community_id)}</code>
+                <code className="opacity-50">{shortHex(c.material.community_id)}</code>
               </button>
             ))}
           </div>
@@ -555,12 +555,12 @@ function SourceEntry({ onPick }: { onPick: (material: JoinMaterial) => void }) {
 
       <section className="border border-base-300 rounded-box p-4 flex flex-col gap-3">
         <h2 className="font-bold">Invite link</h2>
-        <p className="text-sm opacity-70 leading-relaxed">
+        <p className="opacity-70 leading-relaxed">
           Paste an invite link to walk any community's history from its genesis epoch.
         </p>
         <div className="flex flex-wrap gap-2">
           <input
-            className="input input-bordered flex-1 min-w-64 font-mono text-sm"
+            className="input input-bordered flex-1 min-w-64 font-mono "
             placeholder="https://…/invite/naddr1…#…"
             value={invite}
             onChange={(e) => setInvite(e.target.value)}
@@ -586,7 +586,7 @@ export function CryptoHistory() {
   return (
     <>
       <h1 className="text-2xl font-bold mb-1">Group Crypto History</h1>
-      <p className="text-sm opacity-70 leading-relaxed mb-5">
+      <p className="opacity-70 leading-relaxed mb-5">
         Walk a Concord community's cryptographic history epoch by epoch — deriving each epoch's keys, fetching its plane
         events live, and watching which addresses roll at every Refounding.
       </p>
