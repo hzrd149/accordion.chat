@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
+import { FlaskConical, Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { CreateProfile, UpdateProfile } from "applesauce-actions/actions/profile";
 import { AddInboxRelay, AddOutboxRelay, RemoveInboxRelay, RemoveOutboxRelay } from "applesauce-actions/actions/mailboxes";
@@ -11,10 +11,11 @@ import type { ISigner } from "applesauce-signers";
 import { createSettingsRunner, saveRelayList, userFor } from "../lib/settings-actions";
 import { UserAvatar } from "../components/User";
 import { useTheme, type ThemePref } from "../lib/theme";
+import { useDevMode, setDevMode } from "../lib/dev-mode";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
-type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup";
+type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup" | "advanced";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "profile", label: "Profile", icon: <UserIcon size={18} /> },
@@ -23,6 +24,7 @@ const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "dm", label: "DM Inbox Relays", icon: <Inbox size={18} /> },
   { id: "blossom", label: "Blossom Servers", icon: <Flower2 size={18} /> },
   { id: "lookup", label: "Indexer Relays", icon: <Radar size={18} /> },
+  { id: "advanced", label: "Advanced", icon: <FlaskConical size={18} /> },
 ];
 
 /** Normalize a user-typed URL, prefixing `scheme://` when none is given. */
@@ -78,6 +80,7 @@ export function SettingsView({
           {page === "dm" && <DmRelaysPage signer={signer} pubkey={pubkey} />}
           {page === "blossom" && <BlossomPage signer={signer} pubkey={pubkey} />}
           {page === "lookup" && <LookupPage signer={signer} pubkey={pubkey} />}
+          {page === "advanced" && <AdvancedPage />}
         </div>
       </div>
     </div>
@@ -130,6 +133,38 @@ function AppearancePage() {
           );
         })}
       </div>
+    </>
+  );
+}
+
+// ---- Advanced ------------------------------------------------------------
+
+function AdvancedPage() {
+  const devMode = useDevMode();
+  return (
+    <>
+      <h2 className="text-2xl font-bold mb-1">Advanced</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
+        Low-level options for power users. Most people won't need anything here.
+      </p>
+
+      <h3 className="text-lg font-bold mb-1">Developer mode</h3>
+      <p className="text-sm opacity-70 leading-relaxed mb-4 max-w-[440px]">
+        Adds a <strong>Developer tools</strong> button to the sidebar with low-level protocol utilities, like walking a
+        community's cryptographic history epoch by epoch.
+      </p>
+      <label className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer max-w-[440px]">
+        <input
+          type="checkbox"
+          className="toggle toggle-primary"
+          checked={devMode}
+          onChange={(e) => setDevMode(e.target.checked)}
+        />
+        <span className="flex flex-col gap-px">
+          <span className="font-semibold">Enable developer mode</span>
+          <span className="text-xs opacity-60">Show the /dev tools in the sidebar</span>
+        </span>
+      </label>
     </>
   );
 }

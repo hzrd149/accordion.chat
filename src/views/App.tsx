@@ -23,6 +23,7 @@ import {
   UserPlus,
   Users,
   Volume2,
+  Wrench,
   X,
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
@@ -51,6 +52,8 @@ import {
 import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
+import { DevView } from "./dev";
+import { useDevMode } from "../lib/dev-mode";
 import { InvitesView } from "./invites";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/ClientStatus";
@@ -80,6 +83,8 @@ export function App() {
             <Route path="/invites" element={<Shell />} />
             <Route path="/settings" element={<Shell />} />
             <Route path="/settings/:page" element={<Shell />} />
+            <Route path="/dev" element={<Shell />} />
+            <Route path="/dev/:page" element={<Shell />} />
             <Route path="/c/:cid" element={<Shell />} />
             <Route path="/c/:cid/settings" element={<Shell />} />
             <Route path="/c/:cid/settings/:page" element={<Shell />} />
@@ -126,6 +131,11 @@ function Shell() {
   const adminRootMatch = useMatch("/c/:cid/settings");
   const onCommunitySettings = Boolean(adminMatch || adminRootMatch);
   const communitySettingsPage = adminMatch?.params.page ?? "overview";
+  const devMode = useDevMode();
+  const devMatch = useMatch("/dev/:page");
+  const devRootMatch = useMatch("/dev");
+  const onDev = Boolean(devMatch || devRootMatch);
+  const devPage = devMatch?.params.page ?? "crypto-history";
   const { count: inviteCount } = useInvites();
 
   function setParam(key: string, value: string | null) {
@@ -190,10 +200,10 @@ function Shell() {
   useEffect(() => {
     // Don't auto-jump into a community from the invites/settings routes — only
     // from root.
-    if (communities.length > 0 && !selectedCid && !onInvites && !onSettings) {
+    if (communities.length > 0 && !selectedCid && !onInvites && !onSettings && !onDev) {
       navigate(`/c/${communities[0].material.community_id}`, { replace: true });
     }
-  }, [communities, selectedCid, onInvites, onSettings, navigate]);
+  }, [communities, selectedCid, onInvites, onSettings, onDev, navigate]);
 
   useEffect(() => {
     if (!activeState || onCommunitySettings) return;
@@ -266,6 +276,20 @@ function Shell() {
             </span>
           )}
         </div>
+        {devMode && (
+          <button
+            className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+              onDev ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
+            }`}
+            title="Developer tools"
+            onClick={() => {
+              navigate("/dev");
+              setNavOpen(false);
+            }}
+          >
+            <Wrench size={22} />
+          </button>
+        )}
         <button
           className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
             onSettings ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
@@ -284,6 +308,8 @@ function Shell() {
         <InvitesView />
       ) : onSettings ? (
         <SettingsView page={settingsPage} onSelectPage={(p) => navigate(`/settings/${p}`)} />
+      ) : onDev ? (
+        <DevView page={devPage} onSelectPage={(p) => navigate(`/dev/${p}`)} />
       ) : activeState ? (
         onCommunitySettings ? (
           <CommunitySettingsView

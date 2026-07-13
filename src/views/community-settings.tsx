@@ -5,11 +5,13 @@ import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
+import { useDevMode } from "../lib/dev-mode";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
-import { PERM } from "applesauce-concord";
-import type { BlobPointer, CommunityState, PermName } from "applesauce-concord";
+import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
+import { PERM, VSK } from "applesauce-concord";
+import type { BlobPointer, CommunityState, ConcordCommunity, PermName, Role } from "applesauce-concord";
 import { hasPerm, parsePermissions, resolveStanding } from "applesauce-concord/helpers";
 import { ConfirmModal } from "../components/modals";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
@@ -51,8 +53,12 @@ export function CommunitySettingsView({
   const client = useConcord();
   const account = useActiveAccount();
   const state = use$(() => client.getState$(cid), [cid]) as CommunityState;
-  // Fall back to the overview page for an unknown/empty page value.
-  const page: PageId = PAGES.some((p) => p.id === pageParam) ? (pageParam as PageId) : "overview";
+  // The Advanced page (Refounding etc.) is a developer-only area — hide it from
+  // the nav, and refuse to render it via a direct URL, unless dev mode is on.
+  const devMode = useDevMode();
+  const visiblePages = devMode ? PAGES : PAGES.filter((p) => p.id !== "advanced");
+  // Fall back to the overview page for an unknown/empty/hidden page value.
+  const page: PageId = visiblePages.some((p) => p.id === pageParam) ? (pageParam as PageId) : "overview";
 
   if (!state) return null;
   const name = state.metadata?.name ?? state.material.name;
@@ -65,7 +71,7 @@ export function CommunitySettingsView({
           <CommunityIcon state={state} />
           <span className="max-md:hidden">{name}</span>
         </div>
-        {PAGES.map((p) => (
+        {visiblePages.map((p) => (
           <button
             key={p.id}
             className={`btn btn-ghost btn-sm justify-start gap-2.5 w-full font-medium max-md:w-auto max-md:shrink-0 ${page === p.id ? "btn-active" : ""}`}
@@ -294,6 +300,39 @@ function ImageField({
 
 function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
   const community = useCommunity(cid);
+  const serverRoles = state.roles.filter((r) => r.scope.kind === "server").sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+  const [tab, setTab] = useState<string>(serverRoles[0]?.role_id ?? "new");
+
+  const selectedRole = serverRoles.find((r) => r.role_id === tab);
+  const activeTab = selectedRole ? selectedRole.role_id : "new";
+  const canCreate = (community?.canDo(PERM.MANAGE_ROLES) ?? false) && !state.dissolved;
+
+  return (
+    <>
+      <h2 className="text-2xl font-bold mb-1">Roles</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Roles bundle permissions you can grant to members. The owner is always supreme.</p>
+      <div className="tabs tabs-boxed mb-5 overflow-x-auto flex-nowrap">
+        {serverRoles.map((r) => (
+          <button key={r.role_id} className={`tab shrink-0 ${activeTab === r.role_id ? "tab-active" : ""}`} onClick={() => setTab(r.role_id)}>
+            {r.name}
+          </button>
+        ))}
+        <button className={`tab shrink-0 ${activeTab === "new" ? "tab-active" : ""}`} onClick={() => setTab("new")}>
+          New role
+        </button>
+      </div>
+
+      {activeTab === "new" ? (
+        <NewRolePanel state={state} canCreate={canCreate} />
+      ) : selectedRole ? (
+        <RolePanel cid={cid} state={state} role={selectedRole} />
+      ) : null}
+    </>
+  );
+}
+
+function NewRolePanel({ state, canCreate }: { state: CommunityState; canCreate: boolean }) {
+  const community = useCommunity(state.material.community_id);
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -318,51 +357,174 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">Roles</h2>
-      <p className="text-sm opacity-70 leading-relaxed mb-5">Roles bundle permissions you can grant to members. The owner is always supreme.</p>
-      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Existing roles</h3>
-      {state.roles.length === 0 && <p className="text-sm opacity-70 leading-relaxed mb-5">No roles yet.</p>}
-      {state.roles.map((r) => (
-        <div key={r.role_id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
-          <span className="badge badge-primary badge-sm" style={{ background: r.color ? `#${r.color.toString(16)}` : undefined }}>
-            {r.name}
-          </span>
-          <span className="text-xs opacity-60">pos {r.position}</span>
-          <span className="ml-auto">
-            {(Object.keys(PERM) as PermName[])
-              .filter((p) => (parsePermissions(r.permissions) & PERM[p]) === PERM[p])
-              .map((p) => (
-                <span key={p} className="badge badge-ghost badge-sm m-0.5">
-                  {PERM_LABELS[p]}
-                </span>
-              ))}
-          </span>
-        </div>
-      ))}
-
-      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Create role</h3>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mb-2">Create role</h3>
+      {!canCreate && <p className="text-sm opacity-70 leading-relaxed mb-5">You need Manage Roles permission to create roles.</p>}
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Role name</label>
-        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Moderator" maxLength={64} />
+        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Moderator" maxLength={64} disabled={!canCreate} />
       </div>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Permissions</label>
         {(Object.keys(PERM) as PermName[]).map((p) => (
           <div key={p} className="flex items-center gap-2.5 py-1">
-            <input type="checkbox" className="checkbox checkbox-sm" id={p} checked={perms.has(p)} onChange={() => toggle(p)} />
-            <label htmlFor={p} className="cursor-pointer text-sm">
+            <input type="checkbox" className="checkbox checkbox-sm" id={`new-${p}`} checked={perms.has(p)} onChange={() => toggle(p)} disabled={!canCreate} />
+            <label htmlFor={`new-${p}`} className="cursor-pointer text-sm">
               {PERM_LABELS[p]}
             </label>
           </div>
         ))}
       </div>
       <div className="flex items-center gap-3.5 mt-5">
-        <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
+        <button className="btn btn-primary" onClick={create} disabled={!canCreate || !name.trim() || busy}>
           Create role
         </button>
       </div>
     </>
   );
+}
+
+function RolePanel({ cid, state, role }: { cid: string; state: CommunityState; role: Role }) {
+  const community = useCommunity(cid);
+  const [seededRole, setSeededRole] = useState(role.role_id);
+  const [name, setName] = useState(role.name);
+  const [position, setPosition] = useState(String(role.position));
+  const [color, setColor] = useState(role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#5865f2");
+  const [perms, setPerms] = useState<Set<PermName>>(() => rolePermSet(role));
+  const [memberQuery, setMemberQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  if (role.role_id !== seededRole) {
+    setSeededRole(role.role_id);
+    setName(role.name);
+    setPosition(String(role.position));
+    setColor(role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#5865f2");
+    setPerms(rolePermSet(role));
+    setMemberQuery("");
+    setSaved(false);
+  }
+
+  const canManage = (community?.canDo(PERM.MANAGE_ROLES, role.position) ?? false) && !state.dissolved;
+  const members = [...state.members].filter((m) => (state.grants.get(m) ?? []).includes(role.role_id)).sort();
+  const candidates = useMentionCandidates([...state.members].filter((m) => m !== state.material.owner && !members.includes(m)).sort());
+  const search = useMentionSearch(candidates);
+  const results = search(memberQuery);
+
+  function toggle(p: PermName) {
+    const next = new Set(perms);
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    setPerms(next);
+    setSaved(false);
+  }
+
+  async function save() {
+    setBusy(true);
+    setSaved(false);
+    let bits = 0n;
+    for (const p of perms) bits |= PERM[p];
+    const parsedColor = Number.parseInt(color.replace(/^#/, ""), 16);
+    if (community) await editRole(community, role, {
+      name: name.trim(),
+      position: Math.max(1, Number.parseInt(position, 10) || role.position),
+      permissions: bits.toString(),
+      color: Number.isFinite(parsedColor) ? parsedColor : 0,
+    });
+    setBusy(false);
+    setSaved(true);
+  }
+
+  async function removeMember(member: string) {
+    const next = (state.grants.get(member) ?? []).filter((rid) => rid !== role.role_id);
+    await community?.grantRoles(member, next);
+  }
+
+  async function addMember(member: string) {
+    const next = new Set(state.grants.get(member) ?? []);
+    next.add(role.role_id);
+    await community?.grantRoles(member, [...next]);
+    setMemberQuery("");
+  }
+
+  return (
+    <>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mb-2">Edit role</h3>
+      {!canManage && <p className="text-sm opacity-70 leading-relaxed mb-5">You need Manage Roles permission and must outrank this role to edit it.</p>}
+      <div className="grid grid-cols-2 gap-4 mb-4 max-sm:grid-cols-1">
+        <div>
+          <label className="label text-xs font-semibold uppercase opacity-70">Role name</label>
+          <input className="input input-bordered w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} maxLength={64} disabled={!canManage} />
+        </div>
+        <div>
+          <label className="label text-xs font-semibold uppercase opacity-70">Position</label>
+          <input className="input input-bordered w-full" type="number" min={1} value={position} onChange={(e) => { setPosition(e.target.value); setSaved(false); }} disabled={!canManage} />
+        </div>
+      </div>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Color</label>
+        <input className="input input-bordered w-full max-w-40" type="color" value={color} onChange={(e) => { setColor(e.target.value); setSaved(false); }} disabled={!canManage} />
+      </div>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Permissions</label>
+        {(Object.keys(PERM) as PermName[]).map((p) => (
+          <div key={p} className="flex items-center gap-2.5 py-1">
+            <input type="checkbox" className="checkbox checkbox-sm" id={`${role.role_id}-${p}`} checked={perms.has(p)} onChange={() => toggle(p)} disabled={!canManage} />
+            <label htmlFor={`${role.role_id}-${p}`} className="cursor-pointer text-sm">
+              {PERM_LABELS[p]}
+            </label>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3.5 mt-5 mb-7">
+        <button className="btn btn-primary" onClick={save} disabled={!canManage || !name.trim() || busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
+      </div>
+
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Members</h3>
+      {members.length === 0 && <p className="text-sm opacity-70 leading-relaxed mb-3">No members have this role.</p>}
+      {members.map((m) => (
+        <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
+          <UserAvatar pubkey={m} />
+          <div className="font-medium min-w-0 truncate"><UserName pubkey={m} /></div>
+          <button className="btn btn-ghost btn-sm ml-auto" onClick={() => removeMember(m)} disabled={!canManage}>
+            Remove
+          </button>
+        </div>
+      ))}
+
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Add member</h3>
+      <input className="input input-bordered w-full" value={memberQuery} onChange={(e) => setMemberQuery(e.target.value)} placeholder="Search members by name or npub" disabled={!canManage} />
+      {canManage && (
+        <div className="mt-2 rounded-box border border-base-300 overflow-hidden">
+          {results.length === 0 ? (
+            <div className="p-3 text-sm opacity-70">No matching members.</div>
+          ) : (
+            results.map((c) => (
+              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left" onClick={() => addMember(c.pubkey)}>
+                <UserAvatar pubkey={c.pubkey} />
+                <span className="font-medium truncate">{c.name}</span>
+                <span className="text-xs opacity-60 ml-auto truncate">{c.npub}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function rolePermSet(role: Role): Set<PermName> {
+  const bits = parsePermissions(role.permissions);
+  return new Set((Object.keys(PERM) as PermName[]).filter((p) => hasPerm(bits, PERM[p])));
+}
+
+async function editRole(community: ConcordCommunity, role: Role, patch: Partial<Omit<Role, "role_id">>): Promise<void> {
+  const editable = community as unknown as {
+    publishEdition: (vsk: number, entityId: string, content: string) => Promise<void>;
+  };
+  await editable.publishEdition(VSK.ROLE, role.role_id, JSON.stringify({ ...role, ...patch, role_id: role.role_id }));
 }
 
 // ---- Members -------------------------------------------------------------
@@ -372,11 +534,13 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
   const community = useCommunity(cid);
   const members = [...state.members];
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
+  const serverRoles = state.roles.filter((r) => r.scope.kind === "server").sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   // The CALLER's standing governs which admin actions are offered, not the
   // viewed member's. resolveStanding returns isOwner + folded permissions.
   const caller = resolveStanding(account?.pubkey ?? "", state.material.owner, rolesMap, state.grants);
   const canBan = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
   const canKick = caller.isOwner || hasPerm(caller.permissions, PERM.KICK);
+  const canManageRoles = (community?.canDo(PERM.MANAGE_ROLES) ?? false) && !state.dissolved;
   const [banTarget, setBanTarget] = useState<string | null>(null);
 
   const doBan = async (member: string) => {
@@ -433,9 +597,9 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
                 </>
               )}
             </div>
-            {!standing.isOwner && state.roles.length > 0 && (
+            {!standing.isOwner && canManageRoles && serverRoles.length > 0 && (
               <div className="w-full flex gap-1.5 flex-wrap pl-[42px]">
-                {state.roles.map((r) => {
+                {serverRoles.map((r) => {
                   const on = held.has(r.role_id);
                   return (
                     <button
