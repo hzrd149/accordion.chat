@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DoorOpen,
   Hand,
@@ -78,6 +78,8 @@ export function App() {
           <Routes>
             <Route path="/" element={<Shell />} />
             <Route path="/invites" element={<Shell />} />
+            <Route path="/settings" element={<Shell />} />
+            <Route path="/settings/:page" element={<Shell />} />
             <Route path="/c/:cid" element={<Shell />} />
             <Route path="/c/:cid/:channelId" element={<Shell />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -110,12 +112,14 @@ function Shell() {
   const selectedCid = cidParam ?? null;
   const selectedChannel = channelParam ?? null;
   const modal = searchParams.get("modal") as ModalName | null;
-  const settingsPage = searchParams.get("settings");
   const adminPage = searchParams.get("admin");
-  // The Direct Invites (CORD-05 §6) page is its own route rendered in the main
-  // area (the community rail stays put). The count feeds the rail badge; the
-  // watcher syncs invites in the background.
+  // Settings and Direct Invites (CORD-05 §6) are their own routes rendered in
+  // the main area (the community rail stays put), not full-screen overlays.
   const onInvites = useLocation().pathname === "/invites";
+  const settingsMatch = useMatch("/settings/:page");
+  const settingsRootMatch = useMatch("/settings");
+  const onSettings = Boolean(settingsMatch || settingsRootMatch);
+  const settingsPage = settingsMatch?.params.page ?? "profile";
   const { count: inviteCount } = useInvites();
 
   function setParam(key: string, value: string | null) {
@@ -178,11 +182,12 @@ function Shell() {
   // because the current fold has not surfaced them yet.
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
   useEffect(() => {
-    // Don't auto-jump into a community from the invites route — only from root.
-    if (communities.length > 0 && !selectedCid && !onInvites) {
+    // Don't auto-jump into a community from the invites/settings routes — only
+    // from root.
+    if (communities.length > 0 && !selectedCid && !onInvites && !onSettings) {
       navigate(`/c/${communities[0].material.community_id}`, { replace: true });
     }
-  }, [communities, selectedCid, onInvites, navigate]);
+  }, [communities, selectedCid, onInvites, onSettings, navigate]);
 
   useEffect(() => {
     if (!activeState) return;
@@ -256,9 +261,14 @@ function Shell() {
           )}
         </div>
         <button
-          className="w-12 h-12 shrink-0 rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
+          className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+            onSettings ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
+          }`}
           title="Settings"
-          onClick={() => setParam("settings", "profile")}
+          onClick={() => {
+            navigate("/settings");
+            setNavOpen(false);
+          }}
         >
           <Settings size={22} />
         </button>
@@ -266,6 +276,8 @@ function Shell() {
 
       {onInvites ? (
         <InvitesView />
+      ) : onSettings ? (
+        <SettingsView page={settingsPage} onSelectPage={(p) => navigate(`/settings/${p}`)} />
       ) : activeState ? (
         <>
           <div
@@ -396,14 +408,6 @@ function Shell() {
             </button>
           </div>
         </Modal>
-      )}
-
-      {settingsPage !== null && (
-        <SettingsView
-          page={settingsPage}
-          onSelectPage={(p) => setParam("settings", p)}
-          onClose={() => setParam("settings", null)}
-        />
       )}
 
       {adminPage !== null && activeState && (

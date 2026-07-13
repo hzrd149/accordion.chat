@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon, X } from "lucide-react";
+import { Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { CreateProfile, UpdateProfile } from "applesauce-actions/actions/profile";
 import { AddInboxRelay, AddOutboxRelay, RemoveInboxRelay, RemoveOutboxRelay } from "applesauce-actions/actions/mailboxes";
@@ -40,29 +40,21 @@ function normalizeUrl(input: string, scheme: "wss" | "https"): string | null {
 export function SettingsView({
   page: pageParam,
   onSelectPage,
-  onClose,
 }: {
   page: string;
   onSelectPage: (page: PageId) => void;
-  onClose: () => void;
 }) {
   const account = useActiveAccount();
-  // Fall back to the profile page for an unknown/empty `?settings=` value.
+  // Fall back to the profile page for an unknown/empty page value.
   const page: PageId = PAGES.some((p) => p.id === pageParam) ? (pageParam as PageId) : "profile";
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   if (!account) return null;
   const signer = account.signer as ISigner;
   const pubkey = account.pubkey;
 
   return (
-    <div className="fixed inset-0 z-[300] flex bg-base-100 max-md:flex-col">
-      <nav className="w-58 shrink-0 bg-base-200 p-3 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pr-14">
+    <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
+      <nav className="w-58 shrink-0 bg-base-200 p-3 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pl-14">
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide text-base-content/60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
           <UserAvatar pubkey={pubkey} className="w-7 h-7" />
           <span className="max-md:hidden">Settings</span>
@@ -79,9 +71,6 @@ export function SettingsView({
         ))}
       </nav>
       <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
-        <button className="btn btn-ghost btn-circle absolute top-6 right-7 z-10 max-md:fixed max-md:top-2 max-md:right-2" title="Close (Esc)" onClick={onClose}>
-          <X size={22} />
-        </button>
         <div className="max-w-[640px]">
           {page === "profile" && <ProfilePage signer={signer} pubkey={pubkey} />}
           {page === "appearance" && <AppearancePage />}
