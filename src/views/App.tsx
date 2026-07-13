@@ -93,8 +93,9 @@ const NO_COMMUNITIES: CommunityState[] = [];
 
 function Shell() {
   const client = useConcord();
+  const account = useActiveAccount();
+  const pubkey = account?.pubkey ?? "";
   const communities = use$(client.communities$) ?? NO_COMMUNITIES;
-  const status = use$(client.status$);
   const navigate = useNavigate();
   const { cid: cidParam, channelId: channelParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -159,7 +160,7 @@ function Shell() {
 
   // The user's NIP-30 favorite custom emojis — feeds the thread composer in
   // the side panel.
-  const favorites = useFavoriteEmojis(client.pubkey);
+  const favorites = useFavoriteEmojis(pubkey);
 
   // Auto-select a community and channel only when the URL has not already made
   // a choice. Deep links may point at communities/channels that are still being
@@ -379,11 +380,6 @@ function Shell() {
         />
       )}
 
-      {status && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] bg-base-200 border border-base-300 rounded-lg px-4 py-2 text-base-content">
-          {status}
-        </div>
-      )}
     </div>
   );
 }
@@ -675,8 +671,9 @@ function ChatView({
   onToggleMembers: () => void;
   onOpenThread: (id: string) => void;
 }) {
-  const client = useConcord();
   const community = useCommunity(cid);
+  const account = useActiveAccount();
+  const pubkey = account?.pubkey ?? "";
   const messages = useMessages(community, channelId);
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
@@ -687,11 +684,11 @@ function ChatView({
   // where "Leave channel" (a local key-drop) is meaningful.
   const canLeaveChannel =
     Boolean(channel?.private) &&
-    client.pubkey !== state.material.owner &&
+    pubkey !== state.material.owner &&
     (community?.material.channels.some((c) => c.id === channelId) ?? false);
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
-  const favorites = useFavoriteEmojis(client.pubkey);
+  const favorites = useFavoriteEmojis(pubkey);
   // Quick-react buttons: lead with the user's favorites, backfill with defaults.
   // Memoized so the reference stays stable and doesn't defeat MessageList's memo.
   const quickReactions = useMemo<(string | Emoji)[]>(
@@ -772,7 +769,7 @@ function ChatView({
         messages={messages}
         channelName={channel?.name}
         ownerPubkey={state.material.owner}
-        myPubkey={client.pubkey}
+        myPubkey={pubkey}
         canWrite={canWrite}
         community={community}
         channelId={channelId}

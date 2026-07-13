@@ -21,9 +21,8 @@ import {
   VideoPresets,
   type RoomOptions,
 } from "livekit-client";
-import { use$ } from "applesauce-react/hooks";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
 
-import { useConcord } from "../../lib/concord-context";
 import {
   fetchAvToken,
   rendezvousCandidates,
@@ -70,7 +69,7 @@ class SenderKeyProvider extends BaseKeyProvider {
 }
 
 export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => void }) {
-  const client = useConcord();
+  const account = useActiveAccount();
   const { cid, channelId, broker } = call;
   const engine = useVoiceEngine(cid);
 
@@ -248,7 +247,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // Identity → member resolution for the call UI (§4): our own identity is us;
   // anyone else's renders as a member only under a sole fresh presence claim.
   const resolveIdentity: VoiceIdentityResolver = (identity) => {
-    if (tokenData && identity === tokenData.identity) return { pubkey: client.pubkey, verified: true };
+    if (tokenData && identity === tokenData.identity) return { pubkey: account?.pubkey ?? "", verified: true };
     const author = verifiedAuthorOf(fold, identity);
     return author ? { pubkey: author, verified: true } : { pubkey: identity, verified: false };
   };

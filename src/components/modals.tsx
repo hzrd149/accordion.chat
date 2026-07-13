@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { use$ } from "applesauce-react/hooks";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { rumorMs } from "applesauce-concord/helpers";
@@ -174,8 +174,8 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
     setBusy(true);
     setError("");
     try {
-      const id = await client.joinByLink(link.trim());
-      onJoined(id);
+      const community = await client.joinByLink(link.trim());
+      onJoined(community.communityId);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -211,6 +211,8 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
 
 export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () => void }) {
   const client = useConcord();
+  const account = useActiveAccount();
+  const pubkey = account?.pubkey ?? "";
   const community = useCommunity(cid);
   const state = use$(() => client.getState$(cid), [cid]) as CommunityState | undefined;
   const [name, setName] = useState("");
@@ -232,9 +234,9 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
           kind: "channel",
           channel_id: channelId,
         });
-        const mine = new Set(state.grants.get(client.pubkey) ?? []);
+        const mine = new Set(state.grants.get(pubkey) ?? []);
         mine.add(roleId);
-        await community.grantRoles(client.pubkey, [...mine]);
+        await community.grantRoles(pubkey, [...mine]);
       }
       onClose();
     } catch {

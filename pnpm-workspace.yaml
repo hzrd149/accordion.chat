@@ -5,16 +5,16 @@
 # other dependency.
 minimumReleaseAgeExclude:
   - nostr-idb@5.1.0
-  - applesauce-accounts@0.0.0-concord-20260710195315
-  - applesauce-actions@0.0.0-concord-20260710195315
-  - applesauce-common@0.0.0-concord-20260710195315
-  - applesauce-concord@0.0.0-concord-20260710195315
-  - applesauce-content@0.0.0-concord-20260710195315
-  - applesauce-core@0.0.0-concord-20260710195315
-  - applesauce-loaders@0.0.0-concord-20260710195315
-  - applesauce-react@0.0.0-concord-20260710195315
-  - applesauce-relay@0.0.0-concord-20260710195315
-  - applesauce-signers@0.0.0-concord-20260710195315
+  - applesauce-accounts@0.0.0-concord-20260713174937
+  - applesauce-actions@0.0.0-concord-20260713174937
+  - applesauce-common@0.0.0-concord-20260713174937
+  - applesauce-concord@0.0.0-concord-20260713174937
+  - applesauce-content@0.0.0-concord-20260713174937
+  - applesauce-core@0.0.0-concord-20260713174937
+  - applesauce-loaders@0.0.0-concord-20260713174937
+  - applesauce-react@0.0.0-concord-20260713174937
+  - applesauce-relay@0.0.0-concord-20260713174937
+  - applesauce-signers@0.0.0-concord-20260713174937
 
 allowBuilds:
   esbuild: true

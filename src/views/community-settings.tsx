@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
-import { use$ } from "applesauce-react/hooks";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { UserAvatar, UserName } from "../components/User";
@@ -47,6 +47,7 @@ export function CommunitySettingsView({
   onClose: () => void;
 }) {
   const client = useConcord();
+  const account = useActiveAccount();
   const state = use$(() => client.getState$(cid), [cid]) as CommunityState;
   // Fall back to the overview page for an unknown/empty `?admin=` value.
   const page: PageId = PAGES.some((p) => p.id === pageParam) ? (pageParam as PageId) : "overview";
@@ -59,7 +60,7 @@ export function CommunitySettingsView({
 
   if (!state) return null;
   const name = state.metadata?.name ?? state.material.name;
-  const isOwner = client.pubkey === state.material.owner;
+  const isOwner = account?.pubkey === state.material.owner;
 
   return (
     <div className="fixed inset-0 z-[300] flex bg-base-100">
@@ -344,13 +345,13 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
 // ---- Members -------------------------------------------------------------
 
 function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
-  const client = useConcord();
+  const account = useActiveAccount();
   const community = useCommunity(cid);
   const members = [...state.members];
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
   // The CALLER's standing governs which admin actions are offered, not the
   // viewed member's. resolveStanding returns isOwner + folded permissions.
-  const caller = resolveStanding(client.pubkey, state.material.owner, rolesMap, state.grants);
+  const caller = resolveStanding(account?.pubkey ?? "", state.material.owner, rolesMap, state.grants);
   const canBan = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
   const canKick = caller.isOwner || hasPerm(caller.permissions, PERM.KICK);
   const [banTarget, setBanTarget] = useState<string | null>(null);
@@ -659,10 +660,10 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
 // ---- Advanced (testing/debug actions) ------------------------------------
 
 function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
-  const client = useConcord();
+  const account = useActiveAccount();
   const community = useCommunity(cid);
   const rolesMap = new Map(state.roles.map((r) => [r.role_id, r]));
-  const caller = resolveStanding(client.pubkey, state.material.owner, rolesMap, state.grants);
+  const caller = resolveStanding(account?.pubkey ?? "", state.material.owner, rolesMap, state.grants);
   const canRekey = caller.isOwner || hasPerm(caller.permissions, PERM.BAN);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);

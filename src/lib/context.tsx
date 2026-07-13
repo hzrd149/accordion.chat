@@ -25,7 +25,6 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     );
     ref = new ConcordClient({
       signer,
-      pubkey: account.pubkey,
       pool,
       eventStore,
       uploader,
@@ -33,9 +32,18 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       // decoded chat/control/guestbook history survives reload without refetching
       // (or depending on) relays. See src/app/rumor-cache.ts.
       storeFactory: createRumorStoreFactory(),
-      // Auto-decrypt the self-encrypted Community/Invite lists when they arrive
-      // (matches the app's prior behaviour of folding them without a prompt).
+      // The client's automatic signer behaviours are all opt-in gates (default
+      // off). Turn every one on for the smoothest first-class client experience:
+      //  - autoUnlock: decrypt the self-encrypted Community/Invite lists + incoming
+      //    Direct Invites as they arrive (no per-item prompt).
+      //  - autoAuthenticate: NIP-42-authenticate as the user on the Direct Invite
+      //    inbox relays when they challenge, so invites flow in without a manual step.
+      //  - autoSaveCommunityList: republish kind 13302 after a sync catches an epoch
+      //    up (dirty-flag driven; explicit join/leave/create always publish anyway).
+      // (watchDirectInvites already defaults true.)
       autoUnlock: true,
+      autoAuthenticate: true,
+      autoSaveCommunityList: true,
     });
     return ref;
   }, [account]);
