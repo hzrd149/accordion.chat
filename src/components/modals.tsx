@@ -3,6 +3,9 @@ import type { ReactNode } from "react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
+import { useDecryptedImage } from "../hooks/useDecryptedImage";
+import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
+import { UserAvatar, UserName } from "./User";
 import { rumorMs } from "applesauce-concord/helpers";
 import type { CommunityState } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
@@ -169,6 +172,10 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Proactively fetch the invite bundle as the link is entered, so we can preview
+  // the community before the user commits to joining.
+  const preview = useInvitePreview(link);
+  const ready = preview.status === "ready" && !preview.expired;
 
   async function join() {
     setBusy(true);
@@ -197,15 +204,62 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
           autoFocus
         />
       </div>
+      <InvitePreviewCard preview={preview} />
       <div className="modal-action">
         <button className="btn btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn btn-primary" onClick={join} disabled={!link.trim() || busy}>
-          {busy ? "Joining…" : "Join"}
+        <button className="btn btn-primary" onClick={join} disabled={!ready || busy}>
+          {busy
+            ? "Joining…"
+            : preview.status === "ready"
+              ? `Join ${preview.bundle.name}`
+              : "Join"}
         </button>
       </div>
     </Modal>
+  );
+}
+
+/** A preview of the community an invite link points at (name / icon / inviter),
+ *  fetched before the user joins. */
+function InvitePreviewCard({ preview }: { preview: InvitePreview }) {
+  const bundle = preview.status === "ready" ? preview.bundle : undefined;
+  const iconUrl = useDecryptedImage(bundle?.icon);
+  if (preview.status === "idle") return null;
+
+  if (preview.status === "loading")
+    return (
+      <div className="flex items-center gap-2 text-sm opacity-70 mb-4">
+        <span className="loading loading-spinner loading-sm" />
+        Looking up invite…
+      </div>
+    );
+
+  if (preview.status === "error")
+    return <div className="alert alert-warning text-sm mb-4">{preview.error}</div>;
+
+  // status === "ready"
+  const name = preview.bundle.name;
+  // Attribution is set to the inviter's hex pubkey by createInvite; only render a
+  // profile when it looks like one.
+  const inviter = /^[0-9a-f]{64}$/.test(preview.bundle.creator_npub ?? "") ? preview.bundle.creator_npub : undefined;
+  return (
+    <div className="flex items-center gap-3 p-3 mb-4 rounded-box bg-base-200 border border-base-300">
+      <div className="w-12 h-12 shrink-0 rounded-2xl bg-base-300 overflow-hidden flex items-center justify-center font-semibold text-lg">
+        {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="font-semibold truncate">{name}</div>
+        {inviter && (
+          <div className="text-[11px] opacity-60 truncate flex items-center gap-1">
+            <UserAvatar pubkey={inviter} className="w-4 h-4" />
+            invited by <UserName pubkey={inviter} />
+          </div>
+        )}
+        {preview.expired && <div className="text-error text-[11px] mt-0.5">This invite has expired.</div>}
+      </div>
+    </div>
   );
 }
 
