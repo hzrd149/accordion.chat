@@ -259,14 +259,24 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // it's a portal, so the LiveKit connection stays mounted here at the root.
   const host = (node: ReactNode) =>
     stageEl
-      ? createPortal(<div className="call-surface">{node}</div>, stageEl)
-      : createPortal(<div className="call-surface call-mini">{node}</div>, document.body);
+      ? createPortal(
+          <div className="mx-auto mt-2.5 mb-1 flex w-[min(860px,calc(100%-24px))] flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-lg">
+            {node}
+          </div>,
+          stageEl,
+        )
+      : createPortal(
+          <div className="fixed left-1/2 top-3 z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
+            {node}
+          </div>,
+          document.body,
+        );
 
   if (error) {
     return host(
-      <div className="call-status call-status-error">
+      <div className="flex items-center gap-2.5 px-4 py-3 text-error">
         <span>Voice unavailable: {error}</span>
-        <button className="btn secondary" onClick={onLeave}>
+        <button className="btn btn-ghost" onClick={onLeave}>
           Dismiss
         </button>
       </div>,
@@ -274,10 +284,10 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   }
   if (!voice || !tokenData || !e2eeReady) {
     return host(
-      <div className="call-status">
-        <Loader2 className="spin" size={16} />
+      <div className="flex items-center gap-2.5 px-4 py-3 text-base-content">
+        <Loader2 className="animate-spin" size={16} />
         <span>Connecting to #{call.channelName}…</span>
-        <button className="btn secondary" onClick={onLeave}>
+        <button className="btn btn-ghost" onClick={onLeave}>
           Cancel
         </button>
       </div>,
@@ -287,7 +297,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   return (
     <VoiceIdentityContext.Provider value={resolveIdentity}>
       <LiveKitRoom
-        className="call-root"
+        className="[display:contents]"
         room={e2ee.room}
         serverUrl={tokenData.url}
         token={tokenData.token}
@@ -305,9 +315,15 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
         {host(
           <>
             {!stageEl && (
-              <div className="call-mini-head">
-                <span className="call-mini-title">In call · #{call.channelName}</span>
-                <button className="call-btn hangup" title="Leave call" onClick={onLeave}>
+              <div className="flex items-center gap-2.5 border-b border-base-300 px-3 py-2">
+                <span className="flex-1 text-sm font-semibold text-base-content">
+                  In call · #{call.channelName}
+                </span>
+                <button
+                  className="btn btn-error btn-circle btn-sm"
+                  title="Leave call"
+                  onClick={onLeave}
+                >
                   <PhoneOff size={16} />
                 </button>
               </div>

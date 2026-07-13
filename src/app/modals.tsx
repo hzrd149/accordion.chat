@@ -9,10 +9,11 @@ import type { ChatMessage } from "./chat/fold";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal modal-open" onClick={onClose}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
+      <div className="modal-backdrop" />
     </div>
   );
 }
@@ -47,15 +48,15 @@ export function ConfirmModal({
 
   return (
     <Modal onClose={busy ? () => {} : onClose}>
-      <h2>{title}</h2>
-      <div className="modal-body">{body}</div>
-      {error && <p className="modal-error">{error}</p>}
-      <div className="modal-actions">
-        <button className="btn ghost" disabled={busy} onClick={onClose}>
+      <h2 className="text-lg font-bold">{title}</h2>
+      <div className="py-3 text-sm leading-relaxed">{body}</div>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+      <div className="modal-action">
+        <button className="btn btn-ghost" disabled={busy} onClick={onClose}>
           {cancelLabel}
         </button>
         <button
-          className={`btn ${danger ? "danger" : ""}`}
+          className={`btn ${danger ? "btn-error" : "btn-primary"}`}
           disabled={busy}
           onClick={async () => {
             setBusy(true);
@@ -98,14 +99,14 @@ export function RawEventModal({ message, onClose }: { message: ChatMessage; onCl
 
   return (
     <Modal onClose={onClose}>
-      <h2>Raw event</h2>
-      <p className="sub">The decoded rumor and its CORD-01 wrapper metadata, for debugging.</p>
-      <pre className="raw-json">{json}</pre>
-      <div className="modal-actions">
-        <button className="btn secondary" onClick={onClose}>
+      <h2 className="text-lg font-bold">Raw event</h2>
+      <p className="text-sm opacity-60 mb-3">The decoded rumor and its CORD-01 wrapper metadata, for debugging.</p>
+      <pre className="max-h-[60vh] overflow-auto rounded-box bg-base-300 p-3 font-mono text-xs leading-relaxed whitespace-pre select-text">{json}</pre>
+      <div className="modal-action">
+        <button className="btn btn-ghost" onClick={onClose}>
           Close
         </button>
-        <button className="btn" onClick={copy}>
+        <button className="btn btn-primary" onClick={copy}>
           {copied ? "Copied!" : "Copy JSON"}
         </button>
       </div>
@@ -136,26 +137,26 @@ export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => vo
 
   return (
     <Modal onClose={onClose}>
-      <h2>Create a community</h2>
-      <p className="sub">Your community, your rules. It's yours forever — you're the owner.</p>
-      {error && <div className="error">{error}</div>}
-      <div className="field">
-        <label>Community name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="My Community" maxLength={64} autoFocus />
+      <h2 className="text-lg font-bold">Create a community</h2>
+      <p className="text-sm opacity-60 mb-5">Your community, your rules. It's yours forever — you're the owner.</p>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Community name</label>
+        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="My Community" maxLength={64} autoFocus />
       </div>
-      <div className="field">
-        <label>Description (optional)</label>
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's it about?" />
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Description (optional)</label>
+        <input className="input input-bordered w-full" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's it about?" />
       </div>
-      <div className="field">
-        <label>Relays (one per line)</label>
-        <textarea value={relays} onChange={(e) => setRelays(e.target.value)} rows={3} />
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Relays (one per line)</label>
+        <textarea className="textarea textarea-bordered w-full" value={relays} onChange={(e) => setRelays(e.target.value)} rows={3} />
       </div>
-      <div className="modal-actions">
-        <button className="btn secondary" onClick={onClose}>
+      <div className="modal-action">
+        <button className="btn btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn" onClick={create} disabled={!name.trim() || busy}>
+        <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
           {busy ? "Creating…" : "Create"}
         </button>
       </div>
@@ -183,23 +184,24 @@ export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined
 
   return (
     <Modal onClose={onClose}>
-      <h2>Join a community</h2>
-      <p className="sub">Paste an invite link. Only people with the link can join.</p>
-      {error && <div className="error">{error}</div>}
-      <div className="field">
-        <label>Invite link</label>
+      <h2 className="text-lg font-bold">Join a community</h2>
+      <p className="text-sm opacity-60 mb-5">Paste an invite link. Only people with the link can join.</p>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Invite link</label>
         <input
+          className="input input-bordered w-full"
           value={link}
           onChange={(e) => setLink(e.target.value)}
           placeholder="https://…/invite/naddr…#…"
           autoFocus
         />
       </div>
-      <div className="modal-actions">
-        <button className="btn secondary" onClick={onClose}>
+      <div className="modal-action">
+        <button className="btn btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn" onClick={join} disabled={!link.trim() || busy}>
+        <button className="btn btn-primary" onClick={join} disabled={!link.trim() || busy}>
           {busy ? "Joining…" : "Join"}
         </button>
       </div>
@@ -242,28 +244,24 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
 
   return (
     <Modal onClose={onClose}>
-      <h2>Create channel</h2>
-      <div className="field">
-        <label>Channel name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="new-channel" autoFocus maxLength={64} />
+      <h2 className="text-lg font-bold mb-4">Create channel</h2>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Channel name</label>
+        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="new-channel" autoFocus maxLength={64} />
       </div>
-      <div className="check-row">
-        <input type="checkbox" id="priv" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
-        <label htmlFor="priv" style={{ margin: 0 }}>
-          Private channel (its own key, only role-holders can read)
-        </label>
-      </div>
-      <div className="check-row">
-        <input type="checkbox" id="voice" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
-        <label htmlFor="voice" style={{ margin: 0 }}>
-          Voice/video channel (end-to-end-encrypted calls)
-        </label>
-      </div>
-      <div className="modal-actions">
-        <button className="btn secondary" onClick={onClose}>
+      <label className="flex items-center gap-2.5 p-2 rounded-lg cursor-pointer hover:bg-base-200">
+        <input type="checkbox" className="checkbox checkbox-sm" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
+        <span className="text-sm">Private channel (its own key, only role-holders can read)</span>
+      </label>
+      <label className="flex items-center gap-2.5 p-2 rounded-lg cursor-pointer hover:bg-base-200">
+        <input type="checkbox" className="checkbox checkbox-sm" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
+        <span className="text-sm">Voice/video channel (end-to-end-encrypted calls)</span>
+      </label>
+      <div className="modal-action">
+        <button className="btn btn-ghost" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn" onClick={create} disabled={!name.trim() || busy}>
+        <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
           Create
         </button>
       </div>
@@ -296,15 +294,15 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
   return (
     <Modal onClose={onClose}>
-      <h2>Invite people</h2>
-      <p className="sub">Anyone with this link can join. The link carries no keys — those live encrypted on relays.</p>
-      {error && <div className="error">{error}</div>}
+      <h2 className="text-lg font-bold">Invite people</h2>
+      <p className="text-sm opacity-60 mb-5">Anyone with this link can join. The link carries no keys — those live encrypted on relays.</p>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
       {busy ? (
-        <p>Minting invite…</p>
+        <p className="flex items-center gap-2"><span className="loading loading-spinner loading-sm" />Minting invite…</p>
       ) : (
         <>
-          <div className="invite-link">{link}</div>
-          <button className="btn full" onClick={() => navigator.clipboard.writeText(link)}>
+          <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70 mb-3">{link}</div>
+          <button className="btn btn-primary btn-block" onClick={() => navigator.clipboard.writeText(link)}>
             Copy link
           </button>
         </>

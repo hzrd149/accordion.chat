@@ -3,7 +3,7 @@ import { BrowserRouter } from "react-router";
 import { EventStoreProvider, AccountsProvider } from "applesauce-react/providers";
 import { eventStore, accounts, loadAccounts } from "./nostr";
 import { App } from "./app/App";
-import "./app/theme.css";
+import "./app/index.css";
 
 loadAccounts();
 

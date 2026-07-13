@@ -12,7 +12,7 @@ export function ThemeToggle() {
   const next = resolved === "dark" ? "light" : "dark";
   return (
     <button
-      className="logout"
+      className="btn btn-ghost btn-sm btn-circle"
       title={`Switch to ${next} theme`}
       aria-label={`Switch to ${next} theme`}
       onClick={() => setTheme(next)}

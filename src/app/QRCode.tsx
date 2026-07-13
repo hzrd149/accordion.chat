@@ -16,7 +16,7 @@ export function QRCode({ value, size = 224 }: { value: string; size?: number }) 
     };
   }, [value, size]);
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <div className="alert alert-error text-sm">{error}</div>;
   return (
     <div
       style={{ width: size, height: size, borderRadius: 8, background: "#fff", display: "block" }}

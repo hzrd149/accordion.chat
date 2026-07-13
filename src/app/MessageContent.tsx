@@ -17,6 +17,12 @@ const resolved = new Map<string, string>();
 /** A media attachment with a resolved URL (the only kind we render). */
 type UrlAttachment = MediaAttachment & { url: string };
 
+// Gallery tile: square, cover-fit media; a lone last tile (odd count) spans the
+// full row and goes 16:9 via the last:odd variant (mirrors the old CSS rule).
+const TILE =
+  "relative block overflow-hidden rounded-lg aspect-square bg-base-200 cursor-zoom-in last:odd:col-span-2 last:odd:aspect-video";
+const TILE_MEDIA = "w-full h-full object-cover block m-0";
+
 function attKey(a: UrlAttachment): string {
   return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
 }
@@ -74,32 +80,58 @@ function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolea
   const src = useAttachmentSrc(att);
   const kind = att.type?.split("/")[0];
 
-  if (!src) return <div className={gallery ? "attachment-tile loading" : "attachment loading"} />;
+  if (!src)
+    return (
+      <div
+        className={
+          gallery
+            ? `${TILE} animate-pulse`
+            : "block mt-1.5 rounded-lg w-[240px] h-[160px] bg-base-200 animate-pulse"
+        }
+      />
+    );
   if (kind === "video") {
     if (gallery)
       return (
-        <div className="attachment-tile">
-          <video src={src} controls playsInline />
+        <div className={TILE}>
+          <video className={TILE_MEDIA} src={src} controls playsInline />
         </div>
       );
-    return <video className="attachment" src={src} controls />;
+    return (
+      <video
+        className="block mt-1.5 rounded-lg max-w-[min(400px,100%)] max-h-[340px]"
+        src={src}
+        controls
+      />
+    );
   }
-  if (kind === "audio") return <audio className="attachment audio" src={src} controls />;
+  if (kind === "audio")
+    return <audio className="block mt-1.5 rounded-lg w-[320px] h-[40px]" src={src} controls />;
   if (kind === "image" || kind === undefined) {
     return (
-      <a
-        href={src}
-        target="_blank"
-        rel="noreferrer"
-        className={gallery ? "attachment-tile" : "attachment-link"}
-      >
-        <img className={gallery ? undefined : "attachment"} src={src} alt="" loading="lazy" />
+      <a href={src} target="_blank" rel="noreferrer" className={gallery ? TILE : undefined}>
+        <img
+          className={
+            gallery
+              ? TILE_MEDIA
+              : "block mt-1.5 rounded-lg max-w-[min(400px,100%)] max-h-[340px] object-contain cursor-zoom-in"
+          }
+          src={src}
+          alt=""
+          loading="lazy"
+        />
       </a>
     );
   }
   // Non-previewable file — offer a download.
   return (
-    <a href={src} target="_blank" rel="noreferrer" download className="attachment file">
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      download
+      className="inline-block mt-1.5 rounded-lg px-3 py-2 bg-base-200 text-base-content no-underline"
+    >
       📎 {att.type ?? "file"}
     </a>
   );
@@ -169,7 +201,7 @@ export const MessageContent = memo(function MessageContent({
       if (pubkey) {
         items.push({
           node: (
-            <span key={i} className="mention">
+            <span key={i} className="text-primary bg-primary/15 rounded px-0.5 font-medium">
               @<UserName pubkey={pubkey} />
             </span>
           ),
@@ -181,7 +213,7 @@ export const MessageContent = memo(function MessageContent({
       // NIP-30 custom emoji — render the tagged image inline.
       const e = node as unknown as { url: string; code: string; raw: string };
       items.push({
-        node: <img key={i} className="inline-emoji" src={e.url} alt={e.raw} title={e.code} loading="lazy" />,
+        node: <img key={i} className="h-[1.35em] w-auto align-middle object-contain" src={e.url} alt={e.raw} title={e.code} loading="lazy" />,
       });
     } else {
       // text / mention / hashtag — render the raw written form.
@@ -206,7 +238,7 @@ export const MessageContent = memo(function MessageContent({
     } else {
       const group = run;
       out.push(
-        <div className="msg-gallery" data-count={Math.min(group.length, 4)} key={`g${key++}`}>
+        <div className="grid grid-cols-2 gap-1 mt-1.5 max-w-[min(420px,100%)]" data-count={Math.min(group.length, 4)} key={`g${key++}`}>
           {group.map((att, j) => (
             <AttachmentView key={j} att={att} gallery />
           ))}
@@ -226,5 +258,5 @@ export const MessageContent = memo(function MessageContent({
   }
   flushRun();
 
-  return <div className="msg-text">{out}</div>;
+  return <div className="whitespace-pre-wrap break-words text-base-content">{out}</div>;
 });

@@ -62,24 +62,32 @@ export function CommunitySettingsView({
   const isOwner = client.pubkey === state.material.owner;
 
   return (
-    <div className="settings">
-      <nav className="settings-nav">
-        <div className="settings-nav-head">
+    <div className="fixed inset-0 z-[300] flex bg-base-100">
+      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5">
+        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60">
           <CommunityIcon state={state} />
           <span>{name}</span>
         </div>
         {PAGES.map((p) => (
-          <button key={p.id} className={`settings-nav-item ${page === p.id ? "active" : ""}`} onClick={() => onSelectPage(p.id)}>
+          <button
+            key={p.id}
+            className={`btn btn-ghost btn-sm justify-start gap-2.5 w-full font-medium ${page === p.id ? "btn-active" : ""}`}
+            onClick={() => onSelectPage(p.id)}
+          >
             {p.icon}
             <span>{p.label}</span>
           </button>
         ))}
       </nav>
-      <div className="settings-content">
-        <button className="settings-close" title="Close (Esc)" onClick={onClose}>
+      <div className="flex-1 relative overflow-y-auto p-10">
+        <button
+          className="btn btn-ghost btn-circle absolute top-6 right-7 border-2 border-base-300"
+          title="Close (Esc)"
+          onClick={onClose}
+        >
           <X size={22} />
         </button>
-        <div className="settings-page">
+        <div className="max-w-[640px]">
           {page === "overview" && <OverviewPage cid={cid} state={state} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} state={state} />}
           {page === "members" && <MembersPage cid={cid} state={state} />}
@@ -95,8 +103,8 @@ function CommunityIcon({ state }: { state: CommunityState }) {
   const name = state.metadata?.name ?? state.material.name;
   const iconUrl = useDecryptedImage(state.metadata?.icon);
   return (
-    <span className={`rail-icon${iconUrl ? " has-image" : ""}`} style={{ width: 28, height: 28, fontSize: 11 }}>
-      {iconUrl ? <img src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden bg-base-300 font-semibold text-base-content shrink-0 text-[11px]">
+      {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
     </span>
   );
 }
@@ -126,29 +134,30 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
 
   return (
     <>
-      <h2>Overview</h2>
-      <p className="settings-sub">The community's name, description, and images. Members see these everywhere.</p>
+      <h2 className="text-2xl font-bold mb-1">Overview</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">The community's name, description, and images. Members see these everywhere.</p>
       {canManageMetadata && (
-        <div className="field">
-          <label>Images</label>
-          <div className="image-fields">
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Images</label>
+          <div className="flex gap-5 items-start">
             <ImageField cid={cid} which="icon" pointer={state.metadata?.icon} disabled={state.dissolved} />
             <ImageField cid={cid} which="banner" pointer={state.metadata?.banner} disabled={state.dissolved} />
           </div>
         </div>
       )}
-      <div className="field">
-        <label>Name</label>
-        <input value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} maxLength={64} />
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Name</label>
+        <input className="input input-bordered w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} maxLength={64} />
       </div>
-      <div className="field">
-        <label>Description</label>
-        <textarea value={description} onChange={(e) => { setDescription(e.target.value); setSaved(false); }} rows={3} />
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Description</label>
+        <textarea className="textarea textarea-bordered w-full" value={description} onChange={(e) => { setDescription(e.target.value); setSaved(false); }} rows={3} />
       </div>
       {canManageMetadata && (
-        <div className="field">
-          <label>Blossom media servers</label>
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Blossom media servers</label>
           <textarea
+            className="textarea textarea-bordered w-full"
             value={blossom}
             onChange={(e) => { setBlossom(e.target.value); setSaved(false); }}
             rows={2}
@@ -156,21 +165,21 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
           />
         </div>
       )}
-      <div className="settings-actions">
-        <button className="btn" onClick={save} disabled={busy}>
+      <div className="flex items-center gap-3.5 mt-5">
+        <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
         </button>
-        {saved && <span className="settings-saved">Saved ✓</span>}
+        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
 
-      <h3>Danger zone</h3>
-      <div className="field">
-        <label>Community ID</label>
-        <div className="invite-link">{state.material.community_id}</div>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Danger zone</h3>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Community ID</label>
+        <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70">{state.material.community_id}</div>
       </div>
       {isOwner && (
         <button
-          className="btn danger"
+          className="btn btn-error"
           onClick={async () => {
             if (confirm("Dissolve this community permanently? This cannot be undone.")) {
               await community?.dissolve();
@@ -214,23 +223,24 @@ function ImageField({
     }
   }
 
+  const previewSize = which === "icon" ? "w-16 h-16 rounded-xl" : "w-40 h-16 rounded-lg";
   return (
-    <div className={`image-field ${which}`}>
-      <span className="image-field-label">{which === "icon" ? "Icon" : "Banner"}</span>
-      <div className="image-field-controls">
+    <div className={`flex flex-col gap-1.5 ${which === "banner" ? "flex-1" : ""}`}>
+      <span className="text-xs opacity-60">{which === "icon" ? "Icon" : "Banner"}</span>
+      <div className="flex items-center gap-2">
         <button
           type="button"
-          className={`image-preview ${which}`}
+          className={`flex items-center justify-center overflow-hidden border border-dashed border-base-300 bg-base-200 text-base-content/60 cursor-pointer hover:border-primary hover:text-base-content disabled:opacity-60 disabled:cursor-default ${previewSize}`}
           disabled={disabled || busy}
           onClick={() => inputRef.current?.click()}
           title={url ? "Replace" : "Upload"}
         >
-          {url ? <img src={url} alt="" /> : busy ? <span className="spin-dot" /> : <ImagePlus size={20} />}
+          {url ? <img className="w-full h-full object-cover" src={url} alt="" /> : busy ? <span className="loading loading-spinner loading-sm" /> : <ImagePlus size={20} />}
         </button>
         {pointer && !busy && (
           <button
             type="button"
-            className="icon-btn"
+            className="btn btn-ghost btn-sm btn-square"
             title={`Remove ${which}`}
             disabled={disabled}
             onClick={() => community?.removeCommunityImage(which)}
@@ -250,8 +260,8 @@ function ImageField({
           if (file) onFile(file);
         }}
       />
-      {busy && <span className="sub">Encrypting & uploading…</span>}
-      {error && <span className="error-text">{error}</span>}
+      {busy && <span className="text-xs opacity-60">Encrypting & uploading…</span>}
+      {error && <span className="text-error text-xs">{error}</span>}
     </div>
   );
 }
@@ -284,21 +294,21 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   return (
     <>
-      <h2>Roles</h2>
-      <p className="settings-sub">Roles bundle permissions you can grant to members. The owner is always supreme.</p>
-      <h3>Existing roles</h3>
-      {state.roles.length === 0 && <p className="settings-sub">No roles yet.</p>}
+      <h2 className="text-2xl font-bold mb-1">Roles</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Roles bundle permissions you can grant to members. The owner is always supreme.</p>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Existing roles</h3>
+      {state.roles.length === 0 && <p className="text-sm opacity-70 leading-relaxed mb-5">No roles yet.</p>}
       {state.roles.map((r) => (
-        <div key={r.role_id} className="role-row">
-          <span className="badge role" style={{ background: r.color ? `#${r.color.toString(16)}` : undefined }}>
+        <div key={r.role_id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
+          <span className="badge badge-primary badge-sm" style={{ background: r.color ? `#${r.color.toString(16)}` : undefined }}>
             {r.name}
           </span>
-          <span className="sub" style={{ fontSize: 12, color: "var(--text-muted)" }}>pos {r.position}</span>
-          <span style={{ marginLeft: "auto" }}>
+          <span className="text-xs opacity-60">pos {r.position}</span>
+          <span className="ml-auto">
             {(Object.keys(PERM) as PermName[])
               .filter((p) => (parsePermissions(r.permissions) & PERM[p]) === PERM[p])
               .map((p) => (
-                <span key={p} className="pill">
+                <span key={p} className="badge badge-ghost badge-sm m-0.5">
                   {PERM_LABELS[p]}
                 </span>
               ))}
@@ -306,24 +316,24 @@ function RolesPage({ cid, state }: { cid: string; state: CommunityState }) {
         </div>
       ))}
 
-      <h3>Create role</h3>
-      <div className="field">
-        <label>Role name</label>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Moderator" maxLength={64} />
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Create role</h3>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Role name</label>
+        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Moderator" maxLength={64} />
       </div>
-      <div className="field">
-        <label>Permissions</label>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Permissions</label>
         {(Object.keys(PERM) as PermName[]).map((p) => (
-          <div key={p} className="check-row">
-            <input type="checkbox" id={p} checked={perms.has(p)} onChange={() => toggle(p)} />
-            <label htmlFor={p} style={{ margin: 0 }}>
+          <div key={p} className="flex items-center gap-2.5 py-1">
+            <input type="checkbox" className="checkbox checkbox-sm" id={p} checked={perms.has(p)} onChange={() => toggle(p)} />
+            <label htmlFor={p} className="cursor-pointer text-sm">
               {PERM_LABELS[p]}
             </label>
           </div>
         ))}
       </div>
-      <div className="settings-actions">
-        <button className="btn" onClick={create} disabled={!name.trim() || busy}>
+      <div className="flex items-center gap-3.5 mt-5">
+        <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
           Create role
         </button>
       </div>
@@ -357,39 +367,39 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   return (
     <>
-      <h2>Members</h2>
-      <p className="settings-sub">Everyone in the community. Assign roles, or kick and ban members.</p>
+      <h2 className="text-2xl font-bold mb-1">Members</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Everyone in the community. Assign roles, or kick and ban members.</p>
       {members.map((m) => {
         const standing = resolveStanding(m, state.material.owner, rolesMap, state.grants);
         const held = new Set(state.grants.get(m) ?? []);
         const banned = state.banlist.has(m);
         return (
-          <div key={m} className="role-row" style={{ flexWrap: "wrap" }}>
+          <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 flex-wrap">
             <UserAvatar pubkey={m} />
             <div>
-              <div className="m-name">
+              <div className="font-medium">
                 <UserName pubkey={m} />
               </div>
-              {standing.isOwner && <span className="badge owner">Owner</span>}
+              {standing.isOwner && <span className="badge badge-warning badge-sm">Owner</span>}
             </div>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <div className="ml-auto flex gap-1.5">
               {!standing.isOwner && (canKick || canBan) && (
                 <>
                   {canKick && (
-                    <button className="btn ghost" onClick={() => community?.kick(m)}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => community?.kick(m)}>
                       Kick
                     </button>
                   )}
                   {banned ? (
                     canBan && (
-                      <button className="btn ghost" onClick={() => community?.unban(m)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => community?.unban(m)}>
                         Unban
                       </button>
                     )
                   ) : (
                     canBan && (
                       <button
-                        className="btn danger"
+                        className="btn btn-error btn-sm"
                         onClick={() => setBanTarget(m)}
                       >
                         Ban
@@ -400,14 +410,13 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
               )}
             </div>
             {!standing.isOwner && state.roles.length > 0 && (
-              <div style={{ width: "100%", display: "flex", gap: 6, flexWrap: "wrap", paddingLeft: 42 }}>
+              <div className="w-full flex gap-1.5 flex-wrap pl-[42px]">
                 {state.roles.map((r) => {
                   const on = held.has(r.role_id);
                   return (
                     <button
                       key={r.role_id}
-                      className="pill"
-                      style={on ? { background: "var(--accent)", color: "white" } : {}}
+                      className={`badge badge-sm cursor-pointer ${on ? "badge-primary" : "badge-ghost"}`}
                       onClick={() => {
                         const next = new Set(held);
                         if (on) next.delete(r.role_id);
@@ -424,29 +433,29 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
           </div>
         );
       })}
-      {members.length === 0 && <p className="settings-sub">No members yet.</p>}
+      {members.length === 0 && <p className="text-sm opacity-70 leading-relaxed mb-5">No members yet.</p>}
       {state.banlist.size > 0 && (
         <>
-          <h2 style={{ marginTop: 24 }}>Banned members</h2>
-          <p className="settings-sub">
+          <h2 className="text-2xl font-bold mb-1 mt-6">Banned members</h2>
+          <p className="text-sm opacity-70 leading-relaxed mb-5">
             Banned members can't rejoin. Unban removes them from the banlist; to let them back in,
             mint a fresh invite from the sidebar (the link carries current keys, so they rejoin
             without access to history from before the refounding).
           </p>
           {[...state.banlist].sort().map((m) => (
-            <div key={m} className="role-row">
+            <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
               <UserAvatar pubkey={m} />
               <div>
-                <div className="m-name">
+                <div className="font-medium">
                   <UserName pubkey={m} />
                 </div>
-                <span className="badge" style={{ background: "rgba(248,113,113,0.15)", color: "#f87171" }}>
+                <span className="badge badge-error badge-sm">
                   Banned
                 </span>
               </div>
-              <div style={{ marginLeft: "auto" }}>
+              <div className="ml-auto">
                 {canBan && (
-                  <button className="btn ghost" onClick={() => community?.unban(m)}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => community?.unban(m)}>
                     Unban
                   </button>
                 )}
@@ -471,7 +480,7 @@ function MembersPage({ cid, state }: { cid: string; state: CommunityState }) {
                 roles, and <strong>refounds the community</strong> to sever their keys from the
                 control plane and every channel (CORD-06). All remaining members are re-keyed.
               </p>
-              <p className="settings-sub">
+              <p className="text-sm opacity-70 leading-relaxed">
                 This rotates every channel key and voice room. Other members will see a brief
                 re-sync. This cannot be quietly undone.
               </p>
@@ -532,14 +541,14 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   return (
     <>
-      <h2>Channels</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">Channels</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Private channels and who can read them. Adding a member hands over the channel key; removing
         one rotates the key so they lose access to everything sent afterward.
       </p>
-      {error && <div className="error">{error}</div>}
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
       {privateChannels.length === 0 && (
-        <p className="settings-sub">
+        <p className="text-sm opacity-70 leading-relaxed mb-5">
           No private channels yet. Create one from the sidebar (check “Private channel”).
         </p>
       )}
@@ -548,17 +557,16 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
         const rosterSet = new Set(roster);
         const outsiders = [...state.members].filter((m) => !rosterSet.has(m)).sort();
         return (
-          <div key={ch.channel_id} style={{ marginBottom: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <div key={ch.channel_id} className="mb-7">
+            <div className="flex items-center gap-2 mb-2">
               <Lock size={16} />
               <strong>{ch.name}</strong>
-              <span className="settings-sub" style={{ margin: 0 }}>
+              <span className="text-sm opacity-70">
                 {roster.length} member{roster.length === 1 ? "" : "s"}
               </span>
               {canManage && (
                 <button
-                  className="btn danger"
-                  style={{ marginLeft: "auto" }}
+                  className="btn btn-error btn-sm ml-auto"
                   onClick={() => setDeleteTarget({ id: ch.channel_id, name: ch.name })}
                 >
                   <Trash2 size={14} /> Delete
@@ -566,18 +574,18 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
               )}
             </div>
             {roster.map((m) => (
-              <div key={m} className="role-row">
+              <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
                 <UserAvatar pubkey={m} />
                 <div>
-                  <div className="m-name">
+                  <div className="font-medium">
                     <UserName pubkey={m} />
                   </div>
-                  {m === owner && <span className="badge owner">Owner</span>}
+                  {m === owner && <span className="badge badge-warning badge-sm">Owner</span>}
                 </div>
                 {canManage && m !== owner && (
-                  <div style={{ marginLeft: "auto" }}>
+                  <div className="ml-auto">
                     <button
-                      className="btn ghost"
+                      className="btn btn-ghost btn-sm"
                       disabled={busy}
                       onClick={() => setKickTarget({ channelId: ch.channel_id, member: m, name: ch.name })}
                     >
@@ -588,8 +596,9 @@ function ChannelsPage({ cid, state }: { cid: string; state: CommunityState }) {
               </div>
             ))}
             {canManage && outsiders.length > 0 && (
-              <div className="field" style={{ marginTop: 8 }}>
+              <div className="mt-2">
                 <select
+                  className="select select-bordered w-full"
                   value=""
                   disabled={busy}
                   onChange={(e) => {
@@ -678,27 +687,27 @@ function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
 
   return (
     <>
-      <h2>Advanced</h2>
-      <p className="settings-sub">Testing and maintenance actions. These are safe but disruptive.</p>
+      <h2 className="text-2xl font-bold mb-1">Advanced</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Testing and maintenance actions. These are safe but disruptive.</p>
 
-      <h3>Danger zone</h3>
-      <div className="field">
-        <label>Rotate epoch (Rekey)</label>
-        <p className="settings-sub">
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Danger zone</h3>
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">Rotate epoch (Rekey)</label>
+        <p className="text-sm opacity-70 leading-relaxed mb-5">
           Forces a community-wide epoch rotation (a no-exclude Refounding, CORD-06). Rolls
           <code> community_root</code> forward, re-keys every channel and voice room, and
           triggers a brief re-sync for other members. No one is removed — useful for
           testing the rotation path.
         </p>
         {canRekey ? (
-          <button className="btn danger" disabled={busy} onClick={() => setConfirm(true)}>
+          <button className="btn btn-error" disabled={busy} onClick={() => setConfirm(true)}>
             {busy ? "Rotating…" : "Rotate epoch"}
           </button>
         ) : (
-          <p className="settings-sub">Requires ownership or the Ban Members permission.</p>
+          <p className="text-sm opacity-70 leading-relaxed mb-5">Requires ownership or the Ban Members permission.</p>
         )}
-        {done && <span className="settings-saved">Rotated ✓</span>}
-        {error && <span className="error-text">{error}</span>}
+        {done && <span className="text-success text-sm font-semibold">Rotated ✓</span>}
+        {error && <span className="text-error text-xs">{error}</span>}
       </div>
 
       {confirm && (
@@ -715,7 +724,7 @@ function AdvancedPage({ cid, state }: { cid: string; state: CommunityState }) {
                 the next epoch. Every channel key and voice room is re-keyed; other members
                 will see a brief re-sync as they follow the rotation forward.
               </p>
-              <p className="settings-sub">
+              <p className="text-sm opacity-70 leading-relaxed">
                 No members are removed. This cannot be quietly undone.
               </p>
             </>

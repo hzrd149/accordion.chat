@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* daisyUI drives all theming. `light --default` is the base; `dark --prefersdark`
+   auto-applies when the OS prefers dark and no explicit `data-theme` is set on
+   <html>, giving the "follow system by default" behaviour. An explicit choice
+   (set by the theme toggle) overrides that. */
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    font-family: "gg sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}

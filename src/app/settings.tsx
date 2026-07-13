@@ -61,24 +61,28 @@ export function SettingsView({
   const pubkey = account.pubkey;
 
   return (
-    <div className="settings">
-      <nav className="settings-nav">
-        <div className="settings-nav-head">
-          <UserAvatar pubkey={pubkey} />
-          <span>Settings</span>
+    <div className="fixed inset-0 z-[300] flex bg-base-100 max-md:flex-col">
+      <nav className="w-58 shrink-0 bg-base-200 p-3 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pr-14">
+        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide text-base-content/60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
+          <UserAvatar pubkey={pubkey} className="w-7 h-7" />
+          <span className="max-md:hidden">Settings</span>
         </div>
         {PAGES.map((p) => (
-          <button key={p.id} className={`settings-nav-item ${page === p.id ? "active" : ""}`} onClick={() => onSelectPage(p.id)}>
+          <button
+            key={p.id}
+            className={`btn btn-ghost justify-start gap-2.5 w-full font-medium max-md:w-auto max-md:shrink-0 ${page === p.id ? "btn-active" : ""}`}
+            onClick={() => onSelectPage(p.id)}
+          >
             {p.icon}
             <span>{p.label}</span>
           </button>
         ))}
       </nav>
-      <div className="settings-content">
-        <button className="settings-close" title="Close (Esc)" onClick={onClose}>
+      <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
+        <button className="btn btn-ghost btn-circle absolute top-6 right-7 z-10 max-md:fixed max-md:top-2 max-md:right-2" title="Close (Esc)" onClick={onClose}>
           <X size={22} />
         </button>
-        <div className="settings-page">
+        <div className="max-w-[640px]">
           {page === "profile" && <ProfilePage signer={signer} pubkey={pubkey} />}
           {page === "appearance" && <AppearancePage />}
           {page === "relays" && <MailboxesPage signer={signer} pubkey={pubkey} />}
@@ -105,28 +109,37 @@ function AppearancePage() {
   const { pref, resolved, setTheme } = useTheme();
   return (
     <>
-      <h2>Appearance</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">Appearance</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Choose how Accordion looks. <strong>System</strong> follows your operating system's
         light/dark setting — currently <strong>{resolved}</strong>.
       </p>
-      <div className="theme-options">
-        {THEME_OPTIONS.map((o) => (
-          <label key={o.value} className={`theme-option ${pref === o.value ? "active" : ""}`}>
-            <input
-              type="radio"
-              name="theme"
-              value={o.value}
-              checked={pref === o.value}
-              onChange={() => setTheme(o.value)}
-            />
-            <span className="theme-option-icon">{o.icon}</span>
-            <span className="theme-option-text">
-              <span className="theme-option-label">{o.label}</span>
-              <span className="theme-option-hint">{o.hint}</span>
-            </span>
-          </label>
-        ))}
+      <div className="flex flex-col gap-2.5 max-w-[420px]">
+        {THEME_OPTIONS.map((o) => {
+          const active = pref === o.value;
+          return (
+            <label
+              key={o.value}
+              className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-colors ${
+                active ? "border-primary bg-primary/10" : "border-base-300 bg-base-200 hover:bg-base-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="theme"
+                className="radio radio-primary radio-sm"
+                value={o.value}
+                checked={active}
+                onChange={() => setTheme(o.value)}
+              />
+              <span className={`flex ${active ? "text-primary" : "text-base-content/60"}`}>{o.icon}</span>
+              <span className="flex flex-col gap-px">
+                <span className="font-semibold">{o.label}</span>
+                <span className="text-xs opacity-60">{o.hint}</span>
+              </span>
+            </label>
+          );
+        })}
       </div>
     </>
   );
@@ -195,20 +208,25 @@ function ProfilePage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2>Profile</h2>
-      <p className="settings-sub">Your public Nostr profile (kind 0). Anyone can see this.</p>
+      <h2 className="text-2xl font-bold mb-1">Profile</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Your public Nostr profile (kind 0). Anyone can see this.</p>
       {form.banner ? (
-        <div className="profile-banner" style={{ backgroundImage: `url(${form.banner})` }} />
+        <div className="h-30 rounded-lg bg-base-200 bg-cover bg-center" style={{ backgroundImage: `url(${form.banner})` }} />
       ) : (
-        <div className="profile-banner empty" />
+        <div className="h-30 rounded-lg bg-base-200 border border-dashed border-base-300" />
       )}
-      <div className="profile-avatar-preview">
-        {form.picture ? <img src={form.picture} alt="" /> : <UserAvatar pubkey={pubkey} />}
+      <div className="-mt-11 mb-4 ml-4">
+        {form.picture ? (
+          <img className="w-20 h-20 rounded-full object-cover border-[6px] border-base-100 bg-base-200" src={form.picture} alt="" />
+        ) : (
+          <UserAvatar pubkey={pubkey} className="w-20 h-20 border-[6px] border-base-100" />
+        )}
       </div>
       {PROFILE_FIELDS.map((f) => (
-        <div className="field" key={f.key as string}>
-          <label>{f.label}</label>
+        <div className="mb-4" key={f.key as string}>
+          <label className="label text-xs font-semibold uppercase opacity-70">{f.label}</label>
           <input
+            className="input input-bordered w-full"
             type={f.type ?? "text"}
             value={form[f.key as string] ?? ""}
             placeholder={f.placeholder}
@@ -216,16 +234,16 @@ function ProfilePage({ signer, pubkey }: PageProps) {
           />
         </div>
       ))}
-      <div className="field">
-        <label>About</label>
-        <textarea value={form.about ?? ""} rows={4} placeholder="Tell people about yourself" onChange={(e) => set("about", e.target.value)} />
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70">About</label>
+        <textarea className="textarea textarea-bordered w-full" value={form.about ?? ""} rows={4} placeholder="Tell people about yourself" onChange={(e) => set("about", e.target.value)} />
       </div>
-      {error && <div className="error">{error}</div>}
-      <div className="settings-actions">
-        <button className="btn" onClick={save} disabled={busy}>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+      <div className="flex items-center gap-3.5 mt-5">
+        <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save profile"}
         </button>
-        {saved && <span className="settings-saved">Saved ✓</span>}
+        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
     </>
   );
@@ -272,29 +290,28 @@ function RelayListEditor({
 
   return (
     <>
-      <div className="relay-add">
+      <div className="flex gap-2.5">
         <input
+          className="input input-bordered flex-1"
           value={input}
           placeholder={placeholder}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
-        <button className="btn" onClick={add} disabled={busy || !input.trim()}>
+        <button className="btn btn-primary" onClick={add} disabled={busy || !input.trim()}>
           Add
         </button>
       </div>
-      {error && <div className="error">{error}</div>}
+      {error && <div className="alert alert-error text-sm mt-3">{error}</div>}
       {items.length === 0 ? (
-        <p className="settings-sub" style={{ marginTop: 12 }}>
-          None configured yet.
-        </p>
+        <p className="text-sm opacity-70 leading-relaxed mt-3">None configured yet.</p>
       ) : (
-        <ul className="relay-list">
+        <ul className="mt-3.5 flex flex-col gap-1">
           {items.map((url, i) => (
-            <li key={url} className="relay-row">
-              <span className="relay-url">{url.replace(/^(wss|https?):\/\//, "")}</span>
+            <li key={url} className="flex items-center gap-2.5 px-3 py-2 bg-base-200 rounded-md">
+              <span className="flex-1 font-mono text-[13px] overflow-hidden text-ellipsis whitespace-nowrap">{url.replace(/^(wss|https?):\/\//, "")}</span>
               {renderExtra?.(url, i)}
-              <button className="icon-btn" title="Remove" onClick={() => onRemove(url)}>
+              <button className="btn btn-ghost btn-sm btn-circle hover:text-error" title="Remove" onClick={() => onRemove(url)}>
                 <Trash2 size={16} />
               </button>
             </li>
@@ -315,19 +332,19 @@ function MailboxesPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2>Relays</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">Relays</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Your NIP-65 relay list (kind 10002). <strong>Outbox</strong> relays are where you publish; other people read your
         notes there. <strong>Inbox</strong> relays are where others send you replies and mentions.
       </p>
-      <h3>Outbox (write)</h3>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Outbox (write)</h3>
       <RelayListEditor
         items={outboxes}
         placeholder="wss://relay.example.com"
         onAdd={(url) => runner.run(AddOutboxRelay, url)}
         onRemove={(url) => runner.run(RemoveOutboxRelay, url)}
       />
-      <h3 style={{ marginTop: 28 }}>Inbox (read)</h3>
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-7 mb-2">Inbox (read)</h3>
       <RelayListEditor
         items={inboxes}
         placeholder="wss://relay.example.com"
@@ -347,8 +364,8 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2>DM Inbox Relays</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">DM Inbox Relays</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Where you receive NIP-17 encrypted direct messages (kind 10050). Senders publish gift-wraps to these relays, so
         list a couple you check reliably.
       </p>
@@ -371,8 +388,8 @@ function BlossomPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2>Blossom Servers</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">Blossom Servers</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Media servers used to host your uploads (kind 10063). The first server is your default — uploads go there first.
       </p>
       <RelayListEditor
@@ -383,9 +400,9 @@ function BlossomPage({ signer, pubkey }: PageProps) {
         onRemove={(url) => runner.run(RemoveBlossomServer, new URL(url))}
         renderExtra={(url, i) =>
           i === 0 ? (
-            <span className="badge role">Default</span>
+            <span className="badge badge-primary badge-sm">Default</span>
           ) : (
-            <button className="icon-btn" title="Set as default" onClick={() => runner.run(SetDefaultBlossomServer, new URL(url))}>
+            <button className="btn btn-ghost btn-sm btn-circle" title="Set as default" onClick={() => runner.run(SetDefaultBlossomServer, new URL(url))}>
               <Star size={16} />
             </button>
           )
@@ -408,8 +425,8 @@ function LookupPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2>Indexer Relays</h2>
-      <p className="settings-sub">
+      <h2 className="text-2xl font-bold mb-1">Indexer Relays</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
         Lookup / indexer relays (kind 10086) that aggregate profiles and relay lists network-wide. Clients use these to
         discover events for people you have no relay hint for.
       </p>

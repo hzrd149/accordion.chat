@@ -181,15 +181,27 @@ function Shell() {
   }, [activeState, selectedChannel, navigate]);
 
   return (
-    <div className={`app${navOpen ? " nav-open" : ""}${panelMode ? " panel-open" : ""}`}>
-      {/* Mobile-only drawer controls (hidden by CSS on larger screens). */}
-      <button className="drawer-toggle nav" title="Menu" onClick={() => setNavOpen((v) => !v)}>
-        <Menu size={22} />
-      </button>
-      <div className="drawer-backdrop" onClick={closeDrawers} />
+    <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
+      {/* Mobile-only drawer controls (rendered off-canvas above the tablet breakpoint). */}
+      {!navOpen && (
+        <button
+          className="btn btn-ghost btn-sm btn-circle fixed top-1 left-1 z-[45] md:hidden"
+          title="Menu"
+          onClick={() => setNavOpen((v) => !v)}
+        >
+          <Menu size={22} />
+        </button>
+      )}
+      {(navOpen || panelMode) && (
+        <div className="fixed inset-0 z-[35] bg-black/50 md:hidden" onClick={closeDrawers} />
+      )}
 
       {/* Community rail */}
-      <div className="rail">
+      <div
+        className={`w-18 bg-base-300 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:transition-transform ${
+          navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"
+        }`}
+      >
         {communities.map((c) => (
           <RailIcon
             key={c.material.community_id}
@@ -201,14 +213,17 @@ function Shell() {
             }}
           />
         ))}
-        <div className="rail-divider" />
-        <button className="rail-icon add" title="Add a community" onClick={() => setModal("addMenu")}>
+        <div className="w-8 h-0.5 bg-base-content/10 rounded-full shrink-0" />
+        <button
+          className="w-12 h-12 shrink-0 rounded-3xl bg-base-200 flex items-center justify-center text-success overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
+          title="Add a community"
+          onClick={() => setModal("addMenu")}
+        >
           <Plus size={24} />
         </button>
         <button
-          className="rail-icon settings-gear"
+          className="w-12 h-12 shrink-0 mt-auto rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
           title="Settings"
-          style={{ marginTop: "auto" }}
           onClick={() => setParam("settings", "profile")}
         >
           <Settings size={22} />
@@ -217,18 +232,24 @@ function Shell() {
 
       {activeState ? (
         <>
-          <Sidebar
-            state={activeState}
-            selectedChannel={selectedChannel}
-            onSelectChannel={(id) => {
-              navigate(`/c/${activeState.material.community_id}/${id}`);
-              setNavOpen(false);
-            }}
-            onNewChannel={() => setModal("channel")}
-            onInvite={() => setModal("invite")}
-            onSettings={() => setParam("admin", "overview")}
-            onLeave={() => setModal("leave")}
-          />
+          <div
+            className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:transition-transform ${
+              navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-[calc(100%+4.5rem)]"
+            }`}
+          >
+            <Sidebar
+              state={activeState}
+              selectedChannel={selectedChannel}
+              onSelectChannel={(id) => {
+                navigate(`/c/${activeState.material.community_id}/${id}`);
+                setNavOpen(false);
+              }}
+              onNewChannel={() => setModal("channel")}
+              onInvite={() => setModal("invite")}
+              onSettings={() => setParam("admin", "overview")}
+              onLeave={() => setModal("leave")}
+            />
+          </div>
           {selectedChannel ? (
             <ChatView
               cid={activeState.material.community_id}
@@ -241,9 +262,9 @@ function Shell() {
               onOpenThread={openThread}
             />
           ) : (
-            <div className="main">
-              <div className="empty">
-                <div className="big"><MessageSquare size={48} /></div>
+            <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
+              <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
+                <div className="flex items-center justify-center"><MessageSquare size={48} /></div>
                 <div>Select or create a channel to start chatting.</div>
               </div>
             </div>
@@ -264,16 +285,16 @@ function Shell() {
           )}
         </>
       ) : (
-        <div className="main">
-          <div className="empty">
-            <div className="big app-emoji-icon" aria-hidden="true">🪗</div>
-            <h2 style={{ color: "var(--text-bright)", margin: 0 }}>Welcome to Accordion</h2>
+        <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
+          <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
+            <div className="text-5xl leading-none" aria-hidden="true">🪗</div>
+            <h2 className="text-2xl font-bold text-base-content m-0">Welcome to Accordion</h2>
             <div>Create your own community or join one with an invite link.</div>
-            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-              <button className="btn" onClick={() => setModal("create")}>
+            <div className="flex gap-3 mt-3">
+              <button className="btn btn-primary" onClick={() => setModal("create")}>
                 Create a community
               </button>
-              <button className="btn ghost" onClick={() => setModal("join")}>
+              <button className="btn btn-ghost" onClick={() => setModal("join")}>
                 Join with a link
               </button>
             </div>
@@ -284,11 +305,11 @@ function Shell() {
       {/* Modals */}
       {modal === "addMenu" && (
         <Modal onClose={() => setModal(null)}>
-          <h2>Add a community</h2>
-          <button className="btn full" onClick={() => setModal("create")}>
+          <h2 className="text-lg font-bold mb-4">Add a community</h2>
+          <button className="btn btn-primary btn-block mb-2.5" onClick={() => setModal("create")}>
             Create my own
           </button>
-          <button className="btn full ghost" onClick={() => setModal("join")}>
+          <button className="btn btn-ghost btn-block" onClick={() => setModal("join")}>
             Join with an invite link
           </button>
         </Modal>
@@ -310,14 +331,14 @@ function Shell() {
       )}
       {modal === "leave" && activeState && (
         <Modal onClose={() => (leaving ? undefined : setModal(null))}>
-          <h2>Leave {activeState.metadata?.name ?? activeState.material.name}?</h2>
-          <p style={{ color: "var(--text-muted)" }}>
+          <h2 className="text-lg font-bold">Leave {activeState.metadata?.name ?? activeState.material.name}?</h2>
+          <p className="text-sm opacity-60">
             You'll be removed from this community and it will disappear from your list. You can
             rejoin later with an invite link.
           </p>
-          <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+          <div className="flex gap-3 mt-4">
             <button
-              className="btn danger"
+              className="btn btn-error"
               disabled={leaving}
               onClick={async () => {
                 const cid = activeState.material.community_id;
@@ -334,7 +355,7 @@ function Shell() {
             >
               {leaving ? "Leaving…" : "Leave community"}
             </button>
-            <button className="btn ghost" disabled={leaving} onClick={() => setModal(null)}>
+            <button className="btn btn-ghost" disabled={leaving} onClick={() => setModal(null)}>
               Cancel
             </button>
           </div>
@@ -358,7 +379,11 @@ function Shell() {
         />
       )}
 
-      {status && <div className="status-toast">{status}</div>}
+      {status && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] bg-base-200 border border-base-300 rounded-lg px-4 py-2 text-base-content">
+          {status}
+        </div>
+      )}
     </div>
   );
 }
@@ -368,11 +393,15 @@ function RailIcon({ state, active, onClick }: { state: CommunityState; active: b
   const iconUrl = useDecryptedImage(state.metadata?.icon);
   return (
     <button
-      className={`rail-icon ${active ? "active" : ""}${iconUrl ? " has-image" : ""}`}
+      className={`w-12 h-12 shrink-0 relative overflow-hidden flex items-center justify-center font-semibold text-base-content text-lg bg-base-200 transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+        active
+          ? "rounded-2xl before:content-[''] before:absolute before:-left-4 before:w-2 before:h-10 before:rounded-r before:bg-base-content"
+          : "rounded-3xl"
+      }`}
       title={name}
       onClick={onClick}
     >
-      {iconUrl ? <img src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+      {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
     </button>
   );
 }
@@ -401,29 +430,33 @@ function Sidebar({
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
 
   return (
-    <div className="sidebar">
-      {bannerUrl && <div className="sidebar-banner" style={{ backgroundImage: `url(${bannerUrl})` }} />}
-      <div className={`sidebar-header${bannerUrl ? " has-banner" : ""}`}>
-        <span title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
-        <div className="sidebar-header-actions">
-          <button title="Community settings" onClick={onSettings}>
+    <div className="w-60 bg-base-200 flex flex-col shrink-0 max-md:h-full">
+      {bannerUrl && <div className="h-25 bg-cover bg-center shrink-0" style={{ backgroundImage: `url(${bannerUrl})` }} />}
+      <div
+        className={`h-12 px-4 flex items-center justify-between border-b border-base-300 shadow-sm font-semibold text-base-content shrink-0 ${
+          bannerUrl ? "-mt-5 bg-gradient-to-b from-transparent to-base-200" : ""
+        }`}
+      >
+        <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          <button className="btn btn-ghost btn-sm btn-circle" title="Community settings" onClick={onSettings}>
             <Settings size={18} />
           </button>
-          <button title="Leave community" onClick={onLeave}>
+          <button className="btn btn-ghost btn-sm btn-circle" title="Leave community" onClick={onLeave}>
             <DoorOpen size={18} />
           </button>
         </div>
       </div>
       {state.dissolved && (
-        <div className="error" style={{ padding: 12 }}>
+        <div className="text-error text-sm p-3">
           This community has been dissolved. It is now read-only.
         </div>
       )}
-      <div className="channel-list">
-        <div className="channel-cat">
+      <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex justify-between items-center text-[11px] uppercase text-base-content/60 font-semibold pt-4 px-2 pb-1">
           <span>Channels</span>
           {canManageChannels && !state.dissolved && (
-            <button title="Create channel" onClick={onNewChannel}>
+            <button className="btn btn-ghost btn-xs btn-circle" title="Create channel" onClick={onNewChannel}>
               <Plus size={16} />
             </button>
           )}
@@ -441,32 +474,39 @@ function Sidebar({
           ) : (
             <button
               key={ch.channel_id}
-              className={`channel ${ch.channel_id === selectedChannel ? "active" : ""}`}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium mb-px ${
+                ch.channel_id === selectedChannel
+                  ? "bg-base-300 text-base-content"
+                  : "text-base-content/60 hover:bg-base-300 hover:text-base-content"
+              }`}
               onClick={() => onSelectChannel(ch.channel_id)}
             >
-              <span className="hash">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
+              <span className="inline-flex items-center text-base-content/60">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
               <span>{ch.name}</span>
             </button>
           ),
         )}
         {canInvite && !state.dissolved && (
-          <button className="channel" style={{ marginTop: 12, color: "var(--success)" }} onClick={onInvite}>
-            <span className="hash"><UserPlus size={16} /></span>
+          <button
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium mt-3 text-success hover:bg-base-300"
+            onClick={onInvite}
+          >
+            <span className="inline-flex items-center"><UserPlus size={16} /></span>
             <span>Invite people</span>
           </button>
         )}
       </div>
-      <div className="account-bar">
+      <div className="h-13 bg-base-300 flex items-center px-2 gap-2 shrink-0">
         <UserAvatar pubkey={account?.pubkey ?? ""} />
-        <div className="who">
-          <div className="name">
+        <div className="flex-1 overflow-hidden">
+          <div className="text-sm font-semibold text-base-content truncate">
             <UserName pubkey={account?.pubkey ?? ""} />
           </div>
-          <div className="sub">{account?.pubkey === state.material.owner ? "Owner" : "Member"}</div>
+          <div className="text-[11px] text-base-content/60 truncate">{account?.pubkey === state.material.owner ? "Owner" : "Member"}</div>
         </div>
         <ThemeToggle />
         <button
-          className="logout"
+          className="btn btn-ghost btn-sm btn-circle"
           title="Sign out"
           onClick={() => {
             if (account) accounts.removeAccount(account);
@@ -515,24 +555,33 @@ function VoiceChannelRow({
   const inThisCall = call.active?.channelId === channelId && call.active?.cid === cid;
 
   return (
-    <div className="voice-channel">
-      <button className={`channel ${selected ? "active" : ""}`} onClick={onSelect}>
-        <span className="hash"><Volume2 size={16} /></span>
+    <div className="mb-px">
+      <button
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium ${
+          selected ? "bg-base-300 text-base-content" : "text-base-content/60 hover:bg-base-300 hover:text-base-content"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="inline-flex items-center text-base-content/60"><Volume2 size={16} /></span>
         <span>{name}</span>
-        {inThisCall && <span className="voice-live-dot" title="You're in this call" />}
-        {fold.present.length > 0 && <span className="voice-count">{fold.present.length}</span>}
+        {inThisCall && <span className="w-2 h-2 rounded-full bg-success ml-auto" title="You're in this call" />}
+        {fold.present.length > 0 && (
+          <span className={`text-[11px] font-semibold text-base-content/60 bg-base-300 rounded-lg px-1.5 py-px ${inThisCall ? "ml-1.5" : "ml-auto"}`}>
+            {fold.present.length}
+          </span>
+        )}
       </button>
       {roster.length > 0 && (
-        <div className="voice-roster">
+        <div className="flex flex-col gap-0.5 pt-0.5 pb-1 pl-[26px]">
           {roster.map((r) => (
-            <div key={r.identity} className="voice-member">
+            <div key={r.identity} className="flex items-center gap-1.5 text-[13px] text-base-content/60">
               {r.author ? (
                 <>
-                  <UserAvatar pubkey={r.author} className="voice-member-avatar" />
-                  <span className="voice-member-name"><UserName pubkey={r.author} /></span>
+                  <UserAvatar pubkey={r.author} className="w-5 h-5" />
+                  <span className="truncate"><UserName pubkey={r.author} /></span>
                 </>
               ) : (
-                <span className="voice-member-name unverified">Unverified</span>
+                <span className="italic opacity-70">Unverified</span>
               )}
             </div>
           ))}
@@ -556,33 +605,33 @@ function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: stri
 
   // Host the persistent call surface here. `setStageEl` is the stable state
   // setter, so it's safe as a ref callback (node on mount, null on unmount).
-  if (isActiveHere) return <div className="call-host" ref={setStageEl} />;
+  if (isActiveHere) return <div ref={setStageEl} />;
 
   return (
-    <div className="call-prejoin">
-      <div className="call-prejoin-info">
+    <div className="flex items-center gap-3 flex-wrap mx-auto mt-2.5 mb-1 w-[min(860px,calc(100%-24px))] bg-base-200 border border-base-300 rounded-xl px-3.5 py-2.5">
+      <div className="flex items-center gap-2.5 text-sm text-base-content flex-1 min-w-0">
         <Volume2 size={18} />
         <span>{roster.length ? `${roster.length} in the call` : "No one's in the call yet"}</span>
-        <div className="call-prejoin-avatars">
+        <div className="flex items-center gap-1">
           {roster.map((r) =>
             r.author ? (
-              <UserAvatar key={r.identity} pubkey={r.author} className="voice-member-avatar" />
+              <UserAvatar key={r.identity} pubkey={r.author} className="w-5 h-5" />
             ) : (
-              <span key={r.identity} className="voice-member-avatar unverified">
+              <span key={r.identity} className="w-5 h-5 rounded-full bg-base-300 text-base-content/60 flex items-center justify-center">
                 <ShieldQuestion size={14} />
               </span>
             ),
           )}
         </div>
       </div>
-      <div className="call-prejoin-actions">
-        {error && !isPendingHere && <span className="call-error-text">{error}</span>}
+      <div className="flex items-center gap-2.5">
+        {error && !isPendingHere && <span className="text-error text-[13px]">{error}</span>}
         {isPendingHere ? (
-          <button className="btn" disabled>
-            <Loader2 className="spin" size={16} /> Connecting…
+          <button className="btn btn-primary" disabled>
+            <Loader2 className="animate-spin" size={16} /> Connecting…
           </button>
         ) : (
-          <button className="btn" onClick={() => join({ cid, channelId, channelName: name })}>
+          <button className="btn btn-primary" onClick={() => join({ cid, channelId, channelName: name })}>
             <Phone size={16} /> Join call
           </button>
         )}
@@ -598,7 +647,7 @@ function reactionLabel(r: string | Emoji) {
   return typeof r === "string" ? (
     r
   ) : (
-    <img className="inline-emoji" src={r.url} alt={`:${r.shortcode}:`} loading="lazy" />
+    <img className="h-[1.35em] w-auto align-middle object-contain" src={r.url} alt={`:${r.shortcode}:`} loading="lazy" />
   );
 }
 
@@ -679,23 +728,23 @@ function ChatView({
   );
 
   return (
-    <div className="main">
-      <div className="main-header">
-        <span className="hash" style={{ color: "var(--text-muted)" }}>
+    <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
+      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0 max-md:pl-14">
+        <span className="inline-flex items-center text-base-content/60">
           {channel?.voice ? <Volume2 size={20} /> : channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
-        <span className="title">{channel?.name}</span>
-        <span className="topic">{state.metadata?.description}</span>
-        <div className="spacer" />
+        <span className="font-semibold text-base-content">{channel?.name}</span>
+        <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">{state.metadata?.description}</span>
+        <div className="flex-1" />
         {canLeaveChannel && (
-          <button title="Leave channel" onClick={() => setLeaveChannelOpen(true)}>
+          <button className="btn btn-ghost btn-sm btn-circle" title="Leave channel" onClick={() => setLeaveChannelOpen(true)}>
             <DoorOpen size={18} />
           </button>
         )}
-        <button title="Threads" className={threadsOpen ? "active" : ""} onClick={onToggleThreads}>
+        <button className={`btn btn-ghost btn-sm btn-circle ${threadsOpen ? "btn-active" : ""}`} title="Threads" onClick={onToggleThreads}>
           <MessageSquare size={18} />
         </button>
-        <button title="Members" className={membersOpen ? "active" : ""} onClick={onToggleMembers}>
+        <button className={`btn btn-ghost btn-sm btn-circle ${membersOpen ? "btn-active" : ""}`} title="Members" onClick={onToggleMembers}>
           <Users size={18} />
         </button>
       </div>
@@ -781,17 +830,17 @@ const MessageList = memo(function MessageList({
   const groups = useMemo(() => groupMessages(messages), [messages]);
 
   return (
-    <div className="content-row">
-      <div className="messages" ref={ref}>
-        <div className="filler" />
+    <div className="flex-1 flex min-h-0">
+      <div className="flex-1 overflow-y-auto py-4 flex flex-col" ref={ref}>
+        <div className="flex-1" />
         {messages.length === 0 && (
-          <div className="empty">
-            <div className="big"><Hand size={48} /></div>
+          <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
+            <div className="flex items-center justify-center"><Hand size={48} /></div>
             <div>This is the beginning of #{channelName}. Say hello!</div>
           </div>
         )}
         {groups.map((group) => (
-          <div className="msg-group" key={group[0].id}>
+          <div className="mt-3.5 first-of-type:mt-0" key={group[0].id}>
             {group.map((m, i) => (
               <Message
                 key={m.id}
@@ -863,33 +912,35 @@ const Message = memo(function Message({
   }
 
   return (
-    <div className={`msg${showHeader ? "" : " continued"}`} tabIndex={-1}>
+    <div
+      className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 ${showHeader ? "py-0.5" : "py-px"}`}
+      tabIndex={-1}
+    >
       {showHeader ? (
-        <UserAvatar pubkey={m.author} />
+        <UserAvatar pubkey={m.author} className="w-10 h-10 mt-0.5" />
       ) : (
-        <div className="msg-gutter">
-          <span className="time">{clockTime(m.ms)}</span>
+        <div className="w-10 shrink-0 flex items-center justify-end">
+          <span className="text-[10px] text-base-content/60 opacity-0 group-hover:opacity-100 whitespace-nowrap">{clockTime(m.ms)}</span>
         </div>
       )}
-      <div className="msg-body">
+      <div className="min-w-0 flex-1">
         {m.replyTo && (
-          <div className="msg-reply">
+          <div className="flex items-center gap-1.5 text-[13px] text-base-content/60 mb-0.5 before:content-[''] before:w-6 before:h-2 before:border-l-2 before:border-t-2 before:border-base-300 before:rounded-tl-md before:ml-5 before:self-end">
             <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {replyPreview}
           </div>
         )}
         {showHeader && (
-          <div className="msg-head">
-            <span className="name" style={{ color: colorFor(m.author) }}>
+          <div className="flex items-baseline gap-2">
+            <span className="font-semibold" style={{ color: colorFor(m.author) }}>
               <UserName pubkey={m.author} />
             </span>
-            <span className="time">{formatTime(m.ms)}</span>
-            {m.author === ownerPubkey && <span className="badge owner">Owner</span>}
+            <span className="text-[11px] text-base-content/60">{formatTime(m.ms)}</span>
+            {m.author === ownerPubkey && <span className="badge badge-warning badge-sm">Owner</span>}
           </div>
         )}
         {editing ? (
           <input
-            className="field"
-            style={{ width: "100%" }}
+            className="input input-bordered input-sm w-full"
             value={editText}
             autoFocus
             onChange={(e) => setEditText(e.target.value)}
@@ -899,24 +950,26 @@ const Message = memo(function Message({
             }}
           />
         ) : m.deleted ? (
-          <div className="msg-text deleted">(message deleted)</div>
+          <div className="text-base-content/60 italic">(message deleted)</div>
         ) : (
           <>
             <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
-            {m.edited && <span className="time"> (edited)</span>}
+            {m.edited && <span className="text-[11px] text-base-content/60"> (edited)</span>}
           </>
         )}
         {m.reactions.length > 0 && (
-          <div className="reactions">
+          <div className="flex gap-1 mt-1 flex-wrap">
             {m.reactions.map((r) => (
               <button
                 key={r.emoji}
-                className={`reaction ${r.authors.includes(myPubkey) ? "mine" : ""}`}
+                className={`flex items-center gap-1 rounded-lg px-2 py-0.5 text-[13px] border ${
+                  r.authors.includes(myPubkey) ? "border-primary bg-primary/15" : "border-base-300 bg-base-200 hover:border-base-content/40"
+                }`}
                 // Re-react: reconstruct the custom emoji from its URL, else the unicode content.
                 onClick={() => react(r.url ? { shortcode: r.emoji.replace(/^:|:$/g, ""), url: r.url } : r.emoji)}
               >
                 {r.url ? (
-                  <img className="inline-emoji" src={r.url} alt={r.emoji} title={r.emoji} loading="lazy" />
+                  <img className="h-[1.35em] w-auto align-middle object-contain" src={r.url} alt={r.emoji} title={r.emoji} loading="lazy" />
                 ) : (
                   r.emoji
                 )}{" "}
@@ -926,40 +979,45 @@ const Message = memo(function Message({
           </div>
         )}
         {m.threadReplyCount > 0 && (
-          <button className="thread-count" onClick={() => onThread(m)}>
+          <button
+            className="inline-flex items-center gap-1.5 mt-1.5 px-2 py-0.5 rounded-xl bg-primary/15 text-primary text-[13px] font-semibold hover:bg-primary/25"
+            onClick={() => onThread(m)}
+          >
             <MessageSquare size={14} /> {m.threadReplyCount} {m.threadReplyCount === 1 ? "reply" : "replies"}
           </button>
         )}
       </div>
-      <div className="msg-actions">
+      <div className="absolute -top-3 right-3 hidden group-hover:flex group-focus-within:flex bg-base-200 border border-base-300 rounded-md">
         {canWrite && (
           <>
             {quickReactions.map((e) => (
               <button
                 key={typeof e === "string" ? e : e.shortcode}
+                className="btn btn-ghost btn-sm btn-circle"
                 title={typeof e === "string" ? e : `:${e.shortcode}:`}
                 onClick={() => react(e)}
               >
                 {reactionLabel(e)}
               </button>
             ))}
-            <span className="picker-anchor">
-              <button title="React…" onClick={() => setPickerOpen((v) => !v)}>
+            <span className="relative inline-flex">
+              <button className="btn btn-ghost btn-sm btn-circle" title="React…" onClick={() => setPickerOpen((v) => !v)}>
                 <SmilePlus size={16} />
               </button>
               {pickerOpen && (
                 <EmojiPicker favorites={favorites} onPick={react} onClose={() => setPickerOpen(false)} />
               )}
             </span>
-            <button title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
+            <button className="btn btn-ghost btn-sm btn-circle" title="Reply" onClick={() => onReply({ id: m.id, author: m.author })}>
               <Reply size={16} />
             </button>
-            <button title="Reply in thread" onClick={() => onThread(m)}>
+            <button className="btn btn-ghost btn-sm btn-circle" title="Reply in thread" onClick={() => onThread(m)}>
               <MessageSquare size={16} />
             </button>
             {m.author === myPubkey && !m.deleted && (
               <>
                 <button
+                  className="btn btn-ghost btn-sm btn-circle"
                   title="Edit"
                   onClick={() => {
                     setEditText(m.edited ?? m.content);
@@ -968,15 +1026,15 @@ const Message = memo(function Message({
                 >
                   <Pencil size={16} />
                 </button>
-                <button title="Delete" onClick={() => community?.deleteMessage(channelId, m.id)}>
+                <button className="btn btn-ghost btn-sm btn-circle" title="Delete" onClick={() => community?.deleteMessage(channelId, m.id)}>
                   <Trash2 size={16} />
                 </button>
               </>
             )}
           </>
         )}
-        <span className="picker-anchor">
-          <button title="More" onClick={() => setMenuOpen((v) => !v)}>
+        <span className="relative inline-flex">
+          <button className="btn btn-ghost btn-sm btn-circle" title="More" onClick={() => setMenuOpen((v) => !v)}>
             <MoreVertical size={16} />
           </button>
           {menuOpen && (
@@ -1014,8 +1072,13 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
   }, [onClose]);
 
   return (
-    <div className="msg-menu right" ref={ref}>
-      <button onClick={onViewRaw}>View raw</button>
+    <div
+      className="absolute top-full mt-1.5 right-0 z-50 min-w-[140px] flex flex-col p-1 bg-base-200 border border-base-300 rounded-box shadow-lg"
+      ref={ref}
+    >
+      <button className="w-full text-left px-2.5 py-1.5 rounded text-sm hover:bg-base-300" onClick={onViewRaw}>
+        View raw
+      </button>
     </div>
   );
 }
@@ -1051,14 +1114,14 @@ function SidePanel({
 }) {
   const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
-    <aside className="side-panel">
-      <div className="side-panel-header">
-        <span className="side-panel-title">{title}</span>
-        <button title="Close panel" onClick={onClose}>
+    <aside className="w-75 shrink-0 flex flex-col bg-base-200 border-l border-base-300 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(340px,90vw)]">
+      <div className="h-12 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-base-300 shadow-sm">
+        <span className="font-bold text-base-content">{title}</span>
+        <button className="btn btn-ghost btn-sm btn-circle" title="Close panel" onClick={onClose}>
           <X size={18} />
         </button>
       </div>
-      <div className="side-panel-body">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {mode === "members" ? (
           <MemberList state={state} />
         ) : channelId ? (
@@ -1072,9 +1135,9 @@ function SidePanel({
             onCloseThread={onCloseThread}
           />
         ) : (
-          <div className="thread-empty">
+          <div className="h-full min-h-[260px] flex flex-col items-center justify-center gap-2 text-center text-base-content/60">
             <MessageSquare size={36} />
-            <div>Select a channel to see its threads.</div>
+            <div className="text-base-content font-bold">Select a channel to see its threads.</div>
           </div>
         )}
       </div>
@@ -1122,26 +1185,30 @@ function ThreadsPanel({
 
 function ThreadIndex({ roots, onOpen }: { roots: ChatMessage[]; onOpen: (m: ChatMessage) => void }) {
   return (
-    <div className="thread-scroll">
+    <div className="flex-1 min-h-0 overflow-y-auto p-4">
       {roots.length === 0 ? (
-        <div className="thread-empty">
+        <div className="h-full min-h-[260px] flex flex-col items-center justify-center gap-2 text-center text-base-content/60">
           <MessageSquare size={36} />
-          <div>No threads yet.</div>
-          <p>Use “Reply in thread” on a message to start one.</p>
+          <div className="text-base-content font-bold">No threads yet.</div>
+          <p className="m-0 max-w-[220px] text-[13px]">Use “Reply in thread” on a message to start one.</p>
         </div>
       ) : (
         roots.map((root) => (
-          <button className="thread-root-card" key={root.id} onClick={() => onOpen(root)}>
-            <div className="msg-head">
-              <span className="name" style={{ color: colorFor(root.author) }}>
+          <button
+            className="w-full block p-3 mb-2 border border-base-300 rounded-xl bg-base-100 text-left hover:bg-base-200 hover:border-primary/50"
+            key={root.id}
+            onClick={() => onOpen(root)}
+          >
+            <div className="flex items-baseline gap-2">
+              <span className="font-semibold" style={{ color: colorFor(root.author) }}>
                 <UserName pubkey={root.author} />
               </span>
-              <span className="time">{formatTime(root.ms)}</span>
+              <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
             </div>
-            <div className="thread-root-preview">
+            <div className="mt-1.5 text-sm leading-snug whitespace-pre-wrap break-words">
               {root.deleted ? "(message deleted)" : (root.edited ?? root.content).slice(0, 180) || "message"}
             </div>
-            <div className="thread-root-meta">
+            <div className="mt-2 text-primary text-[13px] font-bold">
               {root.threadReplyCount} {root.threadReplyCount === 1 ? "reply" : "replies"}
             </div>
           </button>
@@ -1195,49 +1262,52 @@ function ThreadView({
 
   return (
     <>
-      <button className="thread-back" onClick={onBack}>
+      <button
+        className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 text-base-content/60 border-b border-base-300 text-[13px] hover:text-base-content"
+        onClick={onBack}
+      >
         <Reply size={14} /> Back to threads
       </button>
-      <div className="thread-scroll">
-        <div className="thread-root">
-          <div className="msg-head">
-            <span className="name" style={{ color: colorFor(root.author) }}>
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
+        <div className="py-2.5 border-b border-base-300">
+          <div className="flex items-baseline gap-2">
+            <span className="font-semibold" style={{ color: colorFor(root.author) }}>
               <UserName pubkey={root.author} />
             </span>
-            <span className="time">{formatTime(root.ms)}</span>
+            <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
           </div>
           {root.deleted ? (
-            <div className="msg-text deleted">(message deleted)</div>
+            <div className="text-base-content/60 italic">(message deleted)</div>
           ) : (
             <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
           )}
         </div>
-        <div className="thread-divider">
+        <div className="mt-3.5 mb-1 text-base-content/60 text-xs font-bold uppercase tracking-wide">
           {comments.length} {comments.length === 1 ? "reply" : "replies"}
         </div>
         {comments.map((comment) => {
           const parentComment = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
           return (
-            <div className="thread-comment" key={comment.id} style={{ marginLeft: depthOf(comment) * 18 }}>
+            <div className="py-2.5 border-b border-base-300/70" key={comment.id} style={{ marginLeft: depthOf(comment) * 18 }}>
               {parentComment && (
-                <div className="thread-parent">
+                <div className="mb-1 text-base-content/60 text-xs truncate">
                   Replying to <UserName pubkey={parentComment.author} />: {parentComment.content.slice(0, 80)}
                 </div>
               )}
-              <div className="msg-head">
-                <span className="name" style={{ color: colorFor(comment.author) }}>
+              <div className="flex items-baseline gap-2">
+                <span className="font-semibold" style={{ color: colorFor(comment.author) }}>
                   <UserName pubkey={comment.author} />
                 </span>
-                <span className="time">{formatTime(comment.ms)}</span>
+                <span className="text-[11px] text-base-content/60">{formatTime(comment.ms)}</span>
               </div>
               {comment.deleted ? (
-                <div className="msg-text deleted">(message deleted)</div>
+                <div className="text-base-content/60 italic">(message deleted)</div>
               ) : (
                 <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
               )}
               {canWrite && (
                 <button
-                  className="thread-reply-btn"
+                  className="mt-1.5 px-2 py-1 text-[13px] rounded text-base-content/60 hover:bg-base-300 hover:text-base-content"
                   onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
                 >
                   Reply
@@ -1286,15 +1356,20 @@ function ThreadComposer({
   }
 
   return (
-    <div className="thread-composer">
-      <div className="reply-bar">
+    <div className="shrink-0 px-4 pb-4 border-t border-base-300 bg-base-200">
+      <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1">
         <span>
           Replying to <UserName pubkey={replyingTo} />
         </span>
-        {onClear && <button onClick={onClear}><X size={16} /></button>}
+        {onClear && (
+          <button className="btn btn-ghost btn-sm btn-circle" onClick={onClear}>
+            <X size={16} />
+          </button>
+        )}
       </div>
-      <div className="box">
+      <div className="flex items-end gap-2 bg-base-300 rounded-lg p-2">
         <textarea
+          className="flex-1 min-h-10 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
           rows={2}
           placeholder="Reply in thread"
           value={text}
@@ -1306,7 +1381,7 @@ function ThreadComposer({
             }
           }}
         />
-        <button className="send" onClick={send} disabled={sending || !text.trim()}>
+        <button className="btn btn-primary btn-sm" onClick={send} disabled={sending || !text.trim()}>
           {sending ? "Sending…" : "Send"}
         </button>
       </div>
@@ -1396,28 +1471,34 @@ const Composer = memo(function Composer({
   }
 
   return (
-    <div className="composer">
+    <div className="px-4 pb-5 shrink-0">
       {replyTo && (
-        <div className="reply-bar">
+        <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1">
           <span>
             Replying to <UserName pubkey={replyTo.author} />
           </span>
-          <button onClick={onClearReply}><X size={16} /></button>
+          <button className="btn btn-ghost btn-sm btn-circle" onClick={onClearReply}>
+            <X size={16} />
+          </button>
         </div>
       )}
       {files.length > 0 && (
-        <div className="attach-bar">
+        <div className="flex flex-wrap gap-1.5 px-1 py-2">
           {files.map((f, i) => (
-            <span className="attach-chip" key={i} title={f.name}>
+            <span
+              className="inline-flex items-center gap-1.5 bg-base-200 rounded-md px-2 py-1 text-[13px] text-base-content max-w-[220px] overflow-hidden whitespace-nowrap text-ellipsis"
+              key={i}
+              title={f.name}
+            >
               📎 {f.name}
-              <button onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
+              <button className="text-base-content/60 hover:text-error inline-flex" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
                 <X size={12} />
               </button>
             </span>
           ))}
         </div>
       )}
-      <div className="box">
+      <div className="relative flex items-center gap-1 bg-base-200 rounded-lg px-4">
         <input
           ref={fileInputRef}
           type="file"
@@ -1428,42 +1509,51 @@ const Composer = memo(function Composer({
             e.target.value = "";
           }}
         />
-        <button className="attach" title="Attach files" onClick={() => fileInputRef.current?.click()}>
+        <button className="btn btn-ghost btn-sm btn-circle" title="Attach files" onClick={() => fileInputRef.current?.click()}>
           <Paperclip size={20} />
         </button>
-        <span className="picker-anchor">
-          <button className="attach" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
+        <span className="relative inline-flex">
+          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
             <SmilePlus size={20} />
           </button>
           {pickerOpen && (
             <EmojiPicker
               favorites={favorites}
               align="right"
+              direction="up"
               onPick={(e) => setText((t) => `${t}${typeof e === "string" ? e : `:${e.shortcode}:`}`)}
               onClose={() => setPickerOpen(false)}
             />
           )}
         </span>
         {mentionOpen && (
-          <ul className="mention-menu" role="listbox">
+          <ul
+            className="absolute left-0 right-0 bottom-full mb-1.5 z-50 max-h-65 overflow-y-auto p-1.5 list-none bg-base-200 border border-base-300 rounded-box shadow-lg"
+            role="listbox"
+          >
             {mentionResults.map((c, i) => (
               <li key={c.pubkey} role="option" aria-selected={i === activeIndex}>
                 <button
                   type="button"
-                  className={`mention-item${i === activeIndex ? " active" : ""}`}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left ${
+                    i === activeIndex ? "bg-primary text-primary-content" : "hover:bg-base-300"
+                  }`}
                   // Keep textarea focus so `onBlur`-free selection still works.
                   onMouseDown={(e) => e.preventDefault()}
                   onMouseEnter={() => setMentionIndex(i)}
                   onClick={() => insertMention(c)}
                 >
                   {c.picture ? (
-                    <img className="avatar" src={c.picture} alt="" />
+                    <img className="w-6 h-6 rounded-full shrink-0 object-cover" src={c.picture} alt="" />
                   ) : (
-                    <span className="avatar" style={{ background: colorFor(c.pubkey) }}>
+                    <span
+                      className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-semibold text-white uppercase"
+                      style={{ background: colorFor(c.pubkey) }}
+                    >
                       {c.name.slice(0, 2).toUpperCase()}
                     </span>
                   )}
-                  <span className="m-name">{c.name}</span>
+                  <span className="truncate">{c.name}</span>
                 </button>
               </li>
             ))}
@@ -1472,6 +1562,7 @@ const Composer = memo(function Composer({
         <textarea
           ref={textareaRef}
           rows={1}
+          className="flex-1 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
           placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
           value={text}
           onChange={(e) => {
@@ -1514,7 +1605,7 @@ const Composer = memo(function Composer({
             }
           }}
         />
-        <button className="send" onClick={send} disabled={sending}>
+        <button className="btn btn-primary btn-sm" onClick={send} disabled={sending}>
           {sending ? "Sending…" : "Send"}
         </button>
       </div>
@@ -1546,16 +1637,16 @@ function MemberList({ state }: { state: CommunityState }) {
   );
 
   const row = (m: string, role?: Role) => (
-    <div className="member" key={m} title={m}>
+    <div className="flex items-center gap-2.5 px-2 py-1.5 rounded cursor-pointer hover:bg-base-300" key={m} title={m}>
       <UserAvatar pubkey={m} />
-      <span className="m-name" style={role ? { color: roleColor(role.color) } : undefined}>
+      <span className="font-medium truncate" style={role ? { color: roleColor(role.color) } : undefined}>
         <UserName pubkey={m} />
       </span>
       {m === owner ? (
-        <span className="badge owner">Owner</span>
+        <span className="badge badge-warning badge-sm ml-auto">Owner</span>
       ) : (
         role && (
-          <span className="badge role" style={{ background: roleColor(role.color) }}>
+          <span className="badge badge-sm ml-auto text-white" style={{ background: roleColor(role.color) }}>
             {role.name}
           </span>
         )
@@ -1575,36 +1666,34 @@ function MemberList({ state }: { state: CommunityState }) {
     .filter((s) => s.members.length > 0);
 
   return (
-    <div className="members">
+    <div className="flex-1 min-h-0 overflow-y-auto py-4 px-2">
       {ownerMembers.length > 0 && (
         <>
-          <h4>Owner</h4>
+          <h4 className="text-[11px] uppercase text-base-content/60 px-2 pb-1.5 mt-2 mb-1">Owner</h4>
           {ownerMembers.map((m) => row(m))}
         </>
       )}
       {sections.map((s) => (
         <div key={s.role.role_id}>
-          <h4 style={{ color: roleColor(s.role.color) }}>
+          <h4 className="text-[11px] uppercase px-2 pb-1.5 mt-2 mb-1" style={{ color: roleColor(s.role.color) }}>
             {s.role.name} — {s.members.length}
           </h4>
           {s.members.map((m) => row(m, s.role))}
         </div>
       ))}
-      <h4>Members — {roleless.length}</h4>
+      <h4 className="text-[11px] uppercase text-base-content/60 px-2 pb-1.5 mt-2 mb-1">Members — {roleless.length}</h4>
       {roleless.map((m) => row(m))}
-      {members.length === 0 && <p className="sub" style={{ padding: 8 }}>No members yet.</p>}
+      {members.length === 0 && <p className="text-base-content/60 p-2">No members yet.</p>}
       {state.banlist.size > 0 && (
         <>
-          <h4 style={{ marginTop: 12, color: "#f87171" }}>Banned — {state.banlist.size}</h4>
+          <h4 className="text-[11px] uppercase text-error px-2 pb-1.5 mt-3 mb-1">Banned — {state.banlist.size}</h4>
           {[...state.banlist].sort().map((m) => (
-            <div className="member" key={m} title={m} style={{ opacity: 0.6 }}>
+            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded opacity-60" key={m} title={m}>
               <UserAvatar pubkey={m} />
-              <span className="m-name">
+              <span className="font-medium truncate">
                 <UserName pubkey={m} />
               </span>
-              <span className="badge" style={{ background: "rgba(248,113,113,0.15)", color: "#f87171" }}>
-                Banned
-              </span>
+              <span className="badge badge-sm ml-auto border-0 bg-error/15 text-error">Banned</span>
             </div>
           ))}
         </>

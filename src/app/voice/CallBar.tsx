@@ -12,9 +12,9 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
     useLocalParticipant();
 
   return (
-    <div className="call-bar">
+    <div className="flex items-center justify-center gap-2.5 p-2.5 bg-base-300 border-t border-base-100">
       <button
-        className={isMicrophoneEnabled ? "call-btn active" : "call-btn"}
+        className={isMicrophoneEnabled ? "btn btn-circle btn-primary" : "btn btn-circle"}
         title={isMicrophoneEnabled ? "Mute" : "Unmute"}
         onClick={() => {
           if (isMicrophoneEnabled) playMuteSound();
@@ -25,14 +25,14 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
         {isMicrophoneEnabled ? <Mic size={18} /> : <MicOff size={18} />}
       </button>
       <button
-        className={isCameraEnabled ? "call-btn active" : "call-btn"}
+        className={isCameraEnabled ? "btn btn-circle btn-primary" : "btn btn-circle"}
         title={isCameraEnabled ? "Stop camera" : "Start camera"}
         onClick={() => void localParticipant.setCameraEnabled(!isCameraEnabled)}
       >
         {isCameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
       </button>
       <button
-        className={isScreenShareEnabled ? "call-btn active" : "call-btn"}
+        className={isScreenShareEnabled ? "btn btn-circle btn-primary" : "btn btn-circle"}
         title={isScreenShareEnabled ? "Stop sharing" : "Share screen"}
         onClick={() => {
           if (!isScreenShareEnabled) playScreenShareSound();
@@ -41,7 +41,7 @@ export function CallBar({ onLeave }: { onLeave: () => void }) {
       >
         {isScreenShareEnabled ? <ScreenShareOff size={18} /> : <ScreenShare size={18} />}
       </button>
-      <button className="call-btn hangup" title="Leave call" onClick={onLeave}>
+      <button className="btn btn-error btn-circle" title="Leave call" onClick={onLeave}>
         <PhoneOff size={18} />
       </button>
     </div>

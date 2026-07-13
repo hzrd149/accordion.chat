@@ -61,13 +61,13 @@ export function Login() {
   }, []);
 
   return (
-    <div className="login-screen">
-      <div className="login-card">
-        <div className="logo app-emoji-icon" aria-hidden="true">🪗</div>
-        <h1>Accordion</h1>
-        <p>Discord-style communities on Nostr, end-to-end encrypted.</p>
+    <div className="flex h-screen items-center justify-center bg-gradient-to-b from-base-300 to-base-200">
+      <div className="card w-[420px] max-w-[calc(100vw-2rem)] bg-base-100 p-8 text-center shadow-xl">
+        <div className="mb-2 text-[40px] leading-none" aria-hidden="true">🪗</div>
+        <h1 className="mb-1 text-xl font-bold">Accordion</h1>
+        <p className="mb-6 text-sm opacity-60">Discord-style communities on Nostr, end-to-end encrypted.</p>
 
-        {error && <div className="error">{error}</div>}
+        {error && <div className="alert alert-error mb-3 text-sm">{error}</div>}
 
         {remote ? (
           <RemoteSignerLogin
@@ -77,26 +77,27 @@ export function Login() {
           />
         ) : (
           <>
-            <button className="btn full" onClick={generate}>
+            <button className="btn btn-primary btn-block mb-2.5" onClick={generate}>
               Create a new identity
             </button>
-            <button className="btn full ghost" onClick={extension} disabled={busy}>
+            <button className="btn btn-ghost btn-block mb-2.5" onClick={extension} disabled={busy}>
               Sign in with extension (NIP-07)
             </button>
-            <button className="btn full ghost" onClick={() => { setError(""); setRemote(true); }}>
+            <button className="btn btn-ghost btn-block mb-2.5" onClick={() => { setError(""); setRemote(true); }}>
               Sign in with remote signer (NIP-46)
             </button>
 
-            <div className="field" style={{ marginTop: 20, textAlign: "left" }}>
-              <label>Or import a private key</label>
+            <div className="mb-4 mt-5 text-left">
+              <label className="label text-xs font-semibold uppercase opacity-70">Or import a private key</label>
               <input
+                className="input input-bordered w-full"
                 placeholder="nsec1… or hex"
                 value={nsec}
                 onChange={(e) => setNsec(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && importKey()}
               />
             </div>
-            <button className="btn full secondary" onClick={importKey} disabled={!nsec.trim()}>
+            <button className="btn btn-ghost btn-block" onClick={importKey} disabled={!nsec.trim()}>
               Import & sign in
             </button>
           </>
@@ -200,38 +201,37 @@ function RemoteSignerLogin({
   }
 
   return (
-    <div style={{ textAlign: "center" }}>
-      <p style={{ margin: "0 0 16px", color: "var(--text-muted)" }}>
+    <div className="text-center">
+      <p className="mb-4 text-sm opacity-60">
         Scan with your Nostr signer app, or copy the link into it.
       </p>
 
       {uri && (
-        <a href={uri} style={{ display: "inline-block" }}>
+        <a href={uri} className="inline-block">
           <QRCode value={uri} />
         </a>
       )}
 
-      <button className="btn full ghost" style={{ marginTop: 16 }} onClick={copy} disabled={!uri}>
+      <button className="btn btn-ghost btn-block mt-4" onClick={copy} disabled={!uri}>
         {copied ? <><Check size={16} /> Copied</> : <><Copy size={16} /> Copy connection link</>}
       </button>
 
       {/* Relay customization */}
       {editingRelays ? (
-        <div className="field" style={{ marginTop: 12, textAlign: "left" }}>
-          <label>Signer relays (one per line)</label>
+        <div className="mt-3 text-left">
+          <label className="label text-xs font-semibold uppercase opacity-70">Signer relays (one per line)</label>
           <textarea
+            className="textarea textarea-bordered w-full font-mono text-xs"
             rows={3}
             value={relaysDraft}
             onChange={(e) => setRelaysDraft(e.target.value)}
-            style={{ fontFamily: "monospace", fontSize: 12 }}
           />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn secondary" style={{ flex: 1 }} onClick={applyRelays}>
+          <div className="mt-2 flex gap-2">
+            <button className="btn btn-primary flex-1" onClick={applyRelays}>
               Apply
             </button>
             <button
-              className="btn ghost"
-              style={{ flex: 1 }}
+              className="btn btn-ghost flex-1"
               onClick={() => { setRelaysDraft(relays.join("\n")); setEditingRelays(false); }}
             >
               Cancel
@@ -240,39 +240,29 @@ function RemoteSignerLogin({
         </div>
       ) : (
         <button
+          className="btn btn-ghost btn-xs mt-2.5 gap-1 opacity-60"
           onClick={() => { setRelaysDraft(relays.join("\n")); setEditingRelays(true); }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4,
-            margin: "10px auto 0",
-            padding: 0,
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--text-muted)",
-            fontSize: 12,
-          }}
         >
           <Settings2 size={13} /> Relays: {relays.map((r) => r.replace(/^wss?:\/\//, "")).join(", ")}
         </button>
       )}
 
       {/* Bunker URI alternative */}
-      <div className="field" style={{ marginTop: 20, textAlign: "left" }}>
-        <label>Or paste a bunker:// URI</label>
+      <div className="mb-4 mt-5 text-left">
+        <label className="label text-xs font-semibold uppercase opacity-70">Or paste a bunker:// URI</label>
         <input
+          className="input input-bordered w-full"
           placeholder="bunker://…"
           value={bunkerUrl}
           onChange={(e) => setBunkerUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && connectBunker()}
         />
       </div>
-      <button className="btn full ghost" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
+      <button className="btn btn-ghost btn-block" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
         {bunkerBusy ? "Connecting…" : "Connect with bunker URI"}
       </button>
 
-      <button className="btn full secondary" style={{ marginTop: 8 }} onClick={onBack}>
+      <button className="btn btn-ghost btn-block mt-2" onClick={onBack}>
         <ArrowLeft size={16} /> Back
       </button>
     </div>

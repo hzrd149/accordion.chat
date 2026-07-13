@@ -25,15 +25,20 @@ export function UserName({ pubkey }: { pubkey: string }) {
 
 /**
  * A user's avatar — the kind-0 picture once loaded, else a colored monogram.
- * Extra class names and inline color are merged so existing call sites keep
- * their layout.
+ * `className` controls size/extras (e.g. `w-10 h-10`); the round shape, cover
+ * fit and monogram styling are baked in. The monogram keeps its per-pubkey
+ * colour via inline style (a genuinely dynamic value).
  */
-export function UserAvatar({ pubkey, className = "avatar" }: { pubkey: string; className?: string }) {
+export function UserAvatar({ pubkey, className = "w-8 h-8" }: { pubkey: string; className?: string }) {
   const profile = useProfile(pubkey);
   const picture = profile?.picture;
-  if (picture) return <img className={className} src={picture} alt="" />;
+  if (picture)
+    return <img className={`${className} rounded-full object-cover shrink-0`} src={picture} alt="" />;
   return (
-    <div className={className} style={{ background: colorFor(pubkey) }}>
+    <div
+      className={`${className} rounded-full shrink-0 flex items-center justify-center text-white text-xs font-semibold uppercase`}
+      style={{ background: colorFor(pubkey) }}
+    >
       {initials(pubkey)}
     </div>
   );
