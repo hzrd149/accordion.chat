@@ -4,6 +4,7 @@ import {
   DoorOpen,
   Hand,
   Hash,
+  Inbox,
   Loader2,
   Lock,
   LogOut,
@@ -33,6 +34,7 @@ import { verifiedAuthorOf, type VoicePresenceFold } from "../voice/presence";
 import { useVoiceEngine } from "../voice/registry";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
+import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
 import { useMessages, useThread } from "../chat/useMessages";
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
@@ -49,6 +51,7 @@ import {
 import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
+import { InvitesView } from "./invites";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/ClientStatus";
 import { CommunitySettingsView } from "./community-settings";
@@ -108,6 +111,10 @@ function Shell() {
   const modal = searchParams.get("modal") as ModalName | null;
   const settingsPage = searchParams.get("settings");
   const adminPage = searchParams.get("admin");
+  const invitesOpen = searchParams.get("invites") !== null;
+  // Pending Direct Invites (CORD-05 §6) — surfaced as a badge on the rail's
+  // invites button; the watcher syncs them in the background.
+  const { count: inviteCount } = useInvites();
 
   function setParam(key: string, value: string | null) {
     setSearchParams(
@@ -225,6 +232,20 @@ function Shell() {
         </button>
         <div className="mt-auto shrink-0">
           <ClientStatusRailIndicator />
+        </div>
+        <div className="relative w-12 h-12 shrink-0">
+          <button
+            className="w-full h-full rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
+            title={inviteCount > 0 ? `${inviteCount} pending invite${inviteCount === 1 ? "" : "s"}` : "Invites"}
+            onClick={() => setParam("invites", "open")}
+          >
+            <Inbox size={22} />
+          </button>
+          {inviteCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-primary text-primary-content text-[11px] font-bold flex items-center justify-center pointer-events-none">
+              {inviteCount > 99 ? "99+" : inviteCount}
+            </span>
+          )}
         </div>
         <button
           className="w-12 h-12 shrink-0 rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
@@ -366,6 +387,8 @@ function Shell() {
           </div>
         </Modal>
       )}
+
+      {invitesOpen && <InvitesView onClose={() => setParam("invites", null)} />}
 
       {settingsPage !== null && (
         <SettingsView
