@@ -1,4 +1,35 @@
-:root {
+/* ---- Theme palettes -----------------------------------------------------
+   Light is the base (`:root`, and the explicit "light" choice). Dark applies
+   either when the user explicitly picks it (`[data-theme="dark"]`) or, absent
+   any explicit choice, when the OS prefers dark (`prefers-color-scheme`, scoped
+   to `:root:not([data-theme])` so an explicit light choice always wins). The
+   dark values are the app's original palette; light is derived to match. */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #ffffff;
+  --bg-rail: #e3e5e8;
+  --bg-sidebar: #f2f3f5;
+  --bg-main: #ffffff;
+  --bg-input: #e9eaed;
+  --bg-hover: #e0e1e5;
+  --bg-active: #d4d7dc;
+  --bg-account: #e9eaed;
+  --bg-field: #ffffff;
+  --bg-glow: #e8eaff;
+  --accent: #5865f2;
+  --accent-hover: #4752c4;
+  --text: #313338;
+  --text-muted: #5c5e66;
+  --text-bright: #060607;
+  --danger: #d83c3e;
+  --success: #248046;
+  --border: #d7d9dd;
+  --radius: 8px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
   --bg-app: #1a1b1e;
   --bg-rail: #101114;
   --bg-sidebar: #202227;
@@ -6,6 +37,9 @@
   --bg-input: #303239;
   --bg-hover: #35373d;
   --bg-active: #3b3e45;
+  --bg-account: #17181b;
+  --bg-field: #1a1b1e;
+  --bg-glow: #2b2d33;
   --accent: #5865f2;
   --accent-hover: #4752c4;
   --text: #dbdee1;
@@ -14,7 +48,30 @@
   --danger: #da373c;
   --success: #23a559;
   --border: #2c2e33;
-  --radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg-app: #1a1b1e;
+    --bg-rail: #101114;
+    --bg-sidebar: #202227;
+    --bg-main: #26282d;
+    --bg-input: #303239;
+    --bg-hover: #35373d;
+    --bg-active: #3b3e45;
+    --bg-account: #17181b;
+    --bg-field: #1a1b1e;
+    --bg-glow: #2b2d33;
+    --accent: #5865f2;
+    --accent-hover: #4752c4;
+    --text: #dbdee1;
+    --text-muted: #949ba4;
+    --text-bright: #f2f3f5;
+    --danger: #da373c;
+    --success: #23a559;
+    --border: #2c2e33;
+  }
 }
 
 * {
@@ -234,7 +291,7 @@ textarea {
 
 .account-bar {
   height: 52px;
-  background: #17181b;
+  background: var(--bg-account);
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -1118,7 +1175,7 @@ textarea {
 .field textarea,
 .field select {
   width: 100%;
-  background: #1a1b1e;
+  background: var(--bg-field);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 10px;
@@ -1197,7 +1254,7 @@ textarea {
   margin-bottom: 12px;
 }
 .invite-link {
-  background: #1a1b1e;
+  background: var(--bg-field);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 10px;
@@ -1214,7 +1271,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at 50% 0%, #2b2d33, var(--bg-app));
+  background: radial-gradient(circle at 50% 0%, var(--bg-glow), var(--bg-app));
 }
 .login-card {
   background: var(--bg-main);
@@ -1554,7 +1611,7 @@ textarea {
 }
 .relay-add input {
   flex: 1;
-  background: #1a1b1e;
+  background: var(--bg-field);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 10px;
@@ -1638,6 +1695,58 @@ textarea {
   .role-row {
     flex-wrap: wrap;
   }
+}
+
+/* Appearance: theme-picker radio cards */
+.theme-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 420px;
+}
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-sidebar);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.theme-option:hover {
+  background: var(--bg-hover);
+}
+.theme-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.theme-option input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.theme-option-icon {
+  display: flex;
+  color: var(--text-muted);
+}
+.theme-option.active .theme-option-icon {
+  color: var(--accent);
+}
+.theme-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.theme-option-label {
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.theme-option-hint {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* Community image (icon / banner) editor */

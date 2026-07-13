@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Accordion</title>
+    <!-- Apply the saved theme before first paint to avoid a flash; no stored
+         choice means "follow the system", which the CSS resolves on its own. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("accordion:theme");
+          if (t === "light" || t === "dark")
+            document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

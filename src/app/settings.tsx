@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Flower2, Inbox, Mailbox, Radar, Star, Trash2, User as UserIcon, X } from "lucide-react";
+import { Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon, X } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { CreateProfile, UpdateProfile } from "applesauce-actions/actions/profile";
 import { AddInboxRelay, AddOutboxRelay, RemoveInboxRelay, RemoveOutboxRelay } from "applesauce-actions/actions/mailboxes";
@@ -10,13 +10,15 @@ import type { ProfileContent } from "applesauce-core/helpers/profile";
 import type { ISigner } from "applesauce-signers";
 import { createSettingsRunner, saveRelayList, userFor } from "./settings-actions";
 import { UserAvatar } from "./User";
+import { useTheme, type ThemePref } from "./theme";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
-type PageId = "profile" | "dm" | "relays" | "blossom" | "lookup";
+type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "profile", label: "Profile", icon: <UserIcon size={18} /> },
+  { id: "appearance", label: "Appearance", icon: <SunMoon size={18} /> },
   { id: "relays", label: "Relays", icon: <Mailbox size={18} /> },
   { id: "dm", label: "DM Inbox Relays", icon: <Inbox size={18} /> },
   { id: "blossom", label: "Blossom Servers", icon: <Flower2 size={18} /> },
@@ -78,6 +80,7 @@ export function SettingsView({
         </button>
         <div className="settings-page">
           {page === "profile" && <ProfilePage signer={signer} pubkey={pubkey} />}
+          {page === "appearance" && <AppearancePage />}
           {page === "relays" && <MailboxesPage signer={signer} pubkey={pubkey} />}
           {page === "dm" && <DmRelaysPage signer={signer} pubkey={pubkey} />}
           {page === "blossom" && <BlossomPage signer={signer} pubkey={pubkey} />}
@@ -89,6 +92,45 @@ export function SettingsView({
 }
 
 type PageProps = { signer: ISigner; pubkey: string };
+
+// ---- Appearance ----------------------------------------------------------
+
+const THEME_OPTIONS: { value: ThemePref; label: string; hint: string; icon: ReactNode }[] = [
+  { value: "system", label: "System", hint: "Match your device settings", icon: <Monitor size={18} /> },
+  { value: "light", label: "Light", hint: "Always use the light theme", icon: <Sun size={18} /> },
+  { value: "dark", label: "Dark", hint: "Always use the dark theme", icon: <Moon size={18} /> },
+];
+
+function AppearancePage() {
+  const { pref, resolved, setTheme } = useTheme();
+  return (
+    <>
+      <h2>Appearance</h2>
+      <p className="settings-sub">
+        Choose how Accordion looks. <strong>System</strong> follows your operating system's
+        light/dark setting — currently <strong>{resolved}</strong>.
+      </p>
+      <div className="theme-options">
+        {THEME_OPTIONS.map((o) => (
+          <label key={o.value} className={`theme-option ${pref === o.value ? "active" : ""}`}>
+            <input
+              type="radio"
+              name="theme"
+              value={o.value}
+              checked={pref === o.value}
+              onChange={() => setTheme(o.value)}
+            />
+            <span className="theme-option-icon">{o.icon}</span>
+            <span className="theme-option-text">
+              <span className="theme-option-label">{o.label}</span>
+              <span className="theme-option-hint">{o.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}
 
 // ---- Profile (kind 0) ----------------------------------------------------
 

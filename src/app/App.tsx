@@ -49,6 +49,7 @@ import {
 import { clockTime, colorFor, formatTime, groupMessages } from "./util";
 import { UserAvatar, UserName } from "./User";
 import { SettingsView } from "./settings";
+import { ThemeToggle } from "./ThemeToggle";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "./useDecryptedImage";
 import { MessageContent } from "./MessageContent";
@@ -463,6 +464,7 @@ function Sidebar({
           </div>
           <div className="sub">{account?.pubkey === state.material.owner ? "Owner" : "Member"}</div>
         </div>
+        <ThemeToggle />
         <button
           className="logout"
           title="Sign out"
