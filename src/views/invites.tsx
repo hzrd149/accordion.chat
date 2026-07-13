@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Inbox, Lock, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { useState } from "react";
+import { Inbox, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { ConcordDirectInvite } from "applesauce-concord/casts";
 import { useConcord } from "../lib/concord-context";
@@ -8,21 +8,16 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { UserAvatar, UserName } from "../components/User";
 
 /**
- * The Direct Invites (CORD-05 §6) view: a full-screen overlay listing the
- * pending invites the user has been handed directly (gift-wrapped to their
- * npub). Accepting keeps the keys and joins the community; dismissing hides the
- * invite locally (the keys are discarded, per spec — decline = forget). The
- * watcher syncs in the background; the Sync button forces a fresh fetch.
+ * The Direct Invites (CORD-05 §6) page: a normal in-shell view (the community
+ * rail stays put) listing the pending invites the user has been handed directly
+ * (gift-wrapped to their npub). Accepting keeps the keys and joins the
+ * community; dismissing hides the invite locally (the keys are discarded, per
+ * spec — decline = forget). The watcher syncs in the background; the Sync button
+ * forces a fresh fetch.
  */
-export function InvitesView({ onClose }: { onClose: () => void }) {
+export function InvitesView() {
   const { watcher, invites, needsAuth, status } = useInvites();
   const [syncing, setSyncing] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   async function sync() {
     if (!watcher || syncing) return;
@@ -36,20 +31,15 @@ export function InvitesView({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[300] flex flex-col bg-base-100">
-      <div className="h-14 shrink-0 flex items-center gap-3 px-5 border-b border-base-300 shadow-sm">
-        <Inbox size={20} />
-        <span className="font-bold text-base-content">Invites</span>
-        {invites.length > 0 && (
-          <span className="badge badge-primary badge-sm">{invites.length}</span>
-        )}
+    <div className="flex-1 flex flex-col min-w-0 bg-base-100">
+      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0 max-md:pl-14">
+        <Inbox size={20} className="text-base-content/60" />
+        <span className="font-semibold text-base-content">Invites</span>
+        {invites.length > 0 && <span className="badge badge-primary badge-sm">{invites.length}</span>}
         <div className="flex-1" />
         <button className="btn btn-ghost btn-sm gap-2" title="Sync invites" onClick={sync} disabled={syncing}>
           <RefreshCw size={16} className={syncing ? "animate-spin" : ""} />
           <span className="max-md:hidden">{syncing ? "Syncing…" : "Sync"}</span>
-        </button>
-        <button className="btn btn-ghost btn-circle" title="Close (Esc)" onClick={onClose}>
-          <X size={22} />
         </button>
       </div>
 
@@ -82,7 +72,7 @@ export function InvitesView({ onClose }: { onClose: () => void }) {
           ) : (
             <div className="flex flex-col gap-3">
               {invites.map((invite) => (
-                <InviteRow key={invite.id} invite={invite} onClose={onClose} />
+                <InviteRow key={invite.id} invite={invite} />
               ))}
             </div>
           )}
@@ -92,7 +82,7 @@ export function InvitesView({ onClose }: { onClose: () => void }) {
   );
 }
 
-function InviteRow({ invite, onClose }: { invite: ConcordDirectInvite; onClose: () => void }) {
+function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
   const client = useConcord();
   const { watcher } = useInvites();
   const navigate = useNavigate();
@@ -118,7 +108,6 @@ function InviteRow({ invite, onClose }: { invite: ConcordDirectInvite; onClose: 
         if (wrap) await watcher.dismiss(wrap);
       }
       navigate(`/c/${community.communityId}`);
-      onClose();
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);

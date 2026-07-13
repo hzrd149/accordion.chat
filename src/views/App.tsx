@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DoorOpen,
   Hand,
@@ -77,6 +77,7 @@ export function App() {
         <CallProvider>
           <Routes>
             <Route path="/" element={<Shell />} />
+            <Route path="/invites" element={<Shell />} />
             <Route path="/c/:cid" element={<Shell />} />
             <Route path="/c/:cid/:channelId" element={<Shell />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -111,9 +112,10 @@ function Shell() {
   const modal = searchParams.get("modal") as ModalName | null;
   const settingsPage = searchParams.get("settings");
   const adminPage = searchParams.get("admin");
-  const invitesOpen = searchParams.get("invites") !== null;
-  // Pending Direct Invites (CORD-05 §6) — surfaced as a badge on the rail's
-  // invites button; the watcher syncs them in the background.
+  // The Direct Invites (CORD-05 §6) page is its own route rendered in the main
+  // area (the community rail stays put). The count feeds the rail badge; the
+  // watcher syncs invites in the background.
+  const onInvites = useLocation().pathname === "/invites";
   const { count: inviteCount } = useInvites();
 
   function setParam(key: string, value: string | null) {
@@ -176,10 +178,11 @@ function Shell() {
   // because the current fold has not surfaced them yet.
   const activeState = communities.find((c) => c.material.community_id === selectedCid);
   useEffect(() => {
-    if (communities.length > 0 && !selectedCid) {
+    // Don't auto-jump into a community from the invites route — only from root.
+    if (communities.length > 0 && !selectedCid && !onInvites) {
       navigate(`/c/${communities[0].material.community_id}`, { replace: true });
     }
-  }, [communities, selectedCid, navigate]);
+  }, [communities, selectedCid, onInvites, navigate]);
 
   useEffect(() => {
     if (!activeState) return;
@@ -235,9 +238,14 @@ function Shell() {
         </div>
         <div className="relative w-12 h-12 shrink-0">
           <button
-            className="w-full h-full rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
+            className={`w-full h-full bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+              onInvites ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
+            }`}
             title={inviteCount > 0 ? `${inviteCount} pending invite${inviteCount === 1 ? "" : "s"}` : "Invites"}
-            onClick={() => setParam("invites", "open")}
+            onClick={() => {
+              navigate("/invites");
+              setNavOpen(false);
+            }}
           >
             <Inbox size={22} />
           </button>
@@ -256,7 +264,9 @@ function Shell() {
         </button>
       </div>
 
-      {activeState ? (
+      {onInvites ? (
+        <InvitesView />
+      ) : activeState ? (
         <>
           <div
             className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:transition-transform ${
@@ -387,8 +397,6 @@ function Shell() {
           </div>
         </Modal>
       )}
-
-      {invitesOpen && <InvitesView onClose={() => setParam("invites", null)} />}
 
       {settingsPage !== null && (
         <SettingsView
