@@ -24,6 +24,27 @@ export function UserName({ pubkey }: { pubkey: string }) {
 }
 
 /**
+ * A user's display name followed by their short npub — e.g.
+ * `alice npub1abc…xyz` — so pubkeys in developer/debug views are readable while
+ * still exact. Falls back to just the short npub before the profile name loads.
+ */
+export function UserLabel({ pubkey, className }: { pubkey: string; className?: string }) {
+  const profile = useProfile(pubkey);
+  const npub = shortNpub(pubkey);
+  return (
+    <span className={className}>
+      {profile?.displayName ? (
+        <>
+          {profile.displayName} <span className="opacity-50 font-mono">{npub}</span>
+        </>
+      ) : (
+        <span className="font-mono opacity-70">{npub}</span>
+      )}
+    </span>
+  );
+}
+
+/**
  * A user's avatar — the kind-0 picture once loaded, else a colored monogram.
  * `className` controls size/extras (e.g. `w-10 h-10`); the round shape, cover
  * fit and monogram styling are baked in. The monogram keeps its per-pubkey

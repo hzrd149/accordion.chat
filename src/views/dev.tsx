@@ -27,6 +27,7 @@ export function DevView({
 }) {
   // Fall back to the first tool for an unknown/empty page value.
   const page: PageId = PAGES.some((p) => p.id === pageParam) ? (pageParam as PageId) : "crypto-history";
+  const active = PAGES.find((p) => p.id === page)!;
 
   return (
     <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
@@ -47,10 +48,16 @@ export function DevView({
           </button>
         ))}
       </nav>
-      <div className="flex-1 relative overflow-y-auto p-8 text-base max-md:px-4 max-md:py-6">
-        <div className="w-full">
-          {page === "crypto-history" && <CryptoHistory />}
-          {page === "control-plane" && <ControlPlaneDebugger />}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+          <span className="text-base-content/60">{active.icon}</span>
+          <span className="font-semibold text-base-content">{active.label}</span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 text-base max-md:px-4 max-md:py-6">
+          <div className="w-full">
+            {page === "crypto-history" && <CryptoHistory />}
+            {page === "control-plane" && <ControlPlaneDebugger />}
+          </div>
         </div>
       </div>
     </div>

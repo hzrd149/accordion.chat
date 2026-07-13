@@ -28,11 +28,11 @@ import {
 } from "applesauce-concord/helpers";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import type { ISigner } from "applesauce-signers";
-import { nip19 } from "nostr-tools";
 import { useEffect, useRef, useState } from "react";
 import { firstValueFrom, Subscription, takeUntil, timer, toArray } from "rxjs";
 import { pool } from "../../nostr";
 import { useConcord } from "../../lib/concord-context";
+import { UserLabel } from "../User";
 
 // Ride the app's shared pool (the ConcordClient already keeps its sockets warm +
 // NIP-42-authed); a dedicated ConcordRelayAuth just registers/authenticates the
@@ -270,20 +270,11 @@ function shortHex(hex: string): string {
   return `${hex.slice(0, 10)}…${hex.slice(-6)}`;
 }
 
-function shortNpub(pubkey: string): string {
-  try {
-    const npub = nip19.npubEncode(pubkey);
-    return `${npub.slice(0, 12)}…${npub.slice(-6)}`;
-  } catch {
-    return shortHex(pubkey);
-  }
-}
-
 /** An address row, highlighted when it rolled since the previous epoch. */
 function Row({ label, value, changed }: { label: string; value: string; changed?: boolean }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="w-32 shrink-0 opacity-60">{label}</span>
+      <span className="w-40 shrink-0 opacity-60">{label}</span>
       <code className={`break-all font-mono ${changed ? "text-warning font-semibold" : "opacity-80"}`}>
         {value}
       </code>
@@ -312,7 +303,11 @@ function TransitionBadge({ snap }: { snap: EpochSnapshot }) {
       return (
         <span className="badge badge-warning badge-outline gap-1">
           ↻ Refounded → epoch {snap.epoch + 1}
-          {snap.rotator && <span className="opacity-70">by {shortNpub(snap.rotator)}</span>}
+          {snap.rotator && (
+            <span className="opacity-70">
+              by <UserLabel pubkey={snap.rotator} />
+            </span>
+          )}
         </span>
       );
     case "removed":
@@ -357,21 +352,21 @@ function EpochCard({ snap, prev }: { snap: EpochSnapshot; prev?: EpochSnapshot }
       <Row label="next rekey" value={shortHex(k.nextBaseRekey.key.pk)} changed={changed.has("nextRekey")} />
 
       {snap.state.channels.length > 0 && (
-        <div className="border-t border-base-300 mt-1 pt-2 flex flex-col gap-1">
+        <div className="border-t border-base-300 mt-1 pt-2 flex flex-col gap-2">
           <span className="opacity-60">channels</span>
-          {snap.state.channels.map((c) => (
-            <div key={c.channel_id} className="flex items-baseline gap-2">
-              <span className="w-32 shrink-0 flex items-center gap-1">
-                #{c.name}
-                <span className={`badge badge-xs ${c.private ? "badge-secondary" : "badge-ghost"}`}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+            {snap.state.channels.map((c) => (
+              <div key={c.channel_id} className="flex items-center gap-2 min-w-0 border border-base-300 rounded-box px-3 py-1.5">
+                <span className="font-medium shrink-0">#{c.name}</span>
+                <span className={`badge badge-sm shrink-0 ${c.private ? "badge-secondary" : "badge-ghost"}`}>
                   {c.private ? "private" : "public"}
                 </span>
-              </span>
-              <code className="font-mono break-all opacity-80">
-                {shortHex(k.channels.get(c.channel_id)?.pk ?? "")}
-              </code>
-            </div>
-          ))}
+                <code className="font-mono opacity-70 truncate min-w-0 ml-auto">
+                  {shortHex(k.channels.get(c.channel_id)?.pk ?? "")}
+                </code>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -585,7 +580,6 @@ export function CryptoHistory() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold mb-1">Group Crypto History</h1>
       <p className="opacity-70 leading-relaxed mb-5">
         Walk a Concord community's cryptographic history epoch by epoch — deriving each epoch's keys, fetching its plane
         events live, and watching which addresses roll at every Refounding.

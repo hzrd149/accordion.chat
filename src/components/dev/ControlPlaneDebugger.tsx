@@ -20,6 +20,7 @@ import { CONTROL_KIND, parsePermissions, hasPerm } from "applesauce-concord/help
 import { useConcord } from "../../lib/concord-context";
 import { useCommunity } from "../../hooks/use-community";
 import { ConfirmModal } from "../modals";
+import { UserLabel } from "../User";
 import { formatTime } from "../../lib/util";
 
 // ---- small helpers ---------------------------------------------------------
@@ -161,9 +162,9 @@ function StatePanel({ state }: { state: CommunityState }) {
           <div className="flex flex-col gap-1">
             {[...state.grants].map(([member, roleIds]) => (
               <div key={member} className="flex items-baseline gap-2 ">
-                <code className="opacity-60">{shortHex(member)}</code>
+                <UserLabel pubkey={member} />
                 <span className="opacity-80">
-                  {roleIds.map((id) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id)).join(", ")}
+                  → {roleIds.map((id) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id)).join(", ")}
                 </span>
               </div>
             ))}
@@ -175,7 +176,7 @@ function StatePanel({ state }: { state: CommunityState }) {
         <Section title="Banlist">
           <div className="flex flex-col gap-1">
             {[...state.banlist].map((p) => (
-              <code key={p} className="opacity-70">{shortHex(p)}</code>
+              <UserLabel key={p} pubkey={p} />
             ))}
           </div>
         </Section>
@@ -226,7 +227,7 @@ function EditionRow({ rumor, isHead }: { rumor: Rumor; isHead: boolean }) {
         ) : (
           <span className="badge badge-xs badge-ghost shrink-0" title="Not the winning edition for this entity — superseded or rejected by the fold">not applied</span>
         )}
-        <code className="opacity-60 shrink-0">{shortHex(rumor.pubkey)}</code>
+        <UserLabel pubkey={rumor.pubkey} className="shrink-0" />
         <span className="opacity-40 truncate flex-1">{rumor.content || "(empty)"}</span>
         <span className="opacity-40 shrink-0 max-sm:hidden">{formatTime(rumor.created_at * 1000)}</span>
       </button>
@@ -594,7 +595,6 @@ export function ControlPlaneDebugger() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold mb-1">Control Plane Debugger</h1>
       <p className="opacity-70 leading-relaxed mb-5">
         Inspect a community's control plane and publish hand-crafted control events to it — bypassing your role, so you can
         test how groups react to invalid editions.
