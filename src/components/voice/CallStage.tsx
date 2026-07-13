@@ -33,14 +33,18 @@ function TileLabel({ identity }: { identity: string }) {
 
 function ParticipantMenu({
   participant,
-  volume,
+  volumes,
   onVolumeChange,
 }: {
   participant: Participant;
-  volume: number;
-  onVolumeChange: (identity: string, volume: number) => void;
+  volumes: Record<string, number>;
+  onVolumeChange: (key: string, volume: number) => void;
 }) {
+  const resolve = useVoiceIdentity();
   if (participant.isLocal) return null;
+  const info = resolve(participant.identity);
+  const volumeKey = info.verified ? info.pubkey : participant.identity;
+  const volume = volumes[volumeKey] ?? 1;
   const Icon = volume === 0 ? VolumeX : Volume1;
   return (
     <div className="dropdown dropdown-end absolute right-1.5 top-1.5">
@@ -51,7 +55,7 @@ function ParticipantMenu({
         <li>
           <button
             className="rounded-none"
-            onClick={() => onVolumeChange(participant.identity, volume === 0 ? 1 : 0)}
+            onClick={() => onVolumeChange(volumeKey, volume === 0 ? 1 : 0)}
           >
             {volume === 0 ? <Volume1 size={14} /> : <VolumeX size={14} />}
             {volume === 0 ? "Unmute" : "Mute"}
@@ -73,7 +77,7 @@ function ParticipantMenu({
               step="0.05"
               value={volume}
               title={`Volume ${Math.round(volume * 100)}%`}
-              onChange={(e) => onVolumeChange(participant.identity, Number(e.currentTarget.value))}
+              onChange={(e) => onVolumeChange(volumeKey, Number(e.currentTarget.value))}
             />
           </label>
         </li>
@@ -84,31 +88,31 @@ function ParticipantMenu({
 
 function VideoTile({
   track,
-  volume,
+  volumes,
   onVolumeChange,
 }: {
   track: TrackReference;
-  volume: number;
-  onVolumeChange: (identity: string, volume: number) => void;
+  volumes: Record<string, number>;
+  onVolumeChange: (key: string, volume: number) => void;
 }) {
   const identity = track.participant.identity;
   return (
     <div className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-lg bg-base-300 [&_video]:h-full [&_video]:w-full [&_video]:object-cover">
       <VideoTrack trackRef={track} />
       <TileLabel identity={identity} />
-      <ParticipantMenu participant={track.participant} volume={volume} onVolumeChange={onVolumeChange} />
+      <ParticipantMenu participant={track.participant} volumes={volumes} onVolumeChange={onVolumeChange} />
     </div>
   );
 }
 
 function AvatarTile({
   participant,
-  volume,
+  volumes,
   onVolumeChange,
 }: {
   participant: Participant;
-  volume: number;
-  onVolumeChange: (identity: string, volume: number) => void;
+  volumes: Record<string, number>;
+  onVolumeChange: (key: string, volume: number) => void;
 }) {
   const resolve = useVoiceIdentity();
   const info = resolve(participant.identity);
@@ -129,7 +133,7 @@ function AvatarTile({
         </span>
       )}
       <TileLabel identity={participant.identity} />
-      <ParticipantMenu participant={participant} volume={volume} onVolumeChange={onVolumeChange} />
+      <ParticipantMenu participant={participant} volumes={volumes} onVolumeChange={onVolumeChange} />
     </div>
   );
 }
@@ -143,7 +147,7 @@ export function CallStage({
   channelName: string;
   expanded: boolean;
   volumes: Record<string, number>;
-  onVolumeChange: (identity: string, volume: number) => void;
+  onVolumeChange: (key: string, volume: number) => void;
 }) {
   const participants = useParticipants();
   const videoTracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], {
@@ -165,7 +169,7 @@ export function CallStage({
           <VideoTile
             key={`${t.participant.identity}:${t.source}`}
             track={t}
-            volume={volumes[t.participant.identity] ?? 1}
+            volumes={volumes}
             onVolumeChange={onVolumeChange}
           />
         ))}
@@ -173,7 +177,7 @@ export function CallStage({
           <AvatarTile
             key={p.identity}
             participant={p}
-            volume={volumes[p.identity] ?? 1}
+            volumes={volumes}
             onVolumeChange={onVolumeChange}
           />
         ))}

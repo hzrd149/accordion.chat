@@ -38,14 +38,49 @@ import { randomBytes } from "../../lib/bytes";
 import { CallStage } from "./CallStage";
 import { CallBar } from "./CallBar";
 import { playJoinSound, playLeaveSound } from "./callSounds";
-import { VoiceIdentityContext, type VoiceIdentityResolver } from "./identity";
+import { VoiceIdentityContext, useVoiceIdentity, type VoiceIdentityResolver } from "./identity";
 import type { ActiveCall } from "./call-context";
 
 const EMPTY_FOLD: VoicePresenceFold = { present: [], claims: new Map() };
+const VOLUME_STORAGE_KEY = "accordion:voice-participant-volumes";
 
 type ParticipantVolumes = Record<string, number>;
 
+function clampVolume(volume: number): number {
+  return Math.min(1, Math.max(0, volume));
+}
+
+function loadParticipantVolumes(): ParticipantVolumes {
+  try {
+    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([key, value]) =>
+        typeof value === "number" && Number.isFinite(value) ? [[key, clampVolume(value)]] : [],
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveParticipantVolumes(volumes: ParticipantVolumes) {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, JSON.stringify(volumes));
+  } catch {
+    // Best-effort preference persistence only.
+  }
+}
+
+function participantVolumeKey(identity: string, resolve: VoiceIdentityResolver): string {
+  const info = resolve(identity);
+  return info.verified ? info.pubkey : identity;
+}
+
 function ParticipantAudioRenderer({ volumes }: { volumes: ParticipantVolumes }) {
+  const resolve = useVoiceIdentity();
   const tracks = useTracks([Track.Source.Microphone, Track.Source.ScreenShareAudio, Track.Source.Unknown], {
     updateOnlyOn: [],
     onlySubscribed: true,
@@ -60,7 +95,7 @@ function ParticipantAudioRenderer({ volumes }: { volumes: ParticipantVolumes }) 
         <AudioTrack
           key={`${trackRef.participant.identity}:${trackRef.publication.trackSid}`}
           trackRef={trackRef}
-          volume={volumes[trackRef.participant.identity] ?? 1}
+          volume={volumes[participantVolumeKey(trackRef.participant.identity, resolve)] ?? 1}
         />
       ))}
     </div>
@@ -110,11 +145,12 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   // anti-replay would 401 the second (e.g. React StrictMode's double-invoke).
   const [tokenData, setTokenData] = useState<AvToken | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [participantVolumes, setParticipantVolumes] = useState<ParticipantVolumes>({});
-  const setParticipantVolume = useCallback((identity: string, volume: number) => {
-    const next = Math.min(1, Math.max(0, volume));
-    setParticipantVolumes((current) => ({ ...current, [identity]: next }));
+  const [participantVolumes, setParticipantVolumes] = useState<ParticipantVolumes>(loadParticipantVolumes);
+  const setParticipantVolume = useCallback((key: string, volume: number) => {
+    const next = clampVolume(volume);
+    setParticipantVolumes((current) => ({ ...current, [key]: next }));
   }, []);
+  useEffect(() => saveParticipantVolumes(participantVolumes), [participantVolumes]);
   const tokenReq = useRef<{ key: string; promise: Promise<AvToken> } | null>(null);
   useEffect(() => {
     if (!voice) return;
