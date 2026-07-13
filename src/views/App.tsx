@@ -835,7 +835,7 @@ const MessageList = memo(function MessageList({
 
   return (
     <div className="flex-1 flex min-h-0">
-      <div className="flex-1 overflow-y-auto py-4 flex flex-col" ref={ref}>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 flex flex-col" ref={ref}>
         <div className="flex-1" />
         {messages.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
@@ -929,8 +929,10 @@ const Message = memo(function Message({
       )}
       <div className="min-w-0 flex-1">
         {m.replyTo && (
-          <div className="flex items-center gap-1.5 text-[13px] text-base-content/60 mb-0.5 before:content-[''] before:w-6 before:h-2 before:border-l-2 before:border-t-2 before:border-base-300 before:rounded-tl-md before:ml-5 before:self-end">
-            <Reply size={14} /> <UserName pubkey={m.replyTo.author} />: {replyPreview}
+          <div className="flex items-center gap-1.5 text-[13px] text-base-content/60 mb-0.5 min-w-0 before:content-[''] before:shrink-0 before:w-6 before:h-2 before:border-l-2 before:border-t-2 before:border-base-300 before:rounded-tl-md before:ml-5 before:self-end">
+            <Reply size={14} className="shrink-0" />
+            <span className="shrink-0"><UserName pubkey={m.replyTo.author} />:</span>
+            <span className="truncate">{replyPreview}</span>
           </div>
         )}
         {showHeader && (
