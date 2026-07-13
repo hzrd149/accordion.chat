@@ -1,11 +1,9 @@
 // Descriptive Concord status surfaces (built on the package's `status$`
-// observables). Three views of the same signal:
+// observables). Two views of the same signal:
 //   • ClientStatusRailIndicator — the whole client at a glance (always-visible
 //     dot at the bottom of the community rail).
 //   • CommunityStatusDot — a per-community sync/connection dot, overlaid on a
 //     rail icon.
-//   • CommunityStatusBadges — the per-community phase/connection/auth badges +
-//     error text for the community header.
 import { use$ } from "applesauce-react/hooks";
 import { Loader2 } from "lucide-react";
 import type { ConcordClientStatus, ConcordCommunityStatus } from "applesauce-concord";
@@ -21,13 +19,6 @@ const DOT_BG: Record<Tone, string> = {
   warning: "bg-warning",
   error: "bg-error",
   ghost: "bg-base-content/30",
-};
-const BADGE_CLASS: Record<Tone, string> = {
-  success: "badge-success",
-  info: "badge-info",
-  warning: "badge-warning",
-  error: "badge-error",
-  ghost: "badge-ghost",
 };
 
 interface Derived {
@@ -100,23 +91,6 @@ export function CommunityStatusDot({ cid }: { cid: string }) {
       title={`${d.label} — ${d.detail}`}
     >
       <StatusDot tone={d.tone} spin={d.spin} className="w-2 h-2" />
-    </span>
-  );
-}
-
-/** The per-community phase/connection/auth badges + inline error, for headers. */
-export function CommunityStatusBadges({ cid }: { cid: string }) {
-  const community = useCommunity(cid);
-  const status = use$(() => community?.status$, [community]);
-  if (!status) return null;
-  const d = deriveCommunity(status);
-  return (
-    <span className="inline-flex items-center gap-1.5" title={d.detail}>
-      <span className={`badge badge-sm gap-1 ${BADGE_CLASS[d.tone]}`}>
-        <StatusDot tone={d.tone} spin={d.spin} className="w-1.5 h-1.5" />
-        {d.label}
-      </span>
-      {status.error && <span className="text-error text-[11px] truncate max-w-40">{status.error}</span>}
     </span>
   );
 }

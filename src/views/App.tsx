@@ -50,7 +50,7 @@ import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { ThemeToggle } from "../components/ThemeToggle";
-import { ClientStatusRailIndicator, CommunityStatusDot, CommunityStatusBadges } from "../components/ClientStatus";
+import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/ClientStatus";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
@@ -440,10 +440,7 @@ function Sidebar({
           bannerUrl ? "-mt-5 bg-gradient-to-b from-transparent to-base-200" : ""
         }`}
       >
-        <div className="min-w-0 flex flex-col">
-          <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
-          <CommunityStatusBadges cid={state.material.community_id} />
-        </div>
+        <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
         <div className="flex items-center gap-1 shrink-0">
           <button className="btn btn-ghost btn-sm btn-circle" title="Community settings" onClick={onSettings}>
             <Settings size={18} />
