@@ -41,7 +41,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       // (watchDirectInvites already defaults true.)
       autoUnlock: true,
       autoAuthenticate: true,
-      autoSaveCommunityList: true,
+      autoSaveCommunityList: false,
     });
     return ref;
   }, [account]);
