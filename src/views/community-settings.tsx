@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
+import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
@@ -51,30 +51,24 @@ export function CommunitySettingsView({
   const client = useConcord();
   const account = useActiveAccount();
   const state = use$(() => client.getState$(cid), [cid]) as CommunityState;
-  // Fall back to the overview page for an unknown/empty `?admin=` value.
+  // Fall back to the overview page for an unknown/empty page value.
   const page: PageId = PAGES.some((p) => p.id === pageParam) ? (pageParam as PageId) : "overview";
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   if (!state) return null;
   const name = state.metadata?.name ?? state.material.name;
   const isOwner = account?.pubkey === state.material.owner;
 
   return (
-    <div className="fixed inset-0 z-[300] flex bg-base-100">
-      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5">
-        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60">
+    <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
+      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300 max-md:pl-14">
+        <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
           <CommunityIcon state={state} />
-          <span>{name}</span>
+          <span className="max-md:hidden">{name}</span>
         </div>
         {PAGES.map((p) => (
           <button
             key={p.id}
-            className={`btn btn-ghost btn-sm justify-start gap-2.5 w-full font-medium ${page === p.id ? "btn-active" : ""}`}
+            className={`btn btn-ghost btn-sm justify-start gap-2.5 w-full font-medium max-md:w-auto max-md:shrink-0 ${page === p.id ? "btn-active" : ""}`}
             onClick={() => onSelectPage(p.id)}
           >
             {p.icon}
@@ -82,14 +76,7 @@ export function CommunitySettingsView({
           </button>
         ))}
       </nav>
-      <div className="flex-1 relative overflow-y-auto p-10">
-        <button
-          className="btn btn-ghost btn-circle absolute top-6 right-7 border-2 border-base-300"
-          title="Close (Esc)"
-          onClick={onClose}
-        >
-          <X size={22} />
-        </button>
+      <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
         <div className="max-w-[640px]">
           {page === "overview" && <OverviewPage cid={cid} state={state} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} state={state} />}

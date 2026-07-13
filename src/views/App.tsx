@@ -81,6 +81,8 @@ export function App() {
             <Route path="/settings" element={<Shell />} />
             <Route path="/settings/:page" element={<Shell />} />
             <Route path="/c/:cid" element={<Shell />} />
+            <Route path="/c/:cid/settings" element={<Shell />} />
+            <Route path="/c/:cid/settings/:page" element={<Shell />} />
             <Route path="/c/:cid/:channelId" element={<Shell />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -112,14 +114,18 @@ function Shell() {
   const selectedCid = cidParam ?? null;
   const selectedChannel = channelParam ?? null;
   const modal = searchParams.get("modal") as ModalName | null;
-  const adminPage = searchParams.get("admin");
-  // Settings and Direct Invites (CORD-05 §6) are their own routes rendered in
-  // the main area (the community rail stays put), not full-screen overlays.
+  // Settings, community settings, and Direct Invites (CORD-05 §6) are their own
+  // routes rendered in the main area (the community rail stays put), not
+  // full-screen overlays.
   const onInvites = useLocation().pathname === "/invites";
   const settingsMatch = useMatch("/settings/:page");
   const settingsRootMatch = useMatch("/settings");
   const onSettings = Boolean(settingsMatch || settingsRootMatch);
   const settingsPage = settingsMatch?.params.page ?? "profile";
+  const adminMatch = useMatch("/c/:cid/settings/:page");
+  const adminRootMatch = useMatch("/c/:cid/settings");
+  const onCommunitySettings = Boolean(adminMatch || adminRootMatch);
+  const communitySettingsPage = adminMatch?.params.page ?? "overview";
   const { count: inviteCount } = useInvites();
 
   function setParam(key: string, value: string | null) {
@@ -190,12 +196,12 @@ function Shell() {
   }, [communities, selectedCid, onInvites, onSettings, navigate]);
 
   useEffect(() => {
-    if (!activeState) return;
+    if (!activeState || onCommunitySettings) return;
     const channels = activeState.channels;
     if (channels.length && !selectedChannel) {
       navigate(`/c/${activeState.material.community_id}/${channels[0].channel_id}`, { replace: true });
     }
-  }, [activeState, selectedChannel, navigate]);
+  }, [activeState, selectedChannel, onCommunitySettings, navigate]);
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
@@ -279,6 +285,14 @@ function Shell() {
       ) : onSettings ? (
         <SettingsView page={settingsPage} onSelectPage={(p) => navigate(`/settings/${p}`)} />
       ) : activeState ? (
+        onCommunitySettings ? (
+          <CommunitySettingsView
+            cid={activeState.material.community_id}
+            page={communitySettingsPage}
+            onSelectPage={(p) => navigate(`/c/${activeState.material.community_id}/settings/${p}`)}
+            onClose={() => navigate(`/c/${activeState.material.community_id}`)}
+          />
+        ) : (
         <>
           <div
             className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:transition-transform ${
@@ -294,7 +308,7 @@ function Shell() {
               }}
               onNewChannel={() => setModal("channel")}
               onInvite={() => setModal("invite")}
-              onSettings={() => setParam("admin", "overview")}
+              onSettings={() => navigate(`/c/${activeState.material.community_id}/settings`)}
               onLeave={() => setModal("leave")}
             />
           </div>
@@ -332,6 +346,7 @@ function Shell() {
             />
           )}
         </>
+        )
       ) : (
         <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
           <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
@@ -408,15 +423,6 @@ function Shell() {
             </button>
           </div>
         </Modal>
-      )}
-
-      {adminPage !== null && activeState && (
-        <CommunitySettingsView
-          cid={activeState.material.community_id}
-          page={adminPage}
-          onSelectPage={(p) => setParam("admin", p)}
-          onClose={() => setParam("admin", null)}
-        />
       )}
 
     </div>
