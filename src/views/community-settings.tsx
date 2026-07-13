@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
+import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users, X } from "lucide-react";
+import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
+import { deleteCommunityRumorCache } from "../lib/rumor-cache";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { PERM } from "applesauce-concord";
@@ -113,13 +115,25 @@ function CommunityIcon({ state }: { state: CommunityState }) {
 // ---- Overview (metadata + images + dissolve) -----------------------------
 
 function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: CommunityState; isOwner: boolean; onClose: () => void }) {
+  const client = useConcord();
   const community = useCommunity(cid);
+  const navigate = useNavigate();
   const [name, setName] = useState(state.metadata?.name ?? state.material.name);
   const [description, setDescription] = useState(state.metadata?.description ?? "");
   const [blossom, setBlossom] = useState((state.metadata?.blossom_servers ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
   const canManageMetadata = community?.canDo(PERM.MANAGE_METADATA) ?? false;
+
+  // Leaving is available to every member (no permission needed) — tombstone the
+  // membership, purge the community's decrypted rumor caches, then leave settings.
+  async function leave() {
+    await client.leave(cid);
+    await deleteCommunityRumorCache(cid);
+    onClose();
+    navigate("/");
+  }
 
   async function save() {
     setBusy(true);
@@ -178,18 +192,40 @@ function OverviewPage({ cid, state, isOwner, onClose }: { cid: string; state: Co
         <label className="label text-xs font-semibold uppercase opacity-70">Community ID</label>
         <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70">{state.material.community_id}</div>
       </div>
-      {isOwner && (
-        <button
-          className="btn btn-error"
-          onClick={async () => {
-            if (confirm("Dissolve this community permanently? This cannot be undone.")) {
-              await community?.dissolve();
-              onClose();
-            }
-          }}
-        >
-          Dissolve community
+      <div className="flex flex-wrap gap-3">
+        <button className="btn btn-error btn-outline gap-2" onClick={() => setLeaveOpen(true)}>
+          <DoorOpen size={18} />
+          Leave community
         </button>
+        {isOwner && (
+          <button
+            className="btn btn-error"
+            onClick={async () => {
+              if (confirm("Dissolve this community permanently? This cannot be undone.")) {
+                await community?.dissolve();
+                onClose();
+              }
+            }}
+          >
+            Dissolve community
+          </button>
+        )}
+      </div>
+
+      {leaveOpen && (
+        <ConfirmModal
+          title={`Leave ${name}?`}
+          danger
+          confirmLabel="Leave community"
+          onClose={() => setLeaveOpen(false)}
+          onConfirm={leave}
+          body={
+            <p>
+              You'll be removed from <strong>{name}</strong> and it will disappear from your list. You
+              can rejoin later with an invite link.
+            </p>
+          }
+        />
       )}
     </>
   );
