@@ -50,6 +50,7 @@ import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { ClientStatusRailIndicator, CommunityStatusDot, CommunityStatusBadges } from "../components/ClientStatus";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
@@ -222,8 +223,11 @@ function Shell() {
         >
           <Plus size={24} />
         </button>
+        <div className="mt-auto shrink-0">
+          <ClientStatusRailIndicator />
+        </div>
         <button
-          className="w-12 h-12 shrink-0 mt-auto rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
+          className="w-12 h-12 shrink-0 rounded-3xl bg-base-200 flex items-center justify-center text-base-content/60 overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content"
           title="Settings"
           onClick={() => setParam("settings", "profile")}
         >
@@ -388,17 +392,20 @@ function RailIcon({ state, active, onClick }: { state: CommunityState; active: b
   const name = state.metadata?.name ?? state.material.name;
   const iconUrl = useDecryptedImage(state.metadata?.icon);
   return (
-    <button
-      className={`w-12 h-12 shrink-0 relative overflow-hidden flex items-center justify-center font-semibold text-base-content text-lg bg-base-200 transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
-        active
-          ? "rounded-2xl before:content-[''] before:absolute before:-left-4 before:w-2 before:h-10 before:rounded-r before:bg-base-content"
-          : "rounded-3xl"
-      }`}
-      title={name}
-      onClick={onClick}
-    >
-      {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
-    </button>
+    <div className="relative w-12 h-12 shrink-0">
+      <button
+        className={`w-full h-full relative overflow-hidden flex items-center justify-center font-semibold text-base-content text-lg bg-base-200 transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+          active
+            ? "rounded-2xl before:content-[''] before:absolute before:-left-4 before:w-2 before:h-10 before:rounded-r before:bg-base-content"
+            : "rounded-3xl"
+        }`}
+        title={name}
+        onClick={onClick}
+      >
+        {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+      </button>
+      <CommunityStatusDot cid={state.material.community_id} />
+    </div>
   );
 }
 
@@ -433,7 +440,10 @@ function Sidebar({
           bannerUrl ? "-mt-5 bg-gradient-to-b from-transparent to-base-200" : ""
         }`}
       >
-        <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
+        <div className="min-w-0 flex flex-col">
+          <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
+          <CommunityStatusBadges cid={state.material.community_id} />
+        </div>
         <div className="flex items-center gap-1 shrink-0">
           <button className="btn btn-ghost btn-sm btn-circle" title="Community settings" onClick={onSettings}>
             <Settings size={18} />
