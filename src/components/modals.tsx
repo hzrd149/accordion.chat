@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
@@ -7,7 +7,11 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { UserAvatar, UserName } from "./User";
 import { rumorMs } from "applesauce-concord/helpers";
+import { PERM } from "applesauce-concord";
+import type { ConcordInviteLink } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
+
+const NO_INVITES: ConcordInviteLink[] = [];
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
@@ -323,44 +327,109 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   );
 }
 
+/**
+ * Invite-link management for one community. The user's links live in their
+ * private CORD-05 Invite List (kind 13303), which the client's invite manager
+ * owns — so links minted on another device show up here too, and revoking one
+ * both tombstones the bundle and unregisters it from the community.
+ */
 export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void }) {
+  const client = useConcord();
   const community = useCommunity(cid);
-  const [link, setLink] = useState("");
-  const [busy, setBusy] = useState(true);
+  const live = use$(client.invites.live$) ?? NO_INVITES;
+  const invites = live.filter((i) => i.communityId === cid);
+  const canCreate = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const started = useRef(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Wait for the community engine to resolve, then mint one link per modal open.
-    if (started.current || !community) return;
-    started.current = true;
-    (async () => {
-      try {
-        const base = window.location.origin;
-        const invite = await community.admin.invites.create({ base });
-        setLink(invite.url);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(false);
-      }
-    })();
-  }, [community]);
+  async function create() {
+    setBusy(true);
+    setError("");
+    try {
+      // Publishes the bundle, registers the link into the community (marking it
+      // link-joinable), and saves it to the private Invite List.
+      await client.invites.create(cid, { base: window.location.origin, label: label.trim() || undefined });
+      setLabel("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(token: string) {
+    setRevoking(token);
+    setError("");
+    try {
+      await client.invites.revoke(token);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  async function copy(url: string, token: string) {
+    await navigator.clipboard.writeText(url);
+    setCopied(token);
+    setTimeout(() => setCopied((c) => (c === token ? null : c)), 1500);
+  }
 
   return (
     <Modal onClose={onClose}>
       <h2 className="text-lg font-bold">Invite people</h2>
-      <p className="text-sm opacity-60 mb-5">Anyone with this link can join. The link carries no keys — those live encrypted on relays.</p>
+      <p className="text-sm opacity-60 mb-5">Anyone with a link can join. Links carry no keys — those live encrypted on relays.</p>
       {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
-      {busy ? (
-        <p className="flex items-center gap-2"><span className="loading loading-spinner loading-sm" />Minting invite…</p>
+
+      {invites.length === 0 ? (
+        <p className="text-sm opacity-70 mb-4">No active invite links yet.</p>
       ) : (
-        <>
-          <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70 mb-3">{link}</div>
-          <button className="btn btn-primary btn-block" onClick={() => navigator.clipboard.writeText(link)}>
-            Copy link
+        <div className="flex flex-col gap-2 mb-4">
+          {invites.map((invite) => (
+            <div key={invite.token} className="rounded-box bg-base-200 border border-base-300 p-3">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="font-medium text-sm">{invite.label || "Untitled link"}</span>
+                <span className="text-xs opacity-60">{new Date(invite.createdAt * 1000).toLocaleDateString()}</span>
+                <div className="ml-auto flex gap-1.5">
+                  <button className="btn btn-ghost btn-xs" onClick={() => copy(invite.url, invite.token)}>
+                    {copied === invite.token ? "Copied ✓" : "Copy"}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-xs text-error"
+                    disabled={revoking === invite.token}
+                    onClick={() => revoke(invite.token)}
+                  >
+                    {revoking === invite.token ? "Revoking…" : "Revoke"}
+                  </button>
+                </div>
+              </div>
+              <div className="font-mono text-[11px] break-all opacity-60">{invite.url}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canCreate ? (
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="label text-xs font-semibold uppercase opacity-70">Label (optional)</label>
+            <input
+              className="input input-bordered w-full"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Reddit, Twitter…"
+              maxLength={64}
+            />
+          </div>
+          <button className="btn btn-primary" onClick={create} disabled={busy}>
+            {busy ? "Minting…" : "New link"}
           </button>
-        </>
+        </div>
+      ) : (
+        <p className="text-sm opacity-70">You need the Create Invites permission to mint a link.</p>
       )}
     </Modal>
   );
