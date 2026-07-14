@@ -862,40 +862,30 @@ function ChatView({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = () =>
-      setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX);
+    // The list is column-reverse, so scrollTop is 0 at the newest message and
+    // grows negative going back through history.
+    const onScroll = () => setAtBottom(-el.scrollTop < BOTTOM_THRESHOLD_PX);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Position the channel on entry, then follow it.
+  // The list is column-reverse, so entering a channel already lands on the
+  // newest message and stays there as messages arrive — no effect needed. Only
+  // the unread divider has to be scrolled to.
   const positionedFor = useRef("");
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-
-    if (positionedFor.current !== channelId) {
-      // Wait for history: a channel's rumors hydrate from IndexedDB and stream
-      // in from relays, so the first render is routinely empty.
-      if (messages.length === 0) return;
-      positionedFor.current = channelId;
-      const target = dividerId
-        ? el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`)
-        : null;
-      if (target) {
-        // Land on the divider with a little history above it for context,
-        // rather than flush against the top edge.
-        el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
-      } else {
-        el.scrollTop = el.scrollHeight;
-      }
-      return;
-    }
-
-    // Follow new messages only when already at the bottom — otherwise an
-    // incoming message would yank the user out of the history they're reading.
-    if (atBottom) el.scrollTop = el.scrollHeight;
-  }, [channelId, messages, dividerId, atBottom]);
+    if (!el || positionedFor.current === channelId) return;
+    // Wait for history: a channel's rumors hydrate from IndexedDB and stream
+    // in from relays, so the first render is routinely empty.
+    if (messages.length === 0) return;
+    positionedFor.current = channelId;
+    if (!dividerId) return;
+    const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`);
+    // Land on the divider with a little history above it for context, rather
+    // than flush against the top edge.
+    if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
+  }, [channelId, messages, dividerId]);
 
   // Switching channels clears the shared reply target (the composer resets its
   // own draft via its `key`). Done during render — the documented alternative to
@@ -1046,37 +1036,44 @@ const MessageList = memo(function MessageList({
 
   return (
     <div className="flex-1 flex min-h-0">
-      <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 flex flex-col" ref={ref}>
-        <div className="flex-1" />
-        {messages.length === 0 && (
+      {/* col-reverse puts the scroll origin at the newest message: the view starts
+        * pinned to the bottom and stays there as messages arrive, with no scroll
+        * effect and no jump. Short history packs against the bottom on its own, so
+        * no spacer either. The inner wrapper is one flex item, so groups still read
+        * oldest-to-newest inside it. */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 flex flex-col-reverse" ref={ref}>
+        {messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
             <div className="flex items-center justify-center"><Hand size={48} /></div>
             <div>This is the beginning of #{channelName}. Say hello!</div>
           </div>
-        )}
-        {groups.map((group) => (
-          <div className="mt-3.5 first-of-type:mt-0" key={group[0].id}>
-            {group.map((m, i) => (
-              <Fragment key={m.id}>
-                {m.id === dividerId && <NewMessagesDivider />}
-              <Message
-                m={m}
-                showHeader={i === 0 || Boolean(m.replyTo)}
-                replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
-                ownerPubkey={ownerPubkey}
-                myPubkey={myPubkey}
-                canWrite={canWrite}
-                community={community}
-                channelId={channelId}
-                favorites={favorites}
-                quickReactions={quickReactions}
-                onReply={onReply}
-                onThread={onThread}
-              />
-              </Fragment>
+        ) : (
+          <div>
+            {groups.map((group) => (
+              <div className="mt-3.5 first-of-type:mt-0" key={group[0].id}>
+                {group.map((m, i) => (
+                  <Fragment key={m.id}>
+                    {m.id === dividerId && <NewMessagesDivider />}
+                    <Message
+                      m={m}
+                      showHeader={i === 0 || Boolean(m.replyTo)}
+                      replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
+                      ownerPubkey={ownerPubkey}
+                      myPubkey={myPubkey}
+                      canWrite={canWrite}
+                      community={community}
+                      channelId={channelId}
+                      favorites={favorites}
+                      quickReactions={quickReactions}
+                      onReply={onReply}
+                      onThread={onThread}
+                    />
+                  </Fragment>
+                ))}
+              </div>
             ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
