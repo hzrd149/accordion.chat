@@ -42,6 +42,7 @@ import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
 import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
+import { useUnreadCounts, useMarkRead, type ChannelUnread } from "../chat/useUnread";
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
 import { Login } from "./Login";
 import {
@@ -68,7 +69,7 @@ import { useMentionCandidates, useMentionSearch, detectMention, type MentionCand
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
 import type { ChatMessage } from "../chat/fold";
-import type { CommunityState, Role, ConcordCommunity } from "applesauce-concord";
+import type { ChannelMetadata, CommunityState, Role, ConcordCommunity } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
 import { kinds } from "nostr-tools";
 
@@ -492,6 +493,55 @@ function RailIcon({ state, active, onClick }: { state: CommunityState; active: b
   );
 }
 
+// One text-channel row. An unread channel reads at full contrast and semibold
+// (an unselected read one is dimmed), with the count as a trailing pill —
+// tinted `error` when something in it mentions you, so a mention is findable
+// without reading every badge.
+function ChannelRow({
+  channel,
+  selected,
+  unread,
+  onSelect,
+}: {
+  channel: ChannelMetadata;
+  selected: boolean;
+  unread: ChannelUnread | undefined;
+  onSelect: () => void;
+}) {
+  const count = unread?.count ?? 0;
+  const has = count > 0;
+  return (
+    <button
+      data-channel-row={channel.name}
+      className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left mb-px ${
+        selected
+          ? "bg-base-300 text-base-content font-medium"
+          : has
+            ? "text-base-content font-semibold hover:bg-base-300"
+            : "text-base-content/60 font-medium hover:bg-base-300 hover:text-base-content"
+      }`}
+      onClick={onSelect}
+    >
+      <span className="inline-flex items-center text-base-content/60">
+        {channel.private ? <Lock size={16} /> : <Hash size={16} />}
+      </span>
+      <span className="truncate">{channel.name}</span>
+      {has && (
+        <span
+          data-unread-badge
+          data-mention={unread?.mention ? "true" : "false"}
+          className={`ml-auto shrink-0 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center pointer-events-none ${
+            unread?.mention ? "bg-error text-error-content" : "bg-base-content/20 text-base-content"
+          }`}
+          title={`${count} unread message${count === 1 ? "" : "s"}${unread?.mention ? ", mentions you" : ""}`}
+        >
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function Sidebar({
   state,
   selectedChannel,
@@ -514,6 +564,20 @@ function Sidebar({
   const canManageChannels = community?.canDo(PERM.MANAGE_CHANNELS) ?? false;
   const canInvite = community?.canDo(PERM.CREATE_INVITE) ?? false;
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
+
+  // Only text channels carry chat, so only they can be unread — and counting a
+  // voice channel would open a rumor store (and its IndexedDB database) for a
+  // plane that never holds messages.
+  const textChannelIds = useMemo(
+    () => state.channels.filter((c) => !c.voice).map((c) => c.channel_id),
+    [state.channels],
+  );
+  const unread = useUnreadCounts(
+    community,
+    state.material.community_id,
+    textChannelIds,
+    account?.pubkey ?? "",
+  );
 
   return (
     <div className="w-60 bg-base-200 flex flex-col shrink-0 max-md:h-full">
@@ -558,18 +622,13 @@ function Sidebar({
               onSelect={() => onSelectChannel(ch.channel_id)}
             />
           ) : (
-            <button
+            <ChannelRow
               key={ch.channel_id}
-              className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium mb-px ${
-                ch.channel_id === selectedChannel
-                  ? "bg-base-300 text-base-content"
-                  : "text-base-content/60 hover:bg-base-300 hover:text-base-content"
-              }`}
-              onClick={() => onSelectChannel(ch.channel_id)}
-            >
-              <span className="inline-flex items-center text-base-content/60">{ch.private ? <Lock size={16} /> : <Hash size={16} />}</span>
-              <span>{ch.name}</span>
-            </button>
+              channel={ch}
+              selected={ch.channel_id === selectedChannel}
+              unread={unread[ch.channel_id]}
+              onSelect={() => onSelectChannel(ch.channel_id)}
+            />
           ),
         )}
         {canInvite && !state.dissolved && (
@@ -771,6 +830,10 @@ function ChatView({
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [leaveChannelOpen, setLeaveChannelOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Messages are folded oldest → newest, so the tail is the read cursor.
+  const newestMs = messages.length ? messages[messages.length - 1].ms : 0;
+  useMarkRead(pubkey, cid, channelId, newestMs);
 
   // A private channel we actually hold the key for and don't own — the only case
   // where "Leave channel" (a local key-drop) is meaningful.
@@ -1801,7 +1864,7 @@ const Composer = memo(function Composer({
         <textarea
           ref={textareaRef}
           rows={1}
-          className="flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
+          className="composer-textarea flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
           placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
           value={text}
           onChange={(e) => {
