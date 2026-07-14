@@ -40,6 +40,7 @@ import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
+import { beginUploadBurst, uploadProgress$ } from "../lib/concord-uploader";
 import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
 import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
@@ -1775,6 +1776,16 @@ const Composer = memo(function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // What `sendMessage` is busy with, so a slow encrypt or Blossom upload reads as
+  // progress rather than a dead Send button. `upload` is only ours while we're the
+  // ones sending; once every file is up, the publish itself is all that's left.
+  const upload = use$(uploadProgress$);
+  const status = !sending
+    ? null
+    : upload && upload.done < upload.total
+      ? `${upload.phase === "encrypting" ? "Encrypting" : "Uploading"} file ${upload.done + 1} of ${upload.total}…`
+      : "Sending…";
+
   // @-mention menu: `mention` holds the active `@token` (query + `@` index);
   // `mentionIndex` is the keyboard-highlighted candidate.
   const candidates = useMentionCandidates(members);
@@ -1811,6 +1822,7 @@ const Composer = memo(function Composer({
 
   async function send() {
     const value = text.trim();
+    if (sending) return;
     if (!value && files.length === 0) return;
     const attach = files;
     const reply = replyTo;
@@ -1818,6 +1830,9 @@ const Composer = memo(function Composer({
     setMention(null);
     setFiles([]);
     setSending(true);
+    // Let the composer report the encrypt/upload leg of `sendMessage`; only this
+    // side knows the file count, since the uploader is handed one file at a time.
+    const endBurst = attach.length ? beginUploadBurst(attach.length) : null;
     try {
       await onSend(value, attach, reply);
     } catch (err) {
@@ -1826,6 +1841,7 @@ const Composer = memo(function Composer({
       setText(value);
       setFiles(attach);
     } finally {
+      endBurst?.();
       setSending(false);
     }
   }
@@ -1856,6 +1872,12 @@ const Composer = memo(function Composer({
               </button>
             </span>
           ))}
+        </div>
+      )}
+      {status && (
+        <div className="flex items-center gap-2 px-1 py-2 text-[13px] text-base-content/60" role="status" aria-live="polite">
+          <span className="loading loading-spinner loading-xs" />
+          {status}
         </div>
       )}
       <div className="relative flex items-center gap-1 bg-base-200 rounded-lg px-4 max-sm:px-2">
@@ -1965,9 +1987,24 @@ const Composer = memo(function Composer({
             }
           }}
         />
-        <button className="btn btn-primary btn-sm max-[380px]:btn-square" onClick={send} disabled={sending}>
-          <span className="max-[380px]:hidden">{sending ? "Sending…" : "Send"}</span>
-          <span className="hidden max-[380px]:inline">Go</span>
+        <button
+          className="btn btn-primary btn-sm max-[380px]:btn-square"
+          onClick={send}
+          disabled={sending || (!text.trim() && files.length === 0)}
+        >
+          {sending ? (
+            // The line above the input carries the phase; keep the label steady so
+            // the button doesn't resize on every step.
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              <span className="max-[380px]:hidden">Sending…</span>
+            </>
+          ) : (
+            <>
+              <span className="max-[380px]:hidden">Send</span>
+              <span className="hidden max-[380px]:inline">Go</span>
+            </>
+          )}
         </button>
       </div>
     </div>
