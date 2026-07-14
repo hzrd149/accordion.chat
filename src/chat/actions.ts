@@ -7,7 +7,6 @@
 // channel store) so NIP-22 root pointers propagate to nested replies, and let
 // `community.sendEvent` apply the channel/epoch/ms binding + wrap + publish.
 
-import type { NostrEvent } from "nostr-tools";
 import { CommentFactory } from "applesauce-common/factories";
 import type { Emoji } from "applesauce-common/helpers";
 import type { ConcordCommunity } from "applesauce-concord";
@@ -19,7 +18,7 @@ export async function sendThreadReply(
   text: string,
   emojis?: Emoji[],
 ): Promise<void> {
-  const parentEvent = community.channelStore(channelId).getEvent(parent.id) as NostrEvent | undefined;
+  const parentEvent = await community.channelStore(channelId).getEvent(parent.id);
   const target = parentEvent ?? { type: "event" as const, id: parent.id, kind: parent.kind, pubkey: parent.author };
   await community.sendEvent(channelId, CommentFactory.reply(target, text, { emojis }), {});
 }
