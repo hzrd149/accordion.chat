@@ -1597,76 +1597,81 @@ function ThreadView({
       >
         <ArrowLeft size={14} /> All threads
       </button>
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
-        <div className="flex gap-3 pb-3">
-          <UserAvatar pubkey={root.author} className="w-10 h-10 mt-0.5" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="font-semibold" style={{ color: colorFor(root.author) }}>
-                <UserName pubkey={root.author} />
-              </span>
-              <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
-            </div>
-            {root.deleted ? (
-              <div className="text-base-content/60 italic">(message deleted)</div>
-            ) : (
-              <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
-          <span className="shrink-0">
-            {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
-          </span>
-          <span className="h-px flex-1 bg-base-300" />
-        </div>
-
-        {comments.map((comment) => {
-          // Nested replies stay in one flat list; the chip names the parent so the
-          // shape of the conversation survives without indentation.
-          const parentComment = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
-          const replying = replyParent?.id === comment.id;
-          return (
-            <div
-              className={`group flex gap-3 -mx-2 px-2 py-1.5 rounded-lg ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
-              key={comment.id}
-            >
-              <UserAvatar pubkey={comment.author} className="w-8 h-8 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                {parentComment && (
-                  <div className="flex items-center gap-1 mb-0.5 text-[11px] text-base-content/50 min-w-0">
-                    <CornerDownRight size={11} className="shrink-0" />
-                    <span className="shrink-0">replying to</span>
-                    <span className="font-medium truncate" style={{ color: colorFor(parentComment.author) }}>
-                      <UserName pubkey={parentComment.author} />
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="font-semibold text-sm" style={{ color: colorFor(comment.author) }}>
-                    <UserName pubkey={comment.author} />
-                  </span>
-                  <span className="text-[11px] text-base-content/60">{clockTime(comment.ms)}</span>
-                </div>
-                {comment.deleted ? (
-                  <div className="text-base-content/60 italic">(message deleted)</div>
-                ) : (
-                  <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
-                )}
+      {/* col-reverse keeps the scroll anchored to the newest comment: the browser
+       * pins scrollTop to the reversed start, so new replies don't push the view.
+       * The inner wrapper is one flex item, so its content still reads top-down. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col-reverse">
+        <div>
+          <div className="flex gap-3 pb-3">
+            <UserAvatar pubkey={root.author} className="w-10 h-10 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="font-semibold" style={{ color: colorFor(root.author) }}>
+                  <UserName pubkey={root.author} />
+                </span>
+                <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
               </div>
-              {canWrite && (
-                <button
-                  className="btn btn-ghost btn-xs btn-circle self-start shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
-                  title="Reply to this comment"
-                  onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
-                >
-                  <Reply size={14} />
-                </button>
+              {root.deleted ? (
+                <div className="text-base-content/60 italic">(message deleted)</div>
+              ) : (
+                <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
               )}
             </div>
-          );
-        })}
+          </div>
+
+          <div className="flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+            <span className="shrink-0">
+              {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
+            </span>
+            <span className="h-px flex-1 bg-base-300" />
+          </div>
+
+          {comments.map((comment) => {
+            // Nested replies stay in one flat list; the chip names the parent so the
+            // shape of the conversation survives without indentation.
+            const parentComment = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
+            const replying = replyParent?.id === comment.id;
+            return (
+              <div
+                className={`group flex gap-3 -mx-2 px-2 py-1.5 rounded-lg ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
+                key={comment.id}
+              >
+                <UserAvatar pubkey={comment.author} className="w-8 h-8 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  {parentComment && (
+                    <div className="flex items-center gap-1 mb-0.5 text-[11px] text-base-content/50 min-w-0">
+                      <CornerDownRight size={11} className="shrink-0" />
+                      <span className="shrink-0">replying to</span>
+                      <span className="font-medium truncate" style={{ color: colorFor(parentComment.author) }}>
+                        <UserName pubkey={parentComment.author} />
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-semibold text-sm" style={{ color: colorFor(comment.author) }}>
+                      <UserName pubkey={comment.author} />
+                    </span>
+                    <span className="text-[11px] text-base-content/60">{clockTime(comment.ms)}</span>
+                  </div>
+                  {comment.deleted ? (
+                    <div className="text-base-content/60 italic">(message deleted)</div>
+                  ) : (
+                    <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
+                  )}
+                </div>
+                {canWrite && (
+                  <button
+                    className="btn btn-ghost btn-xs btn-circle self-start shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                    title="Reply to this comment"
+                    onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
+                  >
+                    <Reply size={14} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
       {canWrite && (
         <ThreadComposer
