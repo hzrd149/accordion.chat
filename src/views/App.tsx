@@ -88,6 +88,10 @@ export function App() {
         <CallProvider>
           <Routes>
             <Route path="/" element={<Shell />} />
+            {/* Where a minted invite link points (CORD-05 §2:
+                `<base>/invite/<naddr>#<token>`). Without this the catch-all below
+                would bounce a shared link to "/" and silently drop the token. */}
+            <Route path="/invite/:naddr" element={<Shell />} />
             <Route path="/invites" element={<Shell />} />
             <Route path="/settings" element={<Shell />} />
             <Route path="/settings/:page" element={<Shell />} />
@@ -131,6 +135,10 @@ function Shell() {
   // routes rendered in the main area (the community rail stays put), not
   // full-screen overlays.
   const onInvites = useLocation().pathname === "/invites";
+  // A followed invite link. The unlock token rides the URL *fragment*, which no
+  // router param carries, so hand the join flow the whole href rather than the
+  // :naddr — the bundle is useless without the token.
+  const inviteMatch = useMatch("/invite/:naddr");
   const settingsMatch = useMatch("/settings/:page");
   const settingsRootMatch = useMatch("/settings");
   const onSettings = Boolean(settingsMatch || settingsRootMatch);
@@ -420,8 +428,12 @@ function Shell() {
           onCreated={(id) => navigate(`/c/${id}`)}
         />
       )}
-      {modal === "join" && (
-        <JoinModal onClose={() => setModal(null)} onJoined={(id) => navigate(`/c/${id}`)} />
+      {(modal === "join" || inviteMatch) && (
+        <JoinModal
+          initialLink={inviteMatch ? window.location.href : ""}
+          onClose={() => (inviteMatch ? navigate("/") : setModal(null))}
+          onJoined={(id) => navigate(`/c/${id}`)}
+        />
       )}
       {modal === "channel" && activeState && (
         <CreateChannelModal cid={activeState.material.community_id} onClose={() => setModal(null)} />

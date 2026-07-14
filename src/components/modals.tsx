@@ -181,9 +181,17 @@ export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => vo
   );
 }
 
-export function JoinModal({ onClose, onJoined }: { onClose: () => void; onJoined: (id: string) => void }) {
+export function JoinModal({
+  initialLink = "",
+  onClose,
+  onJoined,
+}: {
+  initialLink?: string;
+  onClose: () => void;
+  onJoined: (id: string) => void;
+}) {
   const client = useConcord();
-  const [link, setLink] = useState("");
+  const [link, setLink] = useState(initialLink);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // Proactively fetch the invite bundle as the link is entered, so we can preview
