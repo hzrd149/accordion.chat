@@ -40,6 +40,7 @@ import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
+import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
 import { Login } from "./Login";
@@ -442,6 +443,7 @@ function Shell() {
                   await client.leave(cid);
                   // Purge the decrypted rumor caches for the community we left.
                   await deleteCommunityRumorCache(cid);
+                  clearCommunityReadState(pubkey, cid);
                   navigate("/");
                 } finally {
                   setLeaving(false);
