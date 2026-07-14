@@ -7,6 +7,7 @@ import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { useDevMode } from "../lib/dev-mode";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
+import { clearCommunityReadState } from "../lib/read-state";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
@@ -120,6 +121,7 @@ function CommunityIcon({ name, icon }: { name: string; icon: BlobPointer | undef
 
 function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean; onClose: () => void }) {
   const client = useConcord();
+  const account = useActiveAccount();
   const community = useCommunity(cid);
   const navigate = useNavigate();
   const metadata = use$(community?.metadata$);
@@ -133,10 +135,12 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   // Leaving is available to every member (no permission needed) — tombstone the
-  // membership, purge the community's decrypted rumor caches, then leave settings.
+  // membership, purge the community's decrypted rumor caches and read cursors
+  // (which are meaningless once the plaintext is gone), then leave settings.
   async function leave() {
     await client.leave(cid);
     await deleteCommunityRumorCache(cid);
+    if (account) clearCommunityReadState(account.pubkey, cid);
     onClose();
     navigate("/");
   }
