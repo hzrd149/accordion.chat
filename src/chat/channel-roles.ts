@@ -7,12 +7,12 @@
 // key on grant via `grantChannelAccess`, rekey on removal via `rotateChannel`).
 // These helpers derive that roster from folded Role + Grant editions.
 
-import type { CommunityState } from "applesauce-concord";
+import type { Role } from "applesauce-concord";
 
 /** The role_id of a private channel's membership role, or undefined if none has
  *  been minted yet (a channel created before this convention, or a public one). */
-export function channelRoleId(channelId: string, state: CommunityState): string | undefined {
-  return state.roles.find((r) => r.scope?.kind === "channel" && r.scope.channel_id === channelId)?.role_id;
+export function channelRoleId(channelId: string, roles: readonly Role[]): string | undefined {
+  return roles.find((r) => r.scope?.kind === "channel" && r.scope.channel_id === channelId)?.role_id;
 }
 
 /**
@@ -22,12 +22,18 @@ export function channelRoleId(channelId: string, state: CommunityState): string 
  * possession — but since grants and key rotations are kept in step, they track
  * each other. Also the deterministic `keep` set for a channel Rekey.
  */
-export function channelRoster(channelId: string, state: CommunityState): string[] {
-  const holders = new Set<string>([state.material.owner]);
-  const rid = channelRoleId(channelId, state);
+export function channelRoster(
+  channelId: string,
+  owner: string,
+  roles: readonly Role[],
+  members: ReadonlySet<string>,
+  grants: ReadonlyMap<string, string[]>,
+): string[] {
+  const holders = new Set<string>([owner]);
+  const rid = channelRoleId(channelId, roles);
   if (rid) {
-    for (const member of state.members) {
-      if ((state.grants.get(member) ?? []).includes(rid)) holders.add(member);
+    for (const member of members) {
+      if ((grants.get(member) ?? []).includes(rid)) holders.add(member);
     }
   }
   return [...holders];
