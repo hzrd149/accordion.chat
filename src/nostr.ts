@@ -6,6 +6,8 @@
 import "applesauce-concord";
 import { EventStore } from "applesauce-core";
 import { persistEventsToCache } from "applesauce-core/helpers";
+import { castUser } from "applesauce-common/casts";
+import { distinctUntilChanged, map, of, shareReplay, startWith, switchMap } from "rxjs";
 import { RelayPool } from "applesauce-relay";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
@@ -93,23 +95,54 @@ export const CONCORD_SIGNER_PERMISSIONS = [
 // Indexer / lookup relays: aggregate kind 0 (profiles) and kind 10002 (relay
 // lists) for the whole network, so profile + relay-list discovery works for any
 // pubkey we have no relay hint for. Overridable via VITE_LOOKUP_RELAYS.
-export const LOOKUP_RELAYS = import.meta.env.VITE_LOOKUP_RELAYS?.split(",")
+export const LOOKUP_RELAYS: string[] = import.meta.env.VITE_LOOKUP_RELAYS?.split(",")
 	.map((r: string) => r.trim())
 	.filter(Boolean) ?? ["wss://purplepag.es", "wss://index.hzrd149.com"];
+
+export const accounts = new AccountManager();
+registerCommonAccountTypes(accounts);
+
+// The active user's own lookup relays (NIP-51 kind 10086), falling back to the
+// defaults above when they have no list — or no list yet.
+//
+// The loader consumes this via `unwrap` (applesauce-loaders), which is
+// `pipe(take(1), switchMap(...))`: it resubscribes and snapshots a single value
+// per request. Two consequences:
+//
+//   - This must emit synchronously on subscribe or a load would hang waiting
+//     for a first value. It does: reading lookupRelayList$ is itself a store
+//     miss (which asks the loader for the 10086 event — the bootstrap cycle),
+//     and a store miss emits `undefined` synchronously, so the fallback below
+//     resolves and that fetch goes out over the defaults. `startWith` makes the
+//     first value explicit rather than resting on that store behavior.
+//   - `shareReplay(1)` must NOT refCount (hence the default, not the options
+//     form). Requests unsubscribe after take(1); a refCounted share would tear
+//     down and replay the first value on the next request, pinning every load
+//     to the defaults even after the user's list arrived.
+const lookupRelays$ = accounts.active$.pipe(
+	switchMap((account) =>
+		account
+			? castUser(account.pubkey, eventStore).lookupRelayList$.pipe(
+					// Public relays only — `hidden` needs an explicit signer unlock.
+					map((list) => (list?.relays.length ? list.relays : LOOKUP_RELAYS)),
+					startWith(LOOKUP_RELAYS),
+				)
+			: of(LOOKUP_RELAYS),
+	),
+	distinctUntilChanged((a, b) => a.length === b.length && a.every((relay, i) => relay === b[i])),
+	shareReplay(1),
+);
 
 // Wire the EventStore's automatic loader. On a store miss, any cast graph-walk
 // (user.profile$, user.outboxes$, eventStore.event/replaceable/addressable)
 // triggers this loader, which fetches by ID or address — following relay hints
-// first, then falling back to the indexer relays above — and adds the result
+// first, then falling back to the lookup relays above — and adds the result
 // back to the store so reactive queries resolve.
 createEventLoaderForStore(eventStore, pool, {
 	cacheRequest,
 	followRelayHints: true,
-	lookupRelays: LOOKUP_RELAYS,
+	lookupRelays: lookupRelays$,
 });
-
-export const accounts = new AccountManager();
-registerCommonAccountTypes(accounts);
 
 // NIP-44 registration for the self-encrypted Community/Invite lists (13302/13303)
 // is handled by applesauce-concord's register.ts (imported for its side effect at
