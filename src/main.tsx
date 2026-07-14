@@ -4,6 +4,7 @@ import { EventStoreProvider, AccountsProvider } from "applesauce-react/providers
 import { eventStore, accounts, loadAccounts } from "./nostr";
 import { App } from "./views/App";
 import "./index.css";
+import "yet-another-react-lightbox/styles.css";
 
 loadAccounts();
 

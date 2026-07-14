@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
 import { getPubkeyFromDecodeResult } from "applesauce-core/helpers";
+import Lightbox from "yet-another-react-lightbox";
 import { decryptToObjectURL } from "../lib/image";
 import type { MediaAttachment } from "applesauce-concord/helpers";
 import { UserName } from "./User";
@@ -16,6 +17,7 @@ const resolved = new Map<string, string>();
 
 /** A media attachment with a resolved URL (the only kind we render). */
 type UrlAttachment = MediaAttachment & { url: string };
+type ImageSlide = { src: string };
 
 // Gallery tile: square, cover-fit media; a lone last tile (odd count) spans the
 // full row and goes 16:9 via the last:odd variant (mirrors the old CSS rule).
@@ -27,47 +29,55 @@ function attKey(a: UrlAttachment): string {
   return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
 }
 
-/** Decrypt an attachment to an object URL (or pass through a plaintext URL). */
-function useAttachmentSrc(a: UrlAttachment): string | null {
-  // Plaintext URLs pass straight through; encrypted ones resolve through the
-  // module cache, which is the source of truth. `src` is derived from it each
-  // render; `bump` only re-renders once the async decrypt lands (in a callback),
-  // so nothing is set synchronously inside the effect.
-  const ck = a.encryption ? attKey(a) : null;
-  const cached = a.encryption ? resolved.get(ck!) ?? null : a.url;
+function attachmentSrc(a: UrlAttachment): string | null {
+  return a.encryption ? resolved.get(attKey(a)) ?? null : a.url;
+}
+
+/** Decrypt attachments to object URLs. Plaintext URLs pass straight through. */
+function useAttachmentSources(attachments: UrlAttachment[]) {
   const [, bump] = useState(0);
+  const encryptedKeys = useMemo(
+    () => attachments.filter((a) => a.encryption).map(attKey).join("\0"),
+    [attachments],
+  );
 
   useEffect(() => {
-    if (!ck || !a.encryption || resolved.has(ck)) return;
+    const encrypted = attachments.filter((a) => a.encryption);
+    if (encrypted.length === 0) return;
     let cancelled = false;
-    let promise = inflight.get(ck);
-    if (!promise) {
-      promise = decryptToObjectURL(a.url, a.encryption.key, a.encryption.nonce, {
-        hash: a.originalSha256,
-        mime: a.type,
-      });
-      inflight.set(ck, promise);
+    encrypted.forEach((a) => {
+      const ck = attKey(a);
+      if (!a.encryption || resolved.has(ck)) return;
+      let promise = inflight.get(ck);
+      if (!promise) {
+        promise = decryptToObjectURL(a.url, a.encryption.key, a.encryption.nonce, {
+          hash: a.originalSha256,
+          mime: a.type,
+        });
+        inflight.set(ck, promise);
+        promise
+          .then((u) => {
+            resolved.set(ck, u);
+            if (resolved.size > MAX_CACHED) {
+              const oldest = resolved.keys().next().value;
+              if (oldest !== undefined && oldest !== ck) resolved.delete(oldest);
+            }
+          })
+          .catch(() => inflight.get(ck) === promise && inflight.delete(ck));
+      }
+      // Re-render on settle (success or failure). Two-arg form so this subscriber
+      // handles its own rejection — `.finally` would leave it unhandled.
       promise
-        .then((u) => {
-          resolved.set(ck, u);
-          if (resolved.size > MAX_CACHED) {
-            const oldest = resolved.keys().next().value;
-            if (oldest !== undefined && oldest !== ck) resolved.delete(oldest);
-          }
-        })
-        .catch(() => inflight.get(ck) === promise && inflight.delete(ck));
-    }
-    // Re-render on settle (success or failure). Two-arg form so this subscriber
-    // handles its own rejection — `.finally` would leave it unhandled.
-    const rerender = () => !cancelled && bump((n) => n + 1);
-    promise.then(rerender, rerender);
+        .then(
+          () => !cancelled && bump((n) => n + 1),
+          () => !cancelled && bump((n) => n + 1),
+        );
+    });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ck]);
-
-  return cached;
+  }, [encryptedKeys]);
 }
 
 /** Images and videos tile into a gallery grid; audio/files always stand alone. */
@@ -76,8 +86,22 @@ function isGalleryMedia(att: UrlAttachment): boolean {
   return kind === "image" || kind === "video" || kind === undefined;
 }
 
-function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolean }) {
-  const src = useAttachmentSrc(att);
+function isImageMedia(att: UrlAttachment): boolean {
+  const kind = att.type?.split("/")[0];
+  return kind === "image" || kind === undefined;
+}
+
+function AttachmentView({
+  att,
+  src,
+  gallery,
+  onImageOpen,
+}: {
+  att: UrlAttachment;
+  src: string | null;
+  gallery?: boolean;
+  onImageOpen?: (src: string) => void;
+}) {
   const kind = att.type?.split("/")[0];
 
   if (!src)
@@ -109,7 +133,12 @@ function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolea
     return <audio className="block mt-1.5 rounded-lg w-full max-w-[320px] h-[40px]" src={src} controls />;
   if (kind === "image" || kind === undefined) {
     return (
-      <a href={src} target="_blank" rel="noreferrer" className={gallery ? TILE : undefined}>
+      <button
+        type="button"
+        className={gallery ? `${TILE} appearance-none p-0 border-0` : "block appearance-none p-0 border-0 bg-transparent"}
+        aria-label="Open image"
+        onClick={() => onImageOpen?.(src)}
+      >
         <img
           className={
             gallery
@@ -120,7 +149,7 @@ function AttachmentView({ att, gallery }: { att: UrlAttachment; gallery?: boolea
           alt=""
           loading="lazy"
         />
-      </a>
+      </button>
     );
   }
   // Non-previewable file — offer a download.
@@ -156,8 +185,10 @@ export const MessageContent = memo(function MessageContent({
     () => attachments.filter((a): a is UrlAttachment => Boolean(a.url)),
     [attachments],
   );
+  useAttachmentSources(withUrl);
   const byUrl = useMemo(() => new Map(withUrl.map((a) => [a.url, a])), [withUrl]);
   const rendered = new Set<string>();
+  const [lightbox, setLightbox] = useState<{ slides: ImageSlide[]; index: number } | null>(null);
 
   // Build an interleaved list of text nodes and media attachments; a second pass
   // coalesces consecutive runs of image/video media into a gallery grid.
@@ -234,14 +265,36 @@ export const MessageContent = memo(function MessageContent({
   const flushRun = () => {
     if (run.length === 0) return;
     if (run.length === 1) {
-      out.push(<AttachmentView key={`m${key++}`} att={run[0]} />);
+      const att = run[0];
+      out.push(
+        <AttachmentView
+          key={`m${key++}`}
+          att={att}
+          src={attachmentSrc(att)}
+          onImageOpen={(src) => setLightbox({ slides: [{ src }], index: 0 })}
+        />,
+      );
     } else {
       const group = run;
+      const imageSlides = () => group.filter(isImageMedia).map(attachmentSrc).filter((src): src is string => Boolean(src));
       out.push(
         <div className="grid grid-cols-2 gap-1 mt-1.5 max-w-[min(420px,100%)]" data-count={Math.min(group.length, 4)} key={`g${key++}`}>
-          {group.map((att, j) => (
-            <AttachmentView key={j} att={att} gallery />
-          ))}
+          {group.map((att, j) => {
+            const src = attachmentSrc(att);
+            return (
+              <AttachmentView
+                key={j}
+                att={att}
+                src={src}
+                gallery
+                onImageOpen={(openedSrc) => {
+                  const slides = imageSlides().map((src) => ({ src }));
+                  const index = Math.max(0, slides.findIndex((slide) => slide.src === openedSrc));
+                  setLightbox({ slides, index });
+                }}
+              />
+            );
+          })}
         </div>,
       );
     }
@@ -252,11 +305,31 @@ export const MessageContent = memo(function MessageContent({
       run.push(it.media);
     } else {
       flushRun();
-      if ("media" in it) out.push(<AttachmentView key={`m${key++}`} att={it.media} />);
-      else out.push(it.node);
+      if ("media" in it) {
+        const att = it.media;
+        out.push(
+          <AttachmentView
+            key={`m${key++}`}
+            att={att}
+            src={attachmentSrc(att)}
+            onImageOpen={(src) => setLightbox({ slides: [{ src }], index: 0 })}
+          />,
+        );
+      } else out.push(it.node);
     }
   }
   flushRun();
 
-  return <div className="whitespace-pre-wrap break-words text-base-content">{out}</div>;
+  return (
+    <>
+      <div className="whitespace-pre-wrap break-words text-base-content">{out}</div>
+      <Lightbox
+        open={Boolean(lightbox)}
+        close={() => setLightbox(null)}
+        index={lightbox?.index ?? 0}
+        slides={lightbox?.slides ?? []}
+        controller={{ closeOnBackdropClick: true }}
+      />
+    </>
+  );
 });
