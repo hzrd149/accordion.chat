@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ArrowLeft,
@@ -42,7 +42,7 @@ import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
 import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
-import { useUnreadCounts, useMarkRead, type ChannelUnread } from "../chat/useUnread";
+import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
 import { Login } from "./Login";
 import {
@@ -72,6 +72,9 @@ import type { ChatMessage } from "../chat/fold";
 import type { ChannelMetadata, CommunityState, Role, ConcordCommunity } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
 import { kinds } from "nostr-tools";
+
+/** How close to the bottom still counts as "following the conversation" (px). */
+const BOTTOM_THRESHOLD_PX = 80;
 
 /** NIP-22 comment kind — the app's thread replies (rooted on chat messages). */
 const COMMENT_KIND = 1111;
@@ -833,7 +836,9 @@ function ChatView({
 
   // Messages are folded oldest → newest, so the tail is the read cursor.
   const newestMs = messages.length ? messages[messages.length - 1].ms : 0;
-  useMarkRead(pubkey, cid, channelId, newestMs);
+  const dividerId = useNewMessagesDivider(pubkey, cid, channelId, messages);
+  const [atBottom, setAtBottom] = useState(true);
+  useMarkRead(pubkey, cid, channelId, newestMs, atBottom);
 
   // A private channel we actually hold the key for and don't own — the only case
   // where "Leave channel" (a local key-drop) is meaningful.
@@ -851,10 +856,46 @@ function ChatView({
     [favorites],
   );
 
+  // Track whether the newest message is on screen. This gates both the
+  // follow-the-conversation scroll below and the mark-read effect above, so
+  // reading history is never interrupted by someone else posting.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+    if (!el) return;
+    const onScroll = () =>
+      setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Position the channel on entry, then follow it.
+  const positionedFor = useRef("");
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (positionedFor.current !== channelId) {
+      // Wait for history: a channel's rumors hydrate from IndexedDB and stream
+      // in from relays, so the first render is routinely empty.
+      if (messages.length === 0) return;
+      positionedFor.current = channelId;
+      const target = dividerId
+        ? el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`)
+        : null;
+      if (target) {
+        // Land on the divider with a little history above it for context,
+        // rather than flush against the top edge.
+        el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
+      return;
+    }
+
+    // Follow new messages only when already at the bottom — otherwise an
+    // incoming message would yank the user out of the history they're reading.
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }, [channelId, messages, dividerId, atBottom]);
 
   // Switching channels clears the shared reply target (the composer resets its
   // own draft via its `key`). Done during render — the documented alternative to
@@ -929,6 +970,7 @@ function ChatView({
         canWrite={canWrite}
         community={community}
         channelId={channelId}
+        dividerId={dividerId}
         favorites={favorites}
         quickReactions={quickReactions}
         onReply={setReplyTo}
@@ -950,6 +992,17 @@ function ChatView({
   );
 }
 
+// The "new messages" line: where you stopped reading last visit. Frozen for the
+// duration of the visit by useNewMessagesDivider, so it stays put while you read.
+function NewMessagesDivider() {
+  return (
+    <div className="flex items-center gap-2 px-4 py-1 select-none" data-new-divider>
+      <div className="flex-1 h-px bg-error" />
+      <span className="text-error text-[10px] font-bold uppercase tracking-wide">New</span>
+    </div>
+  );
+}
+
 const MessageList = memo(function MessageList({
   ref,
   messages,
@@ -959,6 +1012,7 @@ const MessageList = memo(function MessageList({
   canWrite,
   community,
   channelId,
+  dividerId,
   favorites,
   quickReactions,
   onReply,
@@ -972,6 +1026,7 @@ const MessageList = memo(function MessageList({
   canWrite: boolean;
   community: ConcordCommunity | undefined;
   channelId: string;
+  dividerId: string | undefined;
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
   onReply: (r: ReplyTarget) => void;
@@ -995,8 +1050,9 @@ const MessageList = memo(function MessageList({
         {groups.map((group) => (
           <div className="mt-3.5 first-of-type:mt-0" key={group[0].id}>
             {group.map((m, i) => (
+              <Fragment key={m.id}>
+                {m.id === dividerId && <NewMessagesDivider />}
               <Message
-                key={m.id}
                 m={m}
                 showHeader={i === 0 || Boolean(m.replyTo)}
                 replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
@@ -1010,6 +1066,7 @@ const MessageList = memo(function MessageList({
                 onReply={onReply}
                 onThread={onThread}
               />
+              </Fragment>
             ))}
           </div>
         ))}
@@ -1099,6 +1156,7 @@ const Message = memo(function Message({
 
   return (
     <div
+      data-msg-id={m.id}
       className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 max-sm:gap-2.5 max-sm:px-3 ${showHeader ? "py-0.5" : "py-px"}`}
       tabIndex={-1}
       onPointerDown={startLongPress}

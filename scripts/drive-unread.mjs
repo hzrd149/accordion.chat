@@ -203,6 +203,24 @@ try {
   // them" — without this the badge checks pass vacuously on an empty channel.
   const bSees = await B.page.evaluate(() => document.body.innerText.includes("unread one"));
   check("B: actually received A's messages in #random", bSees, true);
+
+  // The divider must sit above the first message B had not seen, and must
+  // survive the channel being marked read on open — the whole point of freezing
+  // the cursor at entry rather than reading it live.
+  const divider = await B.page.evaluate(() => {
+    const d = document.querySelector("[data-new-divider]");
+    const all = [...document.querySelectorAll("[data-msg-id]")].map((m) =>
+      m.innerText.replace(/\n/g, " ⏎ ").slice(0, 70),
+    );
+    if (!d) return { next: null, all };
+    let el = d.nextElementSibling;
+    while (el && !el.getAttribute("data-msg-id")) el = el.nextElementSibling;
+    return { next: el?.innerText?.replace(/\n/g, " ⏎ ") ?? null, all };
+  });
+  console.log("B divider:", JSON.stringify(divider));
+  check("B: new-messages divider is shown above the first unread", Boolean(divider), true);
+  check("B: divider sits above 'unread one'", divider?.next?.includes("unread one") ?? false, true);
+
   const bCleared = await readSidebar(B.page);
   console.log("B sidebar after open:", JSON.stringify(bCleared));
   check(
