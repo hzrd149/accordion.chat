@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Lock } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
@@ -9,10 +9,11 @@ import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-previe
 import { UserAvatar, UserName } from "./User";
 import { rumorMs } from "applesauce-concord/helpers";
 import { PERM } from "applesauce-concord";
-import type { ConcordInviteLink } from "applesauce-concord";
+import type { ChannelMetadata, ConcordInviteLink } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
 
 const NO_INVITES: ConcordInviteLink[] = [];
+const NO_CHANNELS: ChannelMetadata[] = [];
 
 type ExpiryKey = "never" | "1d" | "7d" | "30d";
 
@@ -358,8 +359,16 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const live = use$(client.invites.live$) ?? NO_INVITES;
   const invites = live.filter((i) => i.communityId === cid);
   const canCreate = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
+  const allChannels = use$(community?.channels$) ?? NO_CHANNELS;
+  // Only channels we hold a key for can be granted — the package throws on an id
+  // that isn't in our material, and we couldn't hand over a key we don't have.
+  const grantable = allChannels.filter(
+    (c) => c.private && community?.material.channels.some((k) => k.id === c.channel_id),
+  );
+  const channelNames = new Map(allChannels.map((c) => [c.channel_id, c.name]));
   const [label, setLabel] = useState("");
   const [expiry, setExpiry] = useState<ExpiryKey>("never");
+  const [granted, setGranted] = useState<string[]>([]);
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -368,6 +377,10 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   // Captured once: the expiry countdowns are rendered against a fixed "now" so
   // render stays pure (see ExpiryBadge).
   const [now] = useState(() => Date.now());
+
+  function toggleChannel(id: string) {
+    setGranted((g) => (g.includes(id) ? g.filter((x) => x !== id) : [...g, id]));
+  }
 
   async function create() {
     setBusy(true);
@@ -380,9 +393,12 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
         base: window.location.origin,
         label: label.trim() || undefined,
         expiresAt: ttl ? Date.now() + ttl : undefined,
+        // Omitted when empty: a link grants no private channels unless asked.
+        channels: granted.length ? granted : undefined,
       });
       setLabel("");
       setExpiry("never");
+      setGranted([]);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -424,6 +440,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
             <InviteCard
               key={invite.token}
               invite={invite}
+              channelNames={channelNames}
               now={now}
               copied={copied === invite.token}
               revoking={revoking === invite.token}
@@ -486,6 +503,47 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
                 Past its expiry a link still previews the community, but joining refuses. Revoke a link to cut it off
                 immediately.
               </p>
+
+              {grantable.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 mt-5 mb-1 flex-wrap">
+                    <span className="label p-0">Private channels this link grants</span>
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => setGranted(grantable.map((c) => c.channel_id))}
+                      >
+                        All
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => setGranted([])}>
+                        None
+                      </button>
+                    </div>
+                  </div>
+                  <p className="opacity-70 mb-2">
+                    Anyone who follows the link gets the keys to whatever you tick — including messages sent before they
+                    joined. Grants nothing by default.
+                  </p>
+                  {grantable.map((c) => (
+                    <label
+                      key={c.channel_id}
+                      className="flex items-center gap-2.5 py-1.5 cursor-pointer"
+                      htmlFor={`grant-${c.channel_id}`}
+                    >
+                      <input
+                        id={`grant-${c.channel_id}`}
+                        type="checkbox"
+                        className="checkbox checkbox-sm"
+                        checked={granted.includes(c.channel_id)}
+                        onChange={() => toggleChannel(c.channel_id)}
+                      />
+                      <Lock size={14} className="opacity-60" />
+                      <span>{c.name}</span>
+                    </label>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -498,6 +556,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
 function InviteCard({
   invite,
+  channelNames,
   now,
   copied,
   revoking,
@@ -505,6 +564,7 @@ function InviteCard({
   onRevoke,
 }: {
   invite: ConcordInviteLink;
+  channelNames: Map<string, string>;
   now: number;
   copied: boolean;
   revoking: boolean;
@@ -516,6 +576,12 @@ function InviteCard({
       <div className="flex items-center gap-2.5 mb-2 flex-wrap">
         <span className="font-semibold">{invite.label || "Untitled link"}</span>
         <ExpiryBadge expiresAt={invite.expiresAt} now={now} />
+        {invite.channels?.length ? (
+          <span className="badge badge-warning gap-1">
+            <Lock size={12} />
+            Grants {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
+          </span>
+        ) : null}
       </div>
       <div className="font-mono break-all opacity-60 leading-relaxed mb-3">{invite.url}</div>
       <div className="flex items-center gap-2 flex-wrap">
