@@ -277,18 +277,18 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
     setBusy(true);
     try {
       const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
-      const channelId = await community.createChannel(slug, priv, voice);
+      const channelId = await community.admin.createChannel(slug, { private: priv, voice });
       // A private channel's membership is a channel-scoped role (CORD-04 §2, see
       // chat/channel-roles.ts): mint it and self-grant so the creator is roster
       // member #1. Public channels ride the community root — no role needed.
       if (priv && channelId && state) {
-        const roleId = await community.createRole(`#${slug}`, state.roles.length + 1, 0n, {
+        const roleId = await community.admin.createRole(`#${slug}`, state.roles.length + 1, 0n, {
           kind: "channel",
           channel_id: channelId,
         });
         const mine = new Set(state.grants.get(pubkey) ?? []);
         mine.add(roleId);
-        await community.grantRoles(pubkey, [...mine]);
+        await community.admin.grantRoles(pubkey, [...mine]);
       }
       onClose();
     } catch {
@@ -337,7 +337,8 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
     (async () => {
       try {
         const base = window.location.origin;
-        setLink(await community.createInvite(base));
+        const invite = await community.admin.invites.create({ base });
+        setLink(invite.url);
       } catch (e) {
         setError((e as Error).message);
       } finally {
