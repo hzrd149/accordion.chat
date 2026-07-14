@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams, useSearchParams } from "react-router";
 import {
+  ArrowLeft,
+  CornerDownRight,
   DoorOpen,
   Hand,
   Hash,
@@ -16,6 +18,7 @@ import {
   Phone,
   Plus,
   Reply,
+  Send,
   Settings,
   ShieldQuestion,
   SmilePlus,
@@ -63,7 +66,7 @@ import { MessageContent } from "../components/MessageContent";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
-import type { ChatMessage, ThreadComment } from "../chat/fold";
+import type { ChatMessage } from "../chat/fold";
 import type { CommunityState, Role, ConcordCommunity } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
 import { kinds } from "nostr-tools";
@@ -1296,6 +1299,10 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
  * threads/thread view. Opened from the sidebar (members) or the chat header
  * (threads); closed via its own close button. Replaces the old always-on
  * member list and the floating thread overlay.
+ *
+ * The panel separates from the chat by surface colour (base-200 against the
+ * chat's base-100) rather than a rule, and its contents avoid card chrome — the
+ * whole right side reads as one flat surface.
  */
 function SidePanel({
   mode,
@@ -1322,8 +1329,8 @@ function SidePanel({
 }) {
   const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
-    <aside className="w-75 shrink-0 flex flex-col bg-base-200 border-l border-base-300 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(340px,90vw)] max-md:shadow-2xl">
-      <div className="h-12 shrink-0 flex items-center justify-between gap-3 px-4 border-b border-base-300 shadow-sm">
+    <aside className="w-88 shrink-0 flex flex-col bg-base-200 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(400px,92vw)] max-md:shadow-2xl">
+      <div className="h-12 shrink-0 flex items-center justify-between gap-3 px-4">
         <span className="font-bold text-base-content">{title}</span>
         <button className="btn btn-ghost btn-sm btn-circle" title="Close panel" onClick={onClose}>
           <X size={18} />
@@ -1392,36 +1399,40 @@ function ThreadsPanel({
 }
 
 function ThreadIndex({ roots, onOpen }: { roots: ChatMessage[]; onOpen: (m: ChatMessage) => void }) {
+  if (roots.length === 0)
+    return (
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 text-center text-base-content/60 p-4">
+        <MessageSquare size={36} />
+        <div className="text-base-content font-bold">No threads yet.</div>
+        <p className="m-0 max-w-[220px] text-[13px]">Use “Reply in thread” on a message to start one.</p>
+      </div>
+    );
+
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4">
-      {roots.length === 0 ? (
-        <div className="h-full min-h-[260px] flex flex-col items-center justify-center gap-2 text-center text-base-content/60">
-          <MessageSquare size={36} />
-          <div className="text-base-content font-bold">No threads yet.</div>
-          <p className="m-0 max-w-[220px] text-[13px]">Use “Reply in thread” on a message to start one.</p>
-        </div>
-      ) : (
-        roots.map((root) => (
-          <button
-            className="w-full block p-3 mb-2 border border-base-300 rounded-xl bg-base-100 text-left hover:bg-base-200 hover:border-primary/50"
-            key={root.id}
-            onClick={() => onOpen(root)}
-          >
+    <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">
+      {roots.map((root) => (
+        <button
+          className="w-full flex gap-3 rounded-lg p-2 text-left hover:bg-base-300/60"
+          key={root.id}
+          onClick={() => onOpen(root)}
+        >
+          <UserAvatar pubkey={root.author} className="w-9 h-9 mt-0.5" />
+          <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2">
-              <span className="font-semibold" style={{ color: colorFor(root.author) }}>
+              <span className="font-semibold truncate" style={{ color: colorFor(root.author) }}>
                 <UserName pubkey={root.author} />
               </span>
-              <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
+              <span className="text-[11px] text-base-content/60 shrink-0 ml-auto">{clockTime(root.ms)}</span>
             </div>
-            <div className="mt-1.5 text-sm leading-snug whitespace-pre-wrap break-words">
-              {root.deleted ? "(message deleted)" : (root.edited ?? root.content).slice(0, 180) || "message"}
+            <div className="mt-0.5 text-sm leading-snug text-base-content/80 line-clamp-2 break-words">
+              {root.deleted ? "(message deleted)" : (root.edited ?? root.content) || "message"}
             </div>
-            <div className="mt-2 text-primary text-[13px] font-bold">
+            <div className="mt-1 text-primary text-[13px] font-semibold">
               {root.threadReplyCount} {root.threadReplyCount === 1 ? "reply" : "replies"}
             </div>
-          </button>
-        ))
-      )}
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
@@ -1445,22 +1456,8 @@ function ThreadView({
   const comments = useThread(community, channelId, root.id);
   const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
   const byId = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
+  // No explicit target means replying to the thread root itself.
   const parent = replyParent ?? { id: root.id, author: root.author, kind: kinds.ChatMessage };
-
-  const depthOf = useCallback(
-    (comment: ThreadComment): number => {
-      let depth = 0;
-      let p = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
-      const seen = new Set<string>();
-      while (p && !seen.has(p.id)) {
-        seen.add(p.id);
-        depth += 1;
-        p = p.parent.kind === COMMENT_KIND ? byId.get(p.parent.id) : undefined;
-      }
-      return Math.min(depth, 6);
-    },
-    [byId],
-  );
 
   async function sendThreadReply(text: string) {
     if (!community) return;
@@ -1471,54 +1468,76 @@ function ThreadView({
   return (
     <>
       <button
-        className="shrink-0 flex items-center gap-1.5 px-4 py-2.5 text-base-content/60 border-b border-base-300 text-[13px] hover:text-base-content"
+        className="shrink-0 flex items-center gap-1.5 px-4 py-2 text-base-content/60 text-[13px] hover:text-base-content"
         onClick={onBack}
       >
-        <Reply size={14} /> Back to threads
+        <ArrowLeft size={14} /> All threads
       </button>
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        <div className="py-2.5 border-b border-base-300">
-          <div className="flex items-baseline gap-2">
-            <span className="font-semibold" style={{ color: colorFor(root.author) }}>
-              <UserName pubkey={root.author} />
-            </span>
-            <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+        <div className="flex gap-3 pb-3">
+          <UserAvatar pubkey={root.author} className="w-10 h-10 mt-0.5" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="font-semibold" style={{ color: colorFor(root.author) }}>
+                <UserName pubkey={root.author} />
+              </span>
+              <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
+            </div>
+            {root.deleted ? (
+              <div className="text-base-content/60 italic">(message deleted)</div>
+            ) : (
+              <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
+            )}
           </div>
-          {root.deleted ? (
-            <div className="text-base-content/60 italic">(message deleted)</div>
-          ) : (
-            <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
-          )}
         </div>
-        <div className="mt-3.5 mb-1 text-base-content/60 text-xs font-bold uppercase tracking-wide">
-          {comments.length} {comments.length === 1 ? "reply" : "replies"}
+
+        <div className="flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+          <span className="shrink-0">
+            {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
+          </span>
+          <span className="h-px flex-1 bg-base-300" />
         </div>
+
         {comments.map((comment) => {
+          // Nested replies stay in one flat list; the chip names the parent so the
+          // shape of the conversation survives without indentation.
           const parentComment = comment.parent.kind === COMMENT_KIND ? byId.get(comment.parent.id) : undefined;
+          const replying = replyParent?.id === comment.id;
           return (
-            <div className="py-2.5 border-b border-base-300/70" key={comment.id} style={{ marginLeft: depthOf(comment) * 18 }}>
-              {parentComment && (
-                <div className="mb-1 text-base-content/60 text-xs truncate">
-                  Replying to <UserName pubkey={parentComment.author} />: {parentComment.content.slice(0, 80)}
+            <div
+              className={`group flex gap-3 -mx-2 px-2 py-1.5 rounded-lg ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
+              key={comment.id}
+            >
+              <UserAvatar pubkey={comment.author} className="w-8 h-8 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                {parentComment && (
+                  <div className="flex items-center gap-1 mb-0.5 text-[11px] text-base-content/50 min-w-0">
+                    <CornerDownRight size={11} className="shrink-0" />
+                    <span className="shrink-0">replying to</span>
+                    <span className="font-medium truncate" style={{ color: colorFor(parentComment.author) }}>
+                      <UserName pubkey={parentComment.author} />
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="font-semibold text-sm" style={{ color: colorFor(comment.author) }}>
+                    <UserName pubkey={comment.author} />
+                  </span>
+                  <span className="text-[11px] text-base-content/60">{clockTime(comment.ms)}</span>
                 </div>
-              )}
-              <div className="flex items-baseline gap-2">
-                <span className="font-semibold" style={{ color: colorFor(comment.author) }}>
-                  <UserName pubkey={comment.author} />
-                </span>
-                <span className="text-[11px] text-base-content/60">{formatTime(comment.ms)}</span>
+                {comment.deleted ? (
+                  <div className="text-base-content/60 italic">(message deleted)</div>
+                ) : (
+                  <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
+                )}
               </div>
-              {comment.deleted ? (
-                <div className="text-base-content/60 italic">(message deleted)</div>
-              ) : (
-                <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
-              )}
               {canWrite && (
                 <button
-                  className="mt-1.5 px-2 py-1 text-[13px] rounded text-base-content/60 hover:bg-base-300 hover:text-base-content"
+                  className="btn btn-ghost btn-xs btn-circle self-start shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                  title="Reply to this comment"
                   onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
                 >
-                  Reply
+                  <Reply size={14} />
                 </button>
               )}
             </div>
@@ -1527,8 +1546,8 @@ function ThreadView({
       </div>
       {canWrite && (
         <ThreadComposer
-          replyingTo={parent.author}
-          onClear={replyParent ? () => setReplyParent(null) : undefined}
+          replyingTo={replyParent?.author ?? null}
+          onClear={() => setReplyParent(null)}
           onSend={sendThreadReply}
         />
       )}
@@ -1536,13 +1555,15 @@ function ThreadView({
   );
 }
 
+/** `replyingTo` is null when the reply targets the thread root — the common case,
+ * where the placeholder alone is enough and the reply bar would just be noise. */
 function ThreadComposer({
   replyingTo,
   onClear,
   onSend,
 }: {
-  replyingTo: string;
-  onClear?: () => void;
+  replyingTo: string | null;
+  onClear: () => void;
   onSend: (text: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
@@ -1564,22 +1585,25 @@ function ThreadComposer({
   }
 
   return (
-    <div className="shrink-0 px-4 pb-4 border-t border-base-300 bg-base-200 max-sm:px-2">
-      <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
-        <span>
-          Replying to <UserName pubkey={replyingTo} />
-        </span>
-        {onClear && (
-          <button className="btn btn-ghost btn-sm btn-circle" onClick={onClear}>
-            <X size={16} />
+    <div className="shrink-0 px-4 pb-4 max-sm:px-2">
+      {replyingTo && (
+        <div className="flex items-center justify-between gap-2 px-1 pb-1 text-[12px] text-base-content/60">
+          <span className="flex items-center gap-1 min-w-0">
+            <CornerDownRight size={12} className="shrink-0" />
+            <span className="truncate">
+              Replying to <UserName pubkey={replyingTo} />
+            </span>
+          </span>
+          <button className="btn btn-ghost btn-xs btn-circle shrink-0" title="Reply to the thread instead" onClick={onClear}>
+            <X size={14} />
           </button>
-        )}
-      </div>
-      <div className="flex items-end gap-2 bg-base-300 rounded-lg p-2 max-sm:flex-col max-sm:items-stretch">
+        </div>
+      )}
+      <div className="flex items-end gap-2 bg-base-100 rounded-xl p-2">
         <textarea
-          className="flex-1 min-w-0 min-h-10 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
-          rows={2}
-          placeholder="Reply in thread"
+          className="flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
+          rows={1}
+          placeholder={replyingTo ? "Write a reply…" : "Reply in thread"}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -1589,8 +1613,13 @@ function ThreadComposer({
             }
           }}
         />
-        <button className="btn btn-primary btn-sm max-sm:self-end" onClick={send} disabled={sending || !text.trim()}>
-          {sending ? "Sending…" : "Send"}
+        <button
+          className="btn btn-primary btn-sm btn-circle shrink-0"
+          title="Send"
+          onClick={send}
+          disabled={sending || !text.trim()}
+        >
+          {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
         </button>
       </div>
     </div>
@@ -1890,8 +1919,12 @@ function MemberList({ state }: { state: CommunityState }) {
           {s.members.map((m) => row(m, s.role))}
         </div>
       ))}
-      <h4 className="text-[11px] uppercase text-base-content/60 px-2 pb-1.5 mt-2 mb-1">Members — {roleless.length}</h4>
-      {roleless.map((m) => row(m))}
+      {roleless.length > 0 && (
+        <>
+          <h4 className="text-[11px] uppercase text-base-content/60 px-2 pb-1.5 mt-2 mb-1">Members — {roleless.length}</h4>
+          {roleless.map((m) => row(m))}
+        </>
+      )}
       {members.length === 0 && <p className="text-base-content/60 p-2">No members yet.</p>}
       {state.banlist.size > 0 && (
         <>
