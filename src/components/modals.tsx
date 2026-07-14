@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
@@ -12,6 +13,16 @@ import type { ConcordInviteLink } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
 
 const NO_INVITES: ConcordInviteLink[] = [];
+
+type ExpiryKey = "never" | "1d" | "7d" | "30d";
+
+/** `ms` is the lifetime added to now; `undefined` mints a link that never expires. */
+const EXPIRY_OPTIONS: { key: ExpiryKey; label: string; ms?: number }[] = [
+  { key: "never", label: "Never" },
+  { key: "1d", label: "1 day", ms: 86_400_000 },
+  { key: "7d", label: "7 days", ms: 7 * 86_400_000 },
+  { key: "30d", label: "30 days", ms: 30 * 86_400_000 },
+];
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
@@ -340,19 +351,30 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const invites = live.filter((i) => i.communityId === cid);
   const canCreate = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
   const [label, setLabel] = useState("");
+  const [expiry, setExpiry] = useState<ExpiryKey>("never");
+  const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  // Captured once: the expiry countdowns are rendered against a fixed "now" so
+  // render stays pure (see ExpiryBadge).
+  const [now] = useState(() => Date.now());
 
   async function create() {
     setBusy(true);
     setError("");
     try {
+      const ttl = EXPIRY_OPTIONS.find((o) => o.key === expiry)?.ms;
       // Publishes the bundle, registers the link into the community (marking it
       // link-joinable), and saves it to the private Invite List.
-      await client.invites.create(cid, { base: window.location.origin, label: label.trim() || undefined });
+      await client.invites.create(cid, {
+        base: window.location.origin,
+        label: label.trim() || undefined,
+        expiresAt: ttl ? Date.now() + ttl : undefined,
+      });
       setLabel("");
+      setExpiry("never");
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -380,57 +402,143 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
   return (
     <Modal onClose={onClose}>
-      <h2 className="text-lg font-bold">Invite people</h2>
-      <p className="text-sm opacity-60 mb-5">Anyone with a link can join. Links carry no keys — those live encrypted on relays.</p>
-      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+      <h2 className="text-xl font-bold mb-1">Invite people</h2>
+      <p className="opacity-70 mb-6">Anyone with a link can join. Links carry no keys — those live encrypted on relays.</p>
+      {error && <div className="alert alert-error mb-4">{error}</div>}
 
       {invites.length === 0 ? (
-        <p className="text-sm opacity-70 mb-4">No active invite links yet.</p>
+        <div className="rounded-box border border-dashed border-base-300 p-6 text-center mb-6">
+          <p className="opacity-70">No active invite links yet.</p>
+        </div>
       ) : (
-        <div className="flex flex-col gap-2 mb-4">
+        <div className="flex flex-col gap-3 mb-6">
           {invites.map((invite) => (
-            <div key={invite.token} className="rounded-box bg-base-200 border border-base-300 p-3">
-              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                <span className="font-medium text-sm">{invite.label || "Untitled link"}</span>
-                <span className="text-xs opacity-60">{new Date(invite.createdAt * 1000).toLocaleDateString()}</span>
-                <div className="ml-auto flex gap-1.5">
-                  <button className="btn btn-ghost btn-xs" onClick={() => copy(invite.url, invite.token)}>
-                    {copied === invite.token ? "Copied ✓" : "Copy"}
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-xs text-error"
-                    disabled={revoking === invite.token}
-                    onClick={() => revoke(invite.token)}
-                  >
-                    {revoking === invite.token ? "Revoking…" : "Revoke"}
-                  </button>
-                </div>
-              </div>
-              <div className="font-mono text-[11px] break-all opacity-60">{invite.url}</div>
-            </div>
+            <InviteCard
+              key={invite.token}
+              invite={invite}
+              now={now}
+              copied={copied === invite.token}
+              revoking={revoking === invite.token}
+              onCopy={() => copy(invite.url, invite.token)}
+              onRevoke={() => revoke(invite.token)}
+            />
           ))}
         </div>
       )}
 
       {canCreate ? (
-        <div className="flex gap-2 items-end">
-          <div className="flex-1">
-            <label className="label text-xs font-semibold uppercase opacity-70">Label (optional)</label>
-            <input
-              className="input input-bordered w-full"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Reddit, Twitter…"
-              maxLength={64}
-            />
+        <div className="rounded-box bg-base-200 border border-base-300 p-4">
+          <div className="flex gap-3 items-end flex-wrap">
+            <div className="flex-1 min-w-50">
+              <label className="label pb-1" htmlFor="invite-label">
+                Label <span className="opacity-60">(optional)</span>
+              </label>
+              <input
+                id="invite-label"
+                className="input input-bordered w-full"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Reddit, Twitter…"
+                maxLength={64}
+              />
+            </div>
+            <button className="btn btn-primary" onClick={create} disabled={busy}>
+              {busy ? "Minting…" : "New link"}
+            </button>
           </div>
-          <button className="btn btn-primary" onClick={create} disabled={busy}>
-            {busy ? "Minting…" : "New link"}
+
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm gap-1.5 mt-3 -ml-2"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced((a) => !a)}
+          >
+            <ChevronRight size={16} className={advanced ? "rotate-90 transition-transform" : "transition-transform"} />
+            Advanced options
           </button>
+
+          {advanced && (
+            <div className="mt-2 pt-3 border-t border-base-300">
+              <label className="label pb-1 block" htmlFor="invite-expiry">
+                Expires after
+              </label>
+              <select
+                id="invite-expiry"
+                className="select select-bordered w-full max-w-xs"
+                value={expiry}
+                onChange={(e) => setExpiry(e.target.value as ExpiryKey)}
+              >
+                {EXPIRY_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <p className="opacity-70 mt-2">
+                Past its expiry a link still previews the community, but joining refuses. Revoke a link to cut it off
+                immediately.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
-        <p className="text-sm opacity-70">You need the Create Invites permission to mint a link.</p>
+        <p className="opacity-70">You need the Create Invites permission to mint a link.</p>
       )}
     </Modal>
   );
+}
+
+function InviteCard({
+  invite,
+  now,
+  copied,
+  revoking,
+  onCopy,
+  onRevoke,
+}: {
+  invite: ConcordInviteLink;
+  now: number;
+  copied: boolean;
+  revoking: boolean;
+  onCopy: () => void;
+  onRevoke: () => void;
+}) {
+  return (
+    <div className="rounded-box bg-base-200 border border-base-300 p-4">
+      <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+        <span className="font-semibold">{invite.label || "Untitled link"}</span>
+        <ExpiryBadge expiresAt={invite.expiresAt} now={now} />
+      </div>
+      <div className="font-mono break-all opacity-60 leading-relaxed mb-3">{invite.url}</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="opacity-60">Created {new Date(invite.createdAt * 1000).toLocaleDateString()}</span>
+        <div className="ml-auto flex gap-2">
+          <button className="btn btn-sm" onClick={onCopy}>
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+          <button className="btn btn-sm btn-ghost text-error" disabled={revoking} onClick={onRevoke}>
+            {revoking ? "Revoking…" : "Revoke"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** `now` is captured once by the modal rather than read here: reading the clock
+ *  during render is impure, and the countdown has no reason to move mid-modal. */
+function ExpiryBadge({ expiresAt, now }: { expiresAt?: number; now: number }) {
+  if (!expiresAt) return <span className="badge badge-ghost">Never expires</span>;
+  const left = expiresAt - now;
+  if (left <= 0) return <span className="badge badge-error">Expired</span>;
+  // Round, never ceil: a link minted seconds ago with a 7-day lifetime has a hair
+  // over 7 days left, which ceil would advertise as 8.
+  const hours = Math.round(left / 3_600_000);
+  const label =
+    hours < 24 ? plural(Math.max(1, hours), "hour") : plural(Math.round(hours / 24), "day");
+  return <span className="badge badge-ghost">Expires in {label}</span>;
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
 }
