@@ -52,9 +52,9 @@ export function CommunitySettingsView({
   onSelectPage: (page: PageId) => void;
   onClose: () => void;
 }) {
-  const client = useConcord();
   const account = useActiveAccount();
-  const state = use$(() => client.getState$(cid), [cid]) as CommunityState;
+  const community = useCommunity(cid);
+  const state = use$(community?.state$) as CommunityState;
   // The Advanced page (Refounding etc.) is a developer-only area — hide it from
   // the nav, and refuse to render it via a direct URL, unless dev mode is on.
   const devMode = useDevMode();

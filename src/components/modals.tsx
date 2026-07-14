@@ -7,7 +7,6 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { UserAvatar, UserName } from "./User";
 import { rumorMs } from "applesauce-concord/helpers";
-import type { CommunityState } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
@@ -130,8 +129,8 @@ export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => vo
     setError("");
     try {
       const relayList = relays.split("\n").map((r) => r.trim()).filter(Boolean);
-      const id = await client.createNewCommunity(name.trim(), description.trim(), relayList);
-      onCreated(id);
+      const community = await client.createNewCommunity(name.trim(), description.trim(), relayList);
+      onCreated(community.communityId);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -264,11 +263,10 @@ function InvitePreviewCard({ preview }: { preview: InvitePreview }) {
 }
 
 export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () => void }) {
-  const client = useConcord();
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
   const community = useCommunity(cid);
-  const state = use$(() => client.getState$(cid), [cid]) as CommunityState | undefined;
+  const state = use$(community?.state$);
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
   const [voice, setVoice] = useState(false);
