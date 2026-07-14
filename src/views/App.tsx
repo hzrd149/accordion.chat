@@ -40,7 +40,6 @@ import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { deleteCommunityRumorCache } from "../lib/rumor-cache";
-import { beginUploadBurst, uploadProgress$ } from "../lib/concord-uploader";
 import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
 import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
@@ -70,7 +69,7 @@ import { useMentionCandidates, useMentionSearch, detectMention, type MentionCand
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
 import type { ChatMessage } from "../chat/fold";
-import type { ChannelMetadata, CommunityState, Role, ConcordCommunity } from "applesauce-concord";
+import type { ChannelMetadata, CommunityState, Role, ConcordCommunity, Storage } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
 import { kinds } from "nostr-tools";
 
@@ -914,9 +913,16 @@ function ChatView({
   const members = useMemo(() => [...state.members], [state.members]);
 
   const handleSend = useCallback(
-    async (value: string, files: File[], reply: ReplyTarget | null) => {
+    async (
+      value: string,
+      files: File[],
+      reply: ReplyTarget | null,
+      onUploadProgress: (progress: Storage.ConcordUploadProgress) => void,
+    ) => {
       setReplyTo(null);
-      await community?.sendMessage(channelId, value, reply ?? undefined, files.length ? files : undefined, favorites);
+      await community?.sendMessage(channelId, value, reply ?? undefined, files.length ? files : undefined, favorites, {
+        onUploadProgress,
+      });
     },
     [community, channelId, favorites],
   );
@@ -1772,19 +1778,24 @@ const Composer = memo(function Composer({
   members: string[];
   replyTo: ReplyTarget | null;
   onClearReply: () => void;
-  onSend: (text: string, files: File[], reply: ReplyTarget | null) => Promise<void>;
+  onSend: (
+    text: string,
+    files: File[],
+    reply: ReplyTarget | null,
+    onUploadProgress: (progress: Storage.ConcordUploadProgress) => void,
+  ) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [upload, setUpload] = useState<Storage.ConcordUploadProgress | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // What `sendMessage` is busy with, so a slow encrypt or Blossom upload reads as
-  // progress rather than a dead Send button. `upload` is only ours while we're the
-  // ones sending; once every file is up, the publish itself is all that's left.
-  const upload = use$(uploadProgress$);
+  // What this send is busy with, so a slow encrypt or Blossom upload reads as
+  // progress rather than a dead Send button. Once every file is up, the publish
+  // itself is all that's left.
   const status = !sending
     ? null
     : upload && upload.done < upload.total
@@ -1835,18 +1846,16 @@ const Composer = memo(function Composer({
     setMention(null);
     setFiles([]);
     setSending(true);
-    // Let the composer report the encrypt/upload leg of `sendMessage`; only this
-    // side knows the file count, since the uploader is handed one file at a time.
-    const endBurst = attach.length ? beginUploadBurst(attach.length) : null;
+    setUpload(null);
     try {
-      await onSend(value, attach, reply);
+      await onSend(value, attach, reply, setUpload);
     } catch (err) {
       console.error("send failed", err);
       // Restore the draft so the user doesn't lose their message/attachments.
       setText(value);
       setFiles(attach);
     } finally {
-      endBurst?.();
+      setUpload(null);
       setSending(false);
     }
   }
