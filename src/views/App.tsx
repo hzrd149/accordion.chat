@@ -59,6 +59,7 @@ import { SettingsView } from "./settings";
 import { DevView } from "./dev";
 import { useDevMode } from "../lib/dev-mode";
 import { InvitesView } from "./invites";
+import { DmView } from "./dm";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/ClientStatus";
 import { CommunitySettingsView } from "./community-settings";
@@ -92,6 +93,8 @@ export function App() {
                 `<base>/invite/<naddr>#<token>`). Without this the catch-all below
                 would bounce a shared link to "/" and silently drop the token. */}
             <Route path="/invite/:naddr" element={<Shell />} />
+            <Route path="/dm" element={<Shell />} />
+            <Route path="/dm/:peerPubkey" element={<Shell />} />
             <Route path="/invites" element={<Shell />} />
             <Route path="/settings" element={<Shell />} />
             <Route path="/settings/:page" element={<Shell />} />
@@ -135,6 +138,9 @@ function Shell() {
   // routes rendered in the main area (the community rail stays put), not
   // full-screen overlays.
   const onInvites = useLocation().pathname === "/invites";
+  const dmRootMatch = useMatch("/dm");
+  const dmPeerMatch = useMatch("/dm/:peerPubkey");
+  const onDm = Boolean(dmRootMatch || dmPeerMatch);
   // A followed invite link. The unlock token rides the URL *fragment*, which no
   // router param carries, so hand the join flow the whole href rather than the
   // :naddr — the bundle is useless without the token.
@@ -216,10 +222,10 @@ function Shell() {
   useEffect(() => {
     // Don't auto-jump into a community from the invites/settings routes — only
     // from root.
-    if (communities.length > 0 && !selectedCid && !onInvites && !onSettings && !onDev) {
+    if (communities.length > 0 && !selectedCid && !onDm && !onInvites && !onSettings && !onDev) {
       navigate(`/c/${communities[0].material.community_id}`, { replace: true });
     }
-  }, [communities, selectedCid, onInvites, onSettings, onDev, navigate]);
+  }, [communities, selectedCid, onDm, onInvites, onSettings, onDev, navigate]);
 
   useEffect(() => {
     if (!activeState || onCommunitySettings) return;
@@ -263,6 +269,18 @@ function Shell() {
         <div className="mt-auto shrink-0">
           <ClientStatusRailIndicator />
         </div>
+        <button
+          className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+            onDm ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
+          }`}
+          title="Direct messages"
+          onClick={() => {
+            navigate("/dm");
+            setNavOpen(false);
+          }}
+        >
+          <MessageSquare size={22} />
+        </button>
         <div className="relative w-12 h-12 shrink-0">
           <button
             className={`w-full h-full bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
@@ -310,7 +328,14 @@ function Shell() {
         </button>
       </div>
 
-      {onInvites ? (
+      {onDm ? (
+        <DmView
+          mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
+          mobileNavOpen={navOpen}
+          onOpenMobileNav={() => setNavOpen(true)}
+          onCloseMobileNav={() => setNavOpen(false)}
+        />
+      ) : onInvites ? (
         <InvitesView mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />} />
       ) : onSettings ? (
         <SettingsView
