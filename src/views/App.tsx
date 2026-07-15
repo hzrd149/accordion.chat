@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams,
 import {
   ArrowLeft,
   CornerDownRight,
-  DoorOpen,
   Hand,
   Hash,
   Inbox,
@@ -39,8 +38,6 @@ import { useVoiceEngine } from "../voice/registry";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
-import { deleteCommunityRumorCache } from "../lib/rumor-cache";
-import { clearCommunityReadState } from "../lib/read-state";
 import { useMessages, useThread } from "../chat/useMessages";
 import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
@@ -113,7 +110,7 @@ export function App() {
 }
 
 /** Overlay names carried in the `?modal=` query param. */
-type ModalName = "create" | "join" | "channel" | "invite" | "addMenu" | "leave";
+type ModalName = "create" | "join" | "channel" | "invite" | "addMenu";
 
 // Stable empty fallback so `communities` keeps a constant identity while the
 // stream is still empty — otherwise a fresh `[]` each render would retrigger the
@@ -173,7 +170,6 @@ function Shell() {
   }
   const setModal = (m: ModalName | null) => setParam("modal", m);
 
-  const [leaving, setLeaving] = useState(false);
   // Mobile off-canvas drawers (ignored by CSS above the tablet breakpoint).
   const [navOpen, setNavOpen] = useState(false);
   // The right-hand side panel: opened with either the member roster or the
@@ -375,7 +371,6 @@ function Shell() {
               onNewChannel={() => setModal("channel")}
               onInvite={() => setModal("invite")}
               onSettings={() => navigate(`/c/${activeState.material.community_id}/settings`)}
-              onLeave={() => setModal("leave")}
             />
           </div>
           {selectedChannel ? (
@@ -466,40 +461,6 @@ function Shell() {
       {modal === "invite" && activeState && (
         <InviteModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
       )}
-      {modal === "leave" && activeState && (
-        <Modal onClose={() => (leaving ? undefined : setModal(null))}>
-          <h2 className="text-lg font-bold">Leave {activeState.metadata?.name ?? activeState.material.name}?</h2>
-          <p className="text-sm opacity-60">
-            You'll be removed from this community and it will disappear from your list. You can
-            rejoin later with an invite link.
-          </p>
-          <div className="flex gap-3 mt-4">
-            <button
-              className="btn btn-error"
-              disabled={leaving}
-              onClick={async () => {
-                const cid = activeState.material.community_id;
-                setLeaving(true);
-                try {
-                  await client.leave(cid);
-                  // Purge the decrypted rumor caches for the community we left.
-                  await deleteCommunityRumorCache(cid);
-                  clearCommunityReadState(pubkey, cid);
-                  navigate("/");
-                } finally {
-                  setLeaving(false);
-                }
-              }}
-            >
-              {leaving ? "Leaving…" : "Leave community"}
-            </button>
-            <button className="btn btn-ghost" disabled={leaving} onClick={() => setModal(null)}>
-              Cancel
-            </button>
-          </div>
-        </Modal>
-      )}
-
     </div>
   );
 }
@@ -589,7 +550,6 @@ function Sidebar({
   onNewChannel,
   onInvite,
   onSettings,
-  onLeave,
 }: {
   state: CommunityState;
   selectedChannel: string | null;
@@ -597,7 +557,6 @@ function Sidebar({
   onNewChannel: () => void;
   onInvite: () => void;
   onSettings: () => void;
-  onLeave: () => void;
 }) {
   const community = useCommunity(state.material.community_id);
   const account = useActiveAccount();
@@ -631,9 +590,6 @@ function Sidebar({
         <div className="flex items-center gap-1 shrink-0">
           <button className="btn btn-ghost btn-sm btn-circle" title="Community settings" onClick={onSettings}>
             <Settings size={18} />
-          </button>
-          <button className="btn btn-ghost btn-sm btn-circle" title="Leave community" onClick={onLeave}>
-            <DoorOpen size={18} />
           </button>
         </div>
       </div>
