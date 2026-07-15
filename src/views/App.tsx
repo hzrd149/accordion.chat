@@ -40,7 +40,7 @@ import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { useMessages, useThread } from "../chat/useMessages";
 import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
-import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
+import { sendThreadReply as sendThreadReplyAction, sendEditWithEmojis } from "../chat/actions";
 import { Login } from "./Login";
 import {
   CreateChannelModal,
@@ -208,7 +208,7 @@ function Shell() {
 
   // The user's NIP-30 favorite custom emojis — feeds the thread composer in
   // the side panel.
-  const favorites = useFavoriteEmojis(pubkey);
+  const favorites = useFavoriteEmojis(pubkey, account?.signer);
 
   // Auto-select a community and channel only when the URL has not already made
   // a choice. Deep links may point at communities/channels that are still being
@@ -841,7 +841,7 @@ function ChatView({
   const canDirectInvite = Boolean(community && hasChannelKey && (channel?.private ? canManageChannels : canCreateInvite));
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
-  const favorites = useFavoriteEmojis(pubkey);
+  const favorites = useFavoriteEmojis(pubkey, account?.signer);
   // Quick-react buttons: lead with the user's favorites, backfill with defaults.
   // Memoized so the reference stays stable and doesn't defeat MessageList's memo.
   const quickReactions = useMemo<(string | Emoji)[]>(
@@ -1302,7 +1302,7 @@ const Message = memo(function Message({
   async function saveEdit() {
     const value = editText.trim();
     setEditing(false);
-    if (value) await community?.editMessage(channelId, m.id, value);
+    if (value) await sendEditWithEmojis(community, channelId, m.id, value, favorites);
   }
 
   return (
@@ -1831,6 +1831,7 @@ function ThreadView({
       {canWrite && (
         <ThreadComposer
           replyingTo={replyParent?.author ?? null}
+          favorites={favorites}
           onClear={() => setReplyParent(null)}
           onSend={sendThreadReply}
         />
@@ -1843,15 +1844,19 @@ function ThreadView({
  * where the placeholder alone is enough and the reply bar would just be noise. */
 function ThreadComposer({
   replyingTo,
+  favorites,
   onClear,
   onSend,
 }: {
   replyingTo: string | null;
+  favorites: Emoji[];
   onClear: () => void;
   onSend: (text: string) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function send() {
     const value = text.trim();
@@ -1866,6 +1871,25 @@ function ThreadComposer({
     } finally {
       setSending(false);
     }
+  }
+
+  // Insert an emoji (unicode or `:shortcode:`) at the caret, preserving focus.
+  function insertEmoji(emoji: string | Emoji) {
+    const insert = typeof emoji === "string" ? emoji : `:${emoji.shortcode}:`;
+    const el = textareaRef.current;
+    if (!el) {
+      setText((t) => `${t}${insert}`);
+      return;
+    }
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + insert + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + insert.length;
+      el.setSelectionRange(caret, caret);
+    });
   }
 
   return (
@@ -1884,7 +1908,22 @@ function ThreadComposer({
         </div>
       )}
       <div className="flex items-end gap-2 bg-base-100 rounded-xl p-2">
+        <span className="relative inline-flex shrink-0">
+          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
+            <SmilePlus size={18} />
+          </button>
+          {pickerOpen && (
+            <EmojiPicker
+              favorites={favorites}
+              align="left"
+              direction="up"
+              onPick={(e) => insertEmoji(e)}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
+        </span>
         <textarea
+          ref={textareaRef}
           className="flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
           rows={1}
           placeholder={replyingTo ? "Write a reply…" : "Reply in thread"}
@@ -1985,6 +2024,26 @@ const Composer = memo(function Composer({
     });
   }
 
+  // Insert an emoji (unicode or `:shortcode:`) at the caret, preserving focus.
+  function insertEmoji(emoji: string | Emoji) {
+    const insert = typeof emoji === "string" ? emoji : `:${emoji.shortcode}:`;
+    const el = textareaRef.current;
+    if (!el) {
+      setText((t) => `${t}${insert}`);
+      return;
+    }
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + insert + text.slice(end);
+    setText(next);
+    setMention(null);
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + insert.length;
+      el.setSelectionRange(caret, caret);
+    });
+  }
+
   async function send() {
     const value = text.trim();
     if (sending) return;
@@ -2066,7 +2125,7 @@ const Composer = memo(function Composer({
               favorites={favorites}
               align="right"
               direction="up"
-              onPick={(e) => setText((t) => `${t}${typeof e === "string" ? e : `:${e.shortcode}:`}`)}
+              onPick={(e) => insertEmoji(e)}
               onClose={() => setPickerOpen(false)}
             />
           )}

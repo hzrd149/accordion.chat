@@ -119,7 +119,13 @@ export function foldMessages(rumors: Rumor[]): ChatMessage[] {
   for (const r of edits) {
     const targetId = r.tags.find((t) => t[0] === "e")?.[1];
     const msg = targetId ? byId.get(targetId) : undefined;
-    if (msg && msg.author === r.pubkey) msg.edited = r.content;
+    if (msg && msg.author === r.pubkey) {
+      msg.edited = r.content;
+      // Replace emoji tags with the edit's so :shortcode: renders against the
+      // edit's NIP-30 tags, not the original message's (which may differ).
+      const editEmojiTags = r.tags.filter((t) => t[0] === "emoji");
+      if (editEmojiTags.length) msg.emojiTags = editEmojiTags;
+    }
   }
   for (const r of deletes) {
     for (const t of r.tags) {
