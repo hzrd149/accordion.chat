@@ -104,6 +104,13 @@ export const LOOKUP_RELAYS: string[] = import.meta.env.VITE_LOOKUP_RELAYS?.split
 export const accounts = new AccountManager();
 registerCommonAccountTypes(accounts);
 
+export const user$ = accounts.active$.pipe(
+	map((account) => account?.pubkey),
+	distinctUntilChanged(),
+	map((pubkey) => (pubkey ? castUser(pubkey, eventStore) : undefined)),
+	shareReplay(1),
+);
+
 // The active user's own lookup relays (NIP-51 kind 10086), falling back to the
 // defaults above when they have no list — or no list yet.
 //

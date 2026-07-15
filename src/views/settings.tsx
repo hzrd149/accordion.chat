@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { FlaskConical, Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Search, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { CreateProfile, UpdateProfile } from "applesauce-actions/actions/profile";
@@ -10,8 +10,16 @@ import type { ProfileContent } from "applesauce-core/helpers/profile";
 import type { ISigner } from "applesauce-signers";
 import { createSettingsRunner, saveRelayList, userFor } from "../lib/settings-actions";
 import { UserAvatar } from "../components/User";
-import { useTheme, type ThemePref } from "../lib/theme";
+import {
+  DARK_DAISY_THEMES,
+  LIGHT_DAISY_THEMES,
+  useTheme,
+  type ThemeChoice,
+  type ThemeMode,
+  type ThemeSlot,
+} from "../lib/theme";
 import { useDevMode, setDevMode } from "../lib/dev-mode";
+import { useAvailableProfileThemes } from "../hooks/use-profile-themes";
 import {
   DEFAULT_OPEN_RANKING_PROVIDER,
   OPEN_RANKING_PRESETS,
@@ -83,9 +91,9 @@ export function SettingsView({
         ))}
       </nav>
       <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
-        <div className="max-w-[640px]">
+        <div className="max-w-[1120px]">
           {page === "profile" && <ProfilePage signer={signer} pubkey={pubkey} />}
-          {page === "appearance" && <AppearancePage />}
+          {page === "appearance" && <AppearancePage pubkey={pubkey} />}
           {page === "relays" && <MailboxesPage signer={signer} pubkey={pubkey} />}
           {page === "dm" && <DmRelaysPage signer={signer} pubkey={pubkey} />}
           {page === "blossom" && <BlossomPage signer={signer} pubkey={pubkey} />}
@@ -102,41 +110,52 @@ type PageProps = { signer: ISigner; pubkey: string };
 
 // ---- Appearance ----------------------------------------------------------
 
-const THEME_OPTIONS: { value: ThemePref; label: string; hint: string; icon: ReactNode }[] = [
-  { value: "system", label: "System", hint: "Match your device settings", icon: <Monitor size={18} /> },
-  { value: "light", label: "Light", hint: "Always use the light theme", icon: <Sun size={18} /> },
-  { value: "dark", label: "Dark", hint: "Always use the dark theme", icon: <Moon size={18} /> },
+const MODE_OPTIONS: { value: ThemeMode; label: string; hint: string; icon: ReactNode }[] = [
+  { value: "system", label: "System", hint: "Use the light or dark slot based on your OS", icon: <Monitor size={18} /> },
+  { value: "light", label: "Light", hint: "Always use your selected light theme", icon: <Sun size={18} /> },
+  { value: "dark", label: "Dark", hint: "Always use your selected dark theme", icon: <Moon size={18} /> },
 ];
 
-function AppearancePage() {
-  const { pref, resolved, setTheme } = useTheme();
+function choiceKey(choice: ThemeChoice): string {
+  return choice.type === "daisy" ? `daisy:${choice.name}` : `nostr:${choice.id}`;
+}
+
+function themeLabel(choice: ThemeChoice): string {
+  return choice.type === "daisy" ? choice.name : choice.title;
+}
+
+function AppearancePage({ pubkey }: { pubkey: string }) {
+  const { config, resolved, setMode, setSlotTheme } = useTheme();
+  const profileThemes = useAvailableProfileThemes(pubkey);
+  const slots: ThemeSlot[] = config.mode === "system" ? ["light", "dark"] : [config.mode];
+
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Appearance</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Choose how Accordion looks. <strong>System</strong> follows your operating system's
-        light/dark setting — currently <strong>{resolved}</strong>.
+        Choose how Accordion looks. System mode is currently using the <strong>{resolved}</strong> slot.
       </p>
-      <div className="flex flex-col gap-2.5 max-w-[420px]">
-        {THEME_OPTIONS.map((o) => {
-          const active = pref === o.value;
+
+      <div className="mb-6 grid gap-2.5 sm:grid-cols-3">
+        {MODE_OPTIONS.map((o) => {
+          const active = config.mode === o.value;
           return (
             <label
               key={o.value}
-              className={`flex items-center gap-3 p-3.5 rounded-lg border cursor-pointer transition-colors ${
+              className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3.5 transition-colors ${
                 active ? "border-primary bg-primary/10" : "border-base-300 bg-base-200 hover:bg-base-300"
               }`}
             >
               <input
                 type="radio"
-                name="theme"
+                name="theme-mode"
                 className="radio radio-primary radio-sm"
                 value={o.value}
                 checked={active}
-                onChange={() => setTheme(o.value)}
+                onChange={() => setMode(o.value)}
               />
               <span className={`flex ${active ? "text-primary" : "text-base-content/60"}`}>{o.icon}</span>
-              <span className="flex flex-col gap-px">
+              <span className="flex min-w-0 flex-col gap-px">
                 <span className="font-semibold">{o.label}</span>
                 <span className="text-xs opacity-60">{o.hint}</span>
               </span>
@@ -144,7 +163,196 @@ function AppearancePage() {
           );
         })}
       </div>
+
+      <div className="flex flex-col gap-7">
+        {slots.map((slot) => (
+          <ThemeSlotPicker
+            key={slot}
+            slot={slot}
+            pubkey={pubkey}
+            selected={config[slot]}
+            nostrThemes={profileThemes.themes}
+            nostrAuthors={profileThemes.authors.length}
+            fetchingNostrThemes={profileThemes.fetching}
+            fetchNostrError={profileThemes.error}
+            onFetchNostrThemes={() => void profileThemes.fetchThemes()}
+            onSelect={(choice) => setSlotTheme(slot, choice)}
+          />
+        ))}
+      </div>
     </>
+  );
+}
+
+function ThemeSlotPicker({
+  slot,
+  pubkey,
+  selected,
+  nostrThemes,
+  nostrAuthors,
+  fetchingNostrThemes,
+  fetchNostrError,
+  onFetchNostrThemes,
+  onSelect,
+}: {
+  slot: ThemeSlot;
+  pubkey: string;
+  selected: ThemeChoice;
+  nostrThemes: ReturnType<typeof useAvailableProfileThemes>["themes"];
+  nostrAuthors: number;
+  fetchingNostrThemes: boolean;
+  fetchNostrError: string | null;
+  onFetchNostrThemes: () => void;
+  onSelect: (choice: ThemeChoice) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"builtin" | "nostr">(selected.type === "nostr" ? "nostr" : "builtin");
+  const builtins = slot === "light" ? LIGHT_DAISY_THEMES : DARK_DAISY_THEMES;
+  const q = query.trim().toLowerCase();
+  const daisyThemes = q ? builtins.filter((name) => name.includes(q)) : builtins;
+  const filteredNostr = q ? nostrThemes.filter((theme) => theme.title.toLowerCase().includes(q)) : nostrThemes;
+
+  function selectTab(next: "builtin" | "nostr") {
+    setTab(next);
+    if (next === "nostr" && nostrThemes.length === 0 && !fetchingNostrThemes) onFetchNostrThemes();
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-bold capitalize">{slot} theme</h3>
+          <p className="text-xs text-base-content/60">Selected: {themeLabel(selected)}</p>
+        </div>
+        <input
+          className="input input-sm w-56 max-w-full"
+          value={query}
+          placeholder={tab === "builtin" ? "Search built-in themes" : "Search Nostr themes"}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="tabs tabs-border mb-4">
+        <button className={`tab ${tab === "builtin" ? "tab-active" : ""}`} onClick={() => selectTab("builtin")}>
+          Built-in themes <span className="badge badge-ghost badge-xs ml-1">{daisyThemes.length}</span>
+        </button>
+        <button className={`tab ${tab === "nostr" ? "tab-active" : ""}`} onClick={() => selectTab("nostr")}>
+          Nostr themes <span className="badge badge-ghost badge-xs ml-1">{filteredNostr.length}</span>
+        </button>
+      </div>
+
+      {tab === "builtin" ? (
+        <div className="flex flex-wrap gap-2">
+          {daisyThemes.map((name) => {
+            const choice: ThemeChoice = { type: "daisy", name };
+            return (
+              <ThemeOptionButton
+                key={name}
+                active={choiceKey(selected) === choiceKey(choice)}
+                label={name}
+                badge="Built-in"
+                onClick={() => onSelect(choice)}
+              >
+                <div data-theme={name} className="flex h-12 items-center gap-1.5 rounded-lg bg-base-100 p-2 text-base-content">
+                  <span className="h-7 flex-1 rounded bg-base-200" />
+                  <span className="h-7 flex-1 rounded bg-base-300" />
+                  <span className="h-7 flex-1 rounded bg-primary" />
+                </div>
+              </ThemeOptionButton>
+            );
+          })}
+        </div>
+      ) : (
+        <div>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {filteredNostr.length > 0 && (
+            <button className="btn btn-primary btn-xs" onClick={onFetchNostrThemes} disabled={fetchingNostrThemes || nostrAuthors === 0}>
+              {fetchingNostrThemes ? "Fetching..." : "Fetch Nostr themes"}
+            </button>
+          )}
+          {fetchNostrError && <span className="text-xs font-semibold text-error">{fetchNostrError}</span>}
+        </div>
+        {filteredNostr.length ? (
+          <div className="flex flex-wrap gap-2">
+            {filteredNostr.map((theme) => {
+              const choice: ThemeChoice = {
+                type: "nostr",
+                id: theme.id,
+                title: theme.title,
+                author: theme.author,
+                colors: theme.colors,
+                variables: theme.variables,
+              };
+              return (
+                <ThemeOptionButton
+                  key={theme.id}
+                  active={choiceKey(selected) === choiceKey(choice)}
+                  label={theme.title}
+                  badge={theme.author === pubkey ? "You" : "Contact"}
+                  onClick={() => onSelect(choice)}
+                  leading={<UserAvatar pubkey={theme.author} className="h-6 w-6" />}
+                >
+                  <div
+                    className="flex h-12 items-center gap-1.5 rounded-lg bg-base-100 p-2 text-base-content"
+                    style={theme.variables as CSSProperties}
+                  >
+                    <span className="h-7 flex-1 rounded" style={{ background: theme.colors.background }} />
+                    <span className="h-7 flex-1 rounded" style={{ background: theme.colors.text }} />
+                    <span className="h-7 flex-1 rounded" style={{ background: theme.colors.primary }} />
+                  </div>
+                </ThemeOptionButton>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-base-300 p-5 text-sm text-base-content/70">
+            <div className="font-semibold text-base-content">No Nostr themes cached yet</div>
+            <div className="mt-1 text-xs text-base-content/60">
+              Fetch themes published by you and your contacts from their outbox relays.
+            </div>
+            <button className="btn btn-primary btn-sm mt-3" onClick={onFetchNostrThemes} disabled={fetchingNostrThemes || nostrAuthors === 0}>
+              {fetchingNostrThemes ? "Fetching..." : "Fetch Nostr themes"}
+            </button>
+            {fetchNostrError && <div className="mt-2 text-xs font-semibold text-error">{fetchNostrError}</div>}
+          </div>
+        )}
+      </div>
+      )}
+    </section>
+  );
+}
+
+function ThemeOptionButton({
+  active,
+  label,
+  badge,
+  leading,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  badge: string;
+  leading?: ReactNode;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      className={`w-full rounded-xl border p-2 text-left transition-colors sm:w-56 ${
+        active ? "border-primary bg-primary/10" : "border-base-300 bg-base-100 hover:border-primary/50"
+      }`}
+      onClick={onClick}
+    >
+      {children}
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          {leading}
+          <span className="truncate text-sm font-semibold capitalize">{label}</span>
+        </span>
+        <span className="badge badge-ghost badge-xs shrink-0">{badge}</span>
+      </div>
+    </button>
   );
 }
 

@@ -6,14 +6,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Accordion</title>
-    <!-- Apply the saved theme before first paint to avoid a flash; no stored
-         choice means "follow the system", which the CSS resolves on its own. -->
+    <!-- Apply the saved theme before first paint to avoid a flash. -->
     <script>
       (function () {
         try {
-          var t = localStorage.getItem("accordion:theme");
-          if (t === "light" || t === "dark")
-            document.documentElement.setAttribute("data-theme", t);
+          var fallback = {
+            mode: "system",
+            light: { type: "daisy", name: "light" },
+            dark: { type: "daisy", name: "dark" },
+          };
+          var raw = localStorage.getItem("accordion:appearance");
+          var config = raw ? JSON.parse(raw) : fallback;
+          var old = localStorage.getItem("accordion:theme");
+          if (!raw && (old === "light" || old === "dark")) config = Object.assign({}, fallback, { mode: old });
+          var slot = config.mode === "system"
+            ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : config.mode;
+          var choice = config[slot] || fallback[slot];
+          var root = document.documentElement;
+          if (choice && choice.type === "nostr" && choice.variables) {
+            root.setAttribute("data-theme", "accordion-runtime");
+            Object.keys(choice.variables).forEach(function (name) {
+              root.style.setProperty(name, choice.variables[name]);
+            });
+          } else {
+            root.setAttribute("data-theme", (choice && choice.name) || slot);
+          }
         } catch (e) {}
       })();
     </script>
