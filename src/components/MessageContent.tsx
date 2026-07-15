@@ -1,11 +1,23 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
-import { getPubkeyFromDecodeResult } from "applesauce-core/helpers";
+import {
+  decodeAddressPointer,
+  decodeEventPointer,
+  getProfileContent,
+  getPubkeyFromDecodeResult,
+  isAddressPointer,
+  isEventPointer,
+  type AddressPointer,
+  type EventPointer,
+} from "applesauce-core/helpers";
+import { use$, useEventStore, useRenderedContent, type ComponentMap } from "applesauce-react/hooks";
+import { kinds, type NostrEvent } from "nostr-tools";
 import Lightbox from "yet-another-react-lightbox";
 import { decryptToObjectURL } from "../lib/image";
 import type { MediaAttachment } from "applesauce-concord/helpers";
-import { UserName } from "./User";
+import { shortNpub } from "../lib/util";
+import { UserAvatar, UserName } from "./User";
 
 // Renders a chat message: applesauce-content parses the text into a NAST tree,
 // and any link whose URL matches a NIP-92 attachment is rendered as decrypted
@@ -25,6 +37,9 @@ const TILE =
   "relative block overflow-hidden rounded-lg aspect-square bg-base-200 cursor-zoom-in last:odd:col-span-2 last:odd:aspect-video";
 const TILE_MEDIA = "w-full h-full object-cover block m-0";
 const LINK_CLASS = "text-info hover:text-info/80 underline underline-offset-2";
+const MAX_EMBED_DEPTH = 1;
+
+type NostrPointer = EventPointer | AddressPointer;
 
 function attKey(a: UrlAttachment): string {
   return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
@@ -167,6 +182,271 @@ function AttachmentView({
   );
 }
 
+function tagValue(event: NostrEvent, name: string): string | undefined {
+  return event.tags.find((tag) => tag[0] === name)?.[1];
+}
+
+function eventTitle(event: NostrEvent): string | undefined {
+  if (event.kind === kinds.Metadata) return getProfileContent(event)?.display_name ?? getProfileContent(event)?.name;
+  return tagValue(event, "title") ?? tagValue(event, "name") ?? tagValue(event, "summary") ?? tagValue(event, "alt");
+}
+
+function eventSummary(event: NostrEvent): string | undefined {
+  return tagValue(event, "summary") ?? tagValue(event, "description") ?? tagValue(event, "alt");
+}
+
+function eventImage(event: NostrEvent): string | undefined {
+  if (event.kind === kinds.Metadata) return getProfileContent(event)?.picture;
+  return tagValue(event, "image") ?? tagValue(event, "thumb") ?? tagValue(event, "thumbnail");
+}
+
+function shortId(id: string): string {
+  return `${id.slice(0, 8)}…${id.slice(-6)}`;
+}
+
+function formatTime(timestamp: number): string {
+  if (!timestamp) return "Unknown time";
+  return new Date(timestamp * 1000).toLocaleString();
+}
+
+function pointerFromMention(encoded: string): NostrPointer | null {
+  const value = encoded.replace(/^nostr:/, "");
+  return decodeEventPointer(value) ?? decodeAddressPointer(value);
+}
+
+function externalNostrUrl(encoded: string): string {
+  return `https://njump.me/${encoded.replace(/^nostr:/, "")}`;
+}
+
+const embeddedContentComponents: ComponentMap = {
+  text: ({ node }) => <span>{node.value}</span>,
+  link: ({ node }) => (
+    <a href={node.href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+      {node.value}
+    </a>
+  ),
+  mention: ({ node }) => {
+    const pubkey = getPubkeyFromDecodeResult(node.decoded);
+    if (pubkey) {
+      return (
+        <span className="text-primary bg-primary/15 rounded px-0.5 font-medium">
+          @<UserName pubkey={pubkey} />
+        </span>
+      );
+    }
+    return (
+      <a href={externalNostrUrl(node.encoded)} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+        {node.encoded}
+      </a>
+    );
+  },
+  hashtag: ({ node }) => <span className="text-info">#{node.name}</span>,
+  emoji: ({ node }) => <img className="h-[1.35em] w-auto align-middle object-contain" src={node.url} alt={node.raw} title={node.code} loading="lazy" />,
+};
+
+function EmbeddedEventContent({ event }: { event: NostrEvent }) {
+  return <>{useRenderedContent(event, embeddedContentComponents, { maxLength: 360, cacheKey: null })}</>;
+}
+
+function EventMeta({ event, label }: { event: NostrEvent; label?: string }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0 text-xs text-base-content/60">
+      <UserAvatar pubkey={event.pubkey} className="w-5 h-5" />
+      <span className="font-medium text-base-content truncate">
+        <UserName pubkey={event.pubkey} />
+      </span>
+      <span className="shrink-0">·</span>
+      <span className="shrink-0">{label ?? `kind ${event.kind}`}</span>
+      <span className="shrink-0">·</span>
+      <span className="truncate">{formatTime(event.created_at)}</span>
+    </div>
+  );
+}
+
+function ProfileEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  const profile = getProfileContent(event);
+  const name = profile?.display_name || profile?.name || shortNpub(event.pubkey);
+  return (
+    <EmbedShell encoded={encoded}>
+      <div className="flex items-start gap-3">
+        <UserAvatar pubkey={event.pubkey} className="w-10 h-10" />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold truncate">{name}</div>
+          <div className="text-xs text-base-content/60 font-mono truncate">{shortNpub(event.pubkey)}</div>
+          {profile?.about && <div className="mt-1 text-sm line-clamp-3 whitespace-pre-wrap break-words">{profile.about}</div>}
+        </div>
+      </div>
+    </EmbedShell>
+  );
+}
+
+function TextEventEmbed({ event, encoded, label }: { event: NostrEvent; encoded: string; label?: string }) {
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} label={label} />
+      <div className="mt-2 text-sm whitespace-pre-wrap break-words">
+        <EmbeddedEventContent event={event} />
+      </div>
+    </EmbedShell>
+  );
+}
+
+function ArticleEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  const title = eventTitle(event) ?? "Long-form article";
+  const summary = eventSummary(event);
+  const image = eventImage(event);
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} label="article" />
+      <div className="mt-2 flex gap-3">
+        {image && <img src={image} alt="" className="h-16 w-16 rounded object-cover bg-base-300 shrink-0" loading="lazy" />}
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold line-clamp-2">{title}</div>
+          {summary ? (
+            <div className="mt-1 text-sm text-base-content/75 line-clamp-3 whitespace-pre-wrap break-words">{summary}</div>
+          ) : (
+            <div className="mt-1 text-sm text-base-content/75 line-clamp-3 whitespace-pre-wrap break-words">
+              <EmbeddedEventContent event={event} />
+            </div>
+          )}
+        </div>
+      </div>
+    </EmbedShell>
+  );
+}
+
+function ShareEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} label={event.kind === kinds.Repost ? "repost" : "share"} />
+      <div className="mt-2 text-sm text-base-content/75 whitespace-pre-wrap break-words">
+        {event.content ? <EmbeddedEventContent event={event} /> : "Shared another Nostr event."}
+      </div>
+      <ReferencedTags event={event} />
+    </EmbedShell>
+  );
+}
+
+function ReactionEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} label="reaction" />
+      <div className="mt-2 text-sm">
+        Reacted with <span className="font-semibold">{event.content || "+"}</span>
+      </div>
+      <ReferencedTags event={event} />
+    </EmbedShell>
+  );
+}
+
+function LiveEventEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  const title = eventTitle(event) ?? "Live event";
+  const summary = eventSummary(event);
+  const image = eventImage(event);
+  const status = tagValue(event, "status");
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} label="live" />
+      <div className="mt-2 flex gap-3">
+        {image && <img src={image} alt="" className="h-16 w-16 rounded object-cover bg-base-300 shrink-0" loading="lazy" />}
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold line-clamp-2">{title}</div>
+          {status && <div className="mt-1 badge badge-sm badge-primary">{status}</div>}
+          {summary && <div className="mt-1 text-sm text-base-content/75 line-clamp-3 whitespace-pre-wrap break-words">{summary}</div>}
+        </div>
+      </div>
+    </EmbedShell>
+  );
+}
+
+function ReferencedTags({ event }: { event: NostrEvent }) {
+  const refs = event.tags.filter((tag) => (tag[0] === "e" || tag[0] === "a") && tag[1]).slice(0, 2);
+  if (!refs.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-base-content/60">
+      {refs.map((tag, i) => (
+        <span key={`${tag[0]}-${tag[1]}-${i}`} className="rounded bg-base-300 px-1.5 py-0.5 font-mono">
+          {tag[0]}:{tag[1].length > 28 ? `${tag[1].slice(0, 18)}…${tag[1].slice(-8)}` : tag[1]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function GenericEventEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  const title = eventTitle(event);
+  const summary = eventSummary(event);
+  const content = event.content.trim();
+  return (
+    <EmbedShell encoded={encoded}>
+      <EventMeta event={event} />
+      {title && <div className="mt-2 font-semibold line-clamp-2">{title}</div>}
+      {(summary || content) && (
+        <div className="mt-1 text-sm text-base-content/75 line-clamp-4 whitespace-pre-wrap break-words">
+          {summary ?? content}
+        </div>
+      )}
+      <div className="mt-2 text-xs text-base-content/50 font-mono">{shortId(event.id)}</div>
+      <ReferencedTags event={event} />
+    </EmbedShell>
+  );
+}
+
+function EmbedShell({ encoded, children }: { encoded: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={externalNostrUrl(encoded)}
+      target="_blank"
+      rel="noreferrer"
+      className="block mt-2 max-w-[min(520px,100%)] rounded-xl border border-base-300 bg-base-200/70 px-3 py-2.5 text-base-content no-underline hover:border-primary/50 hover:bg-base-200"
+    >
+      {children}
+    </a>
+  );
+}
+
+function LoadedEventEmbed({ event, encoded }: { event: NostrEvent; encoded: string }) {
+  if (event.kind === kinds.Metadata) return <ProfileEmbed event={event} encoded={encoded} />;
+  if (event.kind === kinds.ShortTextNote) return <TextEventEmbed event={event} encoded={encoded} label="note" />;
+  if (event.kind === 1111) return <TextEventEmbed event={event} encoded={encoded} label="comment" />;
+  if (event.kind === kinds.Repost || event.kind === kinds.GenericRepost) return <ShareEmbed event={event} encoded={encoded} />;
+  if (event.kind === kinds.Reaction) return <ReactionEmbed event={event} encoded={encoded} />;
+  if (event.kind === kinds.LongFormArticle) return <ArticleEmbed event={event} encoded={encoded} />;
+  if (event.kind === kinds.LiveEvent) return <LiveEventEmbed event={event} encoded={encoded} />;
+  return <GenericEventEmbed event={event} encoded={encoded} />;
+}
+
+function NostrEventEmbed({ pointer, encoded, depth = 0 }: { pointer: NostrPointer; encoded: string; depth?: number }) {
+  const store = useEventStore();
+  const event = use$(
+    () => {
+      if (depth > MAX_EMBED_DEPTH) return undefined;
+      if (isEventPointer(pointer) || isAddressPointer(pointer)) return store.event(pointer);
+      return undefined;
+    },
+    [store, pointer, depth],
+  );
+
+  if (depth > MAX_EMBED_DEPTH) {
+    return (
+      <a href={externalNostrUrl(encoded)} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+        {encoded}
+      </a>
+    );
+  }
+  if (!event) {
+    return (
+      <EmbedShell encoded={encoded}>
+        <div className="flex items-center gap-2 text-sm text-base-content/60">
+          <span className="loading loading-spinner loading-xs" />
+          <span>Loading Nostr event…</span>
+        </div>
+      </EmbedShell>
+    );
+  }
+  return <LoadedEventEmbed event={event} encoded={encoded} />;
+}
+
 export const MessageContent = memo(function MessageContent({
   text,
   attachments,
@@ -227,19 +507,24 @@ export const MessageContent = memo(function MessageContent({
         }
       });
     } else if (node.type === "mention") {
-      // NIP-19 `nostr:` mention — render "@Name" from the resolved profile,
-      // falling back to the raw text if the pointer carries no pubkey.
-      const pubkey = getPubkeyFromDecodeResult(node.decoded);
-      if (pubkey) {
-        items.push({
-          node: (
-            <span key={i} className="text-primary bg-primary/15 rounded px-0.5 font-medium">
-              @<UserName pubkey={pubkey} />
-            </span>
-          ),
-        });
+      // NIP-19 mention. Profile pointers stay inline; event/address pointers
+      // become linked event embeds with kind-specific previews.
+      const pointer = pointerFromMention(node.encoded);
+      if (pointer) {
+        items.push({ node: <NostrEventEmbed key={i} pointer={pointer} encoded={node.encoded} /> });
       } else {
-        items.push({ node: <span key={i}>{node.encoded}</span> });
+        const pubkey = getPubkeyFromDecodeResult(node.decoded);
+        if (pubkey) {
+          items.push({
+            node: (
+              <span key={i} className="text-primary bg-primary/15 rounded px-0.5 font-medium">
+                @<UserName pubkey={pubkey} />
+              </span>
+            ),
+          });
+        } else {
+          items.push({ node: <span key={i}>{node.encoded}</span> });
+        }
       }
     } else if (node.type === "emoji") {
       // NIP-30 custom emoji — render the tagged image inline.
