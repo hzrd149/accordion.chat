@@ -123,8 +123,7 @@ export function foldMessages(rumors: Rumor[]): ChatMessage[] {
       msg.edited = r.content;
       // Replace emoji tags with the edit's so :shortcode: renders against the
       // edit's NIP-30 tags, not the original message's (which may differ).
-      const editEmojiTags = r.tags.filter((t) => t[0] === "emoji");
-      if (editEmojiTags.length) msg.emojiTags = editEmojiTags;
+      msg.emojiTags = r.tags.filter((t) => t[0] === "emoji");
     }
   }
   for (const r of deletes) {

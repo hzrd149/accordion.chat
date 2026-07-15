@@ -924,11 +924,12 @@ function MentionsView({
           </div>
         ) : (
           <div className="max-w-[min(860px,calc(100%-24px))] mx-auto py-4">
-            {mentions.map((m) => {
+            {mentions.map((m, i) => {
               const isNew = m.ms > frozenCursor;
+              const nextIsRead = mentions[i + 1]?.ms <= frozenCursor;
               return (
                 <Fragment key={m.id}>
-                  {isNew && (
+                  {isNew && nextIsRead && (
                     <div className="flex items-center gap-2 px-4 py-1 select-none" data-new-divider>
                       <div className="flex-1 h-px bg-error" />
                       <span className="text-error text-[10px] font-bold uppercase tracking-wide">New</span>
