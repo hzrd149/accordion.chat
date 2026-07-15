@@ -17,12 +17,10 @@ import { use$ } from "applesauce-react/hooks";
 import { kinds } from "nostr-tools";
 import type { ConcordCommunity } from "applesauce-concord";
 import { rumorMs } from "applesauce-concord/helpers";
-import { getParsedContent } from "applesauce-content/text";
-import type { Content } from "applesauce-content/nast";
-import { getPubkeyFromDecodeResult } from "applesauce-core/helpers";
 import type { Rumor } from "applesauce-core/helpers";
 import { ensureBaseline, getLastRead, getReadState, markRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "./fold";
+import { mentions } from "./mentions";
 
 /** Unread summary for one channel. */
 export interface ChannelUnread {
@@ -40,28 +38,6 @@ const NO_ENTRIES: (readonly [string, Rumor[]])[] = [];
 // Coalesce store churn: a burst of arriving rumors (or a cache hydrate, which
 // adds every cached rumor one by one) would otherwise re-count on every add.
 const SETTLE_MS = 250;
-
-/**
- * Whether a message's content mentions `pubkey`.
- *
- * Concord chat messages carry no `p` tags — `sendMessage` never adds them, and
- * the only `p` tag on the wire is the gift wrap's *decoy* recipient — so a
- * mention only exists as a NIP-19 `nostr:` token in the content. Parsing is
- * gated on a cheap substring test so the common (unmentioned) message costs a
- * scan rather than a full NAST parse.
- */
-function mentions(content: string, pubkey: string): boolean {
-  if (!pubkey || !content.includes("nostr:")) return false;
-  try {
-    const root = getParsedContent({ kind: kinds.ChatMessage, content, tags: [], created_at: 0 });
-    return root.children.some(
-      (node: Content) => node.type === "mention" && getPubkeyFromDecodeResult(node.decoded) === pubkey,
-    );
-  } catch {
-    /* An unparseable pointer is not a mention. */
-    return false;
-  }
-}
 
 function summarize(rumors: Rumor[], lastRead: number, pubkey: string): ChannelUnread {
   let count = 0;

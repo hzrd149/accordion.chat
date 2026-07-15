@@ -37,6 +37,8 @@ export interface CommunityReadState {
   baseline: number;
   /** channelId → last-read cursor (ms). */
   channels: Record<string, number>;
+  /** Last-read cursor for the community-wide Mentions view (ms). */
+  mentions?: number;
 }
 
 /** cid → read state for that community. */
@@ -105,6 +107,31 @@ export function markRead(pubkey: string, cid: string, channelId: string, ms: num
   write(pubkey, {
     ...state,
     [cid]: { ...community, channels: { ...community.channels, [channelId]: ms } },
+  });
+}
+
+/**
+ * The last-read cursor for the community-wide Mentions view, falling back to
+ * the community baseline (so pre-join mentions read as read).
+ */
+export function getMentionsLastRead(state: ReadState, cid: string): number {
+  const community = state[cid];
+  if (!community) return 0;
+  return community.mentions ?? community.baseline;
+}
+
+/**
+ * Advance the mentions cursor to `ms`. Monotonic like `markRead`.
+ */
+export function markMentionsRead(pubkey: string, cid: string, ms: number) {
+  if (!pubkey) return;
+  const state = getReadState(pubkey);
+  const community = state[cid] ?? { baseline: ms, channels: {} };
+  const current = community.mentions ?? community.baseline;
+  if (current >= ms) return;
+  write(pubkey, {
+    ...state,
+    [cid]: { ...community, mentions: ms },
   });
 }
 

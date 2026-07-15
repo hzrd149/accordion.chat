@@ -2,6 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ArrowLeft,
+  AtSign,
   CornerDownRight,
   Hand,
   Hash,
@@ -40,6 +41,7 @@ import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { useMessages, useThread } from "../chat/useMessages";
 import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread } from "../chat/useUnread";
+import { useMentions } from "../chat/useMentions";
 import { sendThreadReply as sendThreadReplyAction, sendEditWithEmojis } from "../chat/actions";
 import { Login } from "./Login";
 import {
@@ -66,6 +68,7 @@ import { DirectInviteModal } from "../components/DirectInviteModal";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
+import { getMentionsLastRead, markMentionsRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "../chat/fold";
 import type { ChannelMetadata, CommunityState, Role, ConcordCommunity, Storage } from "applesauce-concord";
 import { PERM } from "applesauce-concord";
@@ -100,6 +103,7 @@ export function App() {
             <Route path="/c/:cid" element={<Shell />} />
             <Route path="/c/:cid/settings" element={<Shell />} />
             <Route path="/c/:cid/settings/:page" element={<Shell />} />
+            <Route path="/c/:cid/mentions" element={<Shell />} />
             <Route path="/c/:cid/:channelId" element={<Shell />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -150,6 +154,8 @@ function Shell() {
   const adminRootMatch = useMatch("/c/:cid/settings");
   const onCommunitySettings = Boolean(adminMatch || adminRootMatch);
   const communitySettingsPage = adminMatch?.params.page ?? "overview";
+  const mentionsMatch = useMatch("/c/:cid/mentions");
+  const onMentions = Boolean(mentionsMatch);
   const devMode = useDevMode();
   const devMatch = useMatch("/dev/:page");
   const devRootMatch = useMatch("/dev");
@@ -224,12 +230,12 @@ function Shell() {
   }, [communities, selectedCid, onDm, onInvites, onSettings, onDev, navigate]);
 
   useEffect(() => {
-    if (!activeState || onCommunitySettings) return;
+    if (!activeState || onCommunitySettings || onMentions) return;
     const channels = activeState.channels;
     if (channels.length && !selectedChannel) {
       navigate(`/c/${activeState.material.community_id}/${channels[0].channel_id}`, { replace: true });
     }
-  }, [activeState, selectedChannel, onCommunitySettings, navigate]);
+  }, [activeState, selectedChannel, onCommunitySettings, onMentions, navigate]);
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
@@ -364,8 +370,13 @@ function Shell() {
             <Sidebar
               state={activeState}
               selectedChannel={selectedChannel}
+              mentionsActive={onMentions}
               onSelectChannel={(id) => {
                 navigate(`/c/${activeState.material.community_id}/${id}`);
+                setNavOpen(false);
+              }}
+              onSelectMentions={() => {
+                navigate(`/c/${activeState.material.community_id}/mentions`);
                 setNavOpen(false);
               }}
               onNewChannel={() => setModal("channel")}
@@ -373,7 +384,20 @@ function Shell() {
               onSettings={() => navigate(`/c/${activeState.material.community_id}/settings`)}
             />
           </div>
-          {selectedChannel ? (
+          {onMentions ? (
+            <MentionsView
+              cid={activeState.material.community_id}
+              state={activeState}
+              mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
+              onOpenChannel={(channelId, msgId) => {
+                const url = msgId
+                  ? `/c/${activeState.material.community_id}/${channelId}?msg=${msgId}`
+                  : `/c/${activeState.material.community_id}/${channelId}`;
+                navigate(url);
+                setNavOpen(false);
+              }}
+            />
+          ) : selectedChannel ? (
             <ChatView
               cid={activeState.material.community_id}
               channelId={selectedChannel}
@@ -546,23 +570,29 @@ function ChannelRow({
 function Sidebar({
   state,
   selectedChannel,
+  mentionsActive,
   onSelectChannel,
+  onSelectMentions,
   onNewChannel,
   onInvite,
   onSettings,
 }: {
   state: CommunityState;
   selectedChannel: string | null;
+  mentionsActive: boolean;
   onSelectChannel: (id: string) => void;
+  onSelectMentions: () => void;
   onNewChannel: () => void;
   onInvite: () => void;
   onSettings: () => void;
 }) {
   const community = useCommunity(state.material.community_id);
   const account = useActiveAccount();
+  const pubkey = account?.pubkey ?? "";
   const canManageChannels = community?.canDo(PERM.MANAGE_CHANNELS) ?? false;
   const canInvite = community?.canDo(PERM.CREATE_INVITE) ?? false;
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
+  const readState = useReadState(pubkey);
 
   // Only text channels carry chat, so only they can be unread — and counting a
   // voice channel would open a rumor store (and its IndexedDB database) for a
@@ -575,7 +605,23 @@ function Sidebar({
     community,
     state.material.community_id,
     textChannelIds,
-    account?.pubkey ?? "",
+    pubkey,
+  );
+
+  // Mentions badge: count mentions newer than the mentions cursor. Only text
+  // channels the user can read are scanned (public + held private channels).
+  const readableChannelIds = useMemo(
+    () =>
+      state.channels
+        .filter((c) => !c.voice && (!c.private || community?.material.channels.some((mc) => mc.id === c.channel_id)))
+        .map((c) => c.channel_id),
+    [state.channels, community],
+  );
+  const mentionRows = useMentions(community, state.material.community_id, readableChannelIds, pubkey);
+  const mentionsLastRead = getMentionsLastRead(readState, state.material.community_id);
+  const mentionUnread = useMemo(
+    () => mentionRows.filter((m) => m.ms > mentionsLastRead).length,
+    [mentionRows, mentionsLastRead],
   );
 
   return (
@@ -599,6 +645,28 @@ function Sidebar({
         </div>
       )}
       <div className="flex-1 overflow-y-auto p-2">
+        <button
+          data-mentions-row
+          className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left mb-1 ${
+            mentionsActive
+              ? "bg-base-300 text-base-content font-medium"
+              : mentionUnread > 0
+                ? "text-base-content font-semibold hover:bg-base-300"
+                : "text-base-content/60 font-medium hover:bg-base-300 hover:text-base-content"
+          }`}
+          onClick={onSelectMentions}
+        >
+          <span className="inline-flex items-center text-base-content/60"><AtSign size={16} /></span>
+          <span>Mentions</span>
+          {mentionUnread > 0 && (
+            <span
+              className="ml-auto shrink-0 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center pointer-events-none bg-error text-error-content"
+              title={`${mentionUnread} unread mention${mentionUnread === 1 ? "" : "s"}`}
+            >
+              {mentionUnread > 99 ? "99+" : mentionUnread}
+            </span>
+          )}
+        </button>
         <div className="flex justify-between items-center text-[11px] uppercase text-base-content/60 font-semibold pt-4 px-2 pb-1">
           <span>Channels</span>
           {canManageChannels && !state.dissolved && (
@@ -792,6 +860,110 @@ function reactionLabel(r: string | Emoji) {
   );
 }
 
+function MentionsView({
+  cid,
+  state,
+  mobileNav,
+  onOpenChannel,
+}: {
+  cid: string;
+  state: CommunityState;
+  mobileNav: React.ReactNode;
+  onOpenChannel: (channelId: string, msgId?: string) => void;
+}) {
+  const community = useCommunity(cid);
+  const account = useActiveAccount();
+  const pubkey = account?.pubkey ?? "";
+  const readState = useReadState(pubkey);
+
+  // Only scan text channels the user can read (public + held private channels).
+  const readableChannelIds = useMemo(
+    () =>
+      state.channels
+        .filter((c) => !c.voice && (!c.private || community?.material.channels.some((mc) => mc.id === c.channel_id)))
+        .map((c) => c.channel_id),
+    [state.channels, community],
+  );
+  const mentions = useMentions(community, cid, readableChannelIds, pubkey);
+
+  // Freeze the cursor at entry so the "New" divider stays put while reading,
+  // then advance it to the newest mention once the view is mounted + focused.
+  const [frozenCursor, setFrozenCursor] = useState(() => getMentionsLastRead(readState, cid));
+  const [frozenKey, setFrozenKey] = useState(cid);
+  if (frozenKey !== cid) {
+    setFrozenKey(cid);
+    setFrozenCursor(getMentionsLastRead(readState, cid));
+  }
+
+  const newestMs = mentions.length ? mentions[0].ms : 0;
+  useEffect(() => {
+    if (!pubkey || !cid || !newestMs) return;
+    markMentionsRead(pubkey, cid, newestMs);
+  }, [pubkey, cid, newestMs]);
+
+  const channelName = useCallback(
+    (channelId: string) => state.channels.find((c) => c.channel_id === channelId)?.name ?? "unknown",
+    [state.channels],
+  );
+
+  return (
+    <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
+      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+        {mobileNav}
+        <span className="inline-flex items-center text-base-content/60"><AtSign size={20} /></span>
+        <span className="font-semibold text-base-content">Mentions</span>
+        <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">
+          {state.metadata?.name ?? state.material.name}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {mentions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-base-content/60 gap-2 text-center p-10">
+            <div className="flex items-center justify-center"><AtSign size={48} /></div>
+            <div>No mentions yet. When someone mentions you in a channel, it will show up here.</div>
+          </div>
+        ) : (
+          <div className="max-w-[min(860px,calc(100%-24px))] mx-auto py-4">
+            {mentions.map((m) => {
+              const isNew = m.ms > frozenCursor;
+              return (
+                <Fragment key={m.id}>
+                  {isNew && (
+                    <div className="flex items-center gap-2 px-4 py-1 select-none" data-new-divider>
+                      <div className="flex-1 h-px bg-error" />
+                      <span className="text-error text-[10px] font-bold uppercase tracking-wide">New</span>
+                    </div>
+                  )}
+                  <button
+                    className="group flex gap-3.5 px-4 py-2 w-full text-left hover:bg-base-200 rounded-lg max-sm:gap-2.5 max-sm:px-2"
+                    onClick={() => onOpenChannel(m.channelId, m.id)}
+                  >
+                    <UserAvatar pubkey={m.author} className="w-10 h-10 mt-0.5 shrink-0 max-sm:w-8 max-sm:h-8" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="font-semibold shrink-0" style={{ color: colorFor(m.author) }}>
+                          <UserName pubkey={m.author} />
+                        </span>
+                        <span className="text-[11px] text-base-content/60 shrink-0">{formatTime(m.ms)}</span>
+                        <span className="inline-flex items-center gap-1 text-[11px] text-base-content/60 shrink-0">
+                          <Hash size={11} />{channelName(m.channelId)}
+                        </span>
+                      </div>
+                      <div className="text-base-content/90 break-words">
+                        <MessageContent text={m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
+                      </div>
+                    </div>
+                  </button>
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // The chat view is split into three independently-rendering pieces so a keystroke
 // in the composer never re-renders the (potentially long) message list:
 //   • ChatView    — owns the message stream, scroll, and shared reply target.
@@ -823,6 +995,8 @@ function ChatView({
   const pubkey = account?.pubkey ?? "";
   const messages = useMessages(community, channelId);
   const channel = state.channels.find((c) => c.channel_id === channelId);
+  const [searchParams] = useSearchParams();
+  const jumpTargetId = searchParams.get("msg");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [directInviteOpen, setDirectInviteOpen] = useState(false);
   const [privateDebugOpen, setPrivateDebugOpen] = useState(false);
@@ -864,7 +1038,7 @@ function ChatView({
 
   // The list is column-reverse, so entering a channel already lands on the
   // newest message and stays there as messages arrive — no effect needed. Only
-  // the unread divider has to be scrolled to.
+  // the unread divider (or a deep-linked `?msg=` target) has to be scrolled to.
   const positionedFor = useRef("");
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -873,12 +1047,22 @@ function ChatView({
     // in from relays, so the first render is routinely empty.
     if (messages.length === 0) return;
     positionedFor.current = channelId;
+    // A deep-linked message (from the Mentions view) takes priority over the
+    // unread divider: scroll it into view, centered.
+    if (jumpTargetId) {
+      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(jumpTargetId)}"]`);
+      if (target) {
+        target.scrollIntoView({ block: "center" });
+        target.focus({ preventScroll: true });
+        return;
+      }
+    }
     if (!dividerId) return;
     const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`);
     // Land on the divider with a little history above it for context, rather
     // than flush against the top edge.
     if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
-  }, [channelId, messages, dividerId]);
+  }, [channelId, messages, dividerId, jumpTargetId]);
 
   // Switching channels clears the shared reply target (the composer resets its
   // own draft via its `key`). Done during render — the documented alternative to
