@@ -929,6 +929,13 @@ function ChatView({
     [community, channelId, favorites],
   );
 
+  const jumpToMessage = useCallback((id: string) => {
+    const scrollEl = scrollRef.current;
+    const target = scrollEl?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
+    target?.scrollIntoView({ block: "center", behavior: "smooth" });
+    target?.focus({ preventScroll: true });
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
       <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
@@ -995,6 +1002,7 @@ function ChatView({
         favorites={favorites}
         quickReactions={quickReactions}
         onReply={setReplyTo}
+        onJumpToMessage={jumpToMessage}
         onThread={(m) => onOpenThread(m.id)}
       />
       {canWrite && (
@@ -1166,6 +1174,7 @@ const MessageList = memo(function MessageList({
   favorites,
   quickReactions,
   onReply,
+  onJumpToMessage,
   onThread,
 }: {
   ref: React.Ref<HTMLDivElement>;
@@ -1180,6 +1189,7 @@ const MessageList = memo(function MessageList({
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
   onReply: (r: ReplyTarget) => void;
+  onJumpToMessage: (id: string) => void;
   onThread: (m: ChatMessage) => void;
 }) {
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
@@ -1219,6 +1229,7 @@ const MessageList = memo(function MessageList({
                       favorites={favorites}
                       quickReactions={quickReactions}
                       onReply={onReply}
+                      onJumpToMessage={onJumpToMessage}
                       onThread={onThread}
                     />
                   </Fragment>
@@ -1249,6 +1260,7 @@ const Message = memo(function Message({
   favorites,
   quickReactions,
   onReply,
+  onJumpToMessage,
   onThread,
 }: {
   m: ChatMessage;
@@ -1262,6 +1274,7 @@ const Message = memo(function Message({
   favorites: Emoji[];
   quickReactions: (string | Emoji)[];
   onReply: (r: ReplyTarget) => void;
+  onJumpToMessage: (id: string) => void;
   onThread: (m: ChatMessage) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1336,11 +1349,16 @@ const Message = memo(function Message({
       )}
       <div className="min-w-0 flex-1">
         {m.replyTo && (
-          <div className="flex items-center gap-1.5 text-[13px] text-base-content/60 mb-0.5 min-w-0 before:content-[''] before:shrink-0 before:w-6 before:h-2 before:border-l-2 before:border-t-2 before:border-base-300 before:rounded-tl-md before:ml-5 before:self-end">
+          <button
+            type="button"
+            className="flex w-full items-center gap-1.5 text-left text-[13px] text-base-content/60 mb-0.5 min-w-0 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 before:content-[''] before:shrink-0 before:w-6 before:h-2 before:border-l-2 before:border-t-2 before:border-base-300 before:rounded-tl-md before:ml-5 before:self-end"
+            onClick={() => onJumpToMessage(m.replyTo!.id)}
+            title="Jump to replied message"
+          >
             <Reply size={14} className="shrink-0" />
             <span className="shrink-0"><UserName pubkey={m.replyTo.author} />:</span>
             <span className="truncate">{replyPreview}</span>
-          </div>
+          </button>
         )}
         {showHeader && (
           <div className="flex items-baseline gap-2">

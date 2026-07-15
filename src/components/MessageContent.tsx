@@ -24,6 +24,7 @@ type ImageSlide = { src: string };
 const TILE =
   "relative block overflow-hidden rounded-lg aspect-square bg-base-200 cursor-zoom-in last:odd:col-span-2 last:odd:aspect-video";
 const TILE_MEDIA = "w-full h-full object-cover block m-0";
+const LINK_CLASS = "text-info hover:text-info/80 underline underline-offset-2";
 
 function attKey(a: UrlAttachment): string {
   return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
@@ -203,7 +204,7 @@ export const MessageContent = memo(function MessageContent({
       } else {
         items.push({
           node: (
-            <a key={i} href={node.href} target="_blank" rel="noreferrer">
+            <a key={i} href={node.href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
               {node.value}
             </a>
           ),
@@ -218,7 +219,7 @@ export const MessageContent = memo(function MessageContent({
         } else {
           items.push({
             node: (
-              <a key={`${i}-${j}`} href={href} target="_blank" rel="noreferrer">
+              <a key={`${i}-${j}`} href={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
                 {href}
               </a>
             ),
