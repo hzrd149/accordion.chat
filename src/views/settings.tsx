@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { FlaskConical, Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
+import { FlaskConical, Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Search, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { CreateProfile, UpdateProfile } from "applesauce-actions/actions/profile";
 import { AddInboxRelay, AddOutboxRelay, RemoveInboxRelay, RemoveOutboxRelay } from "applesauce-actions/actions/mailboxes";
@@ -12,10 +12,15 @@ import { createSettingsRunner, saveRelayList, userFor } from "../lib/settings-ac
 import { UserAvatar } from "../components/User";
 import { useTheme, type ThemePref } from "../lib/theme";
 import { useDevMode, setDevMode } from "../lib/dev-mode";
+import {
+  DEFAULT_OPEN_RANKING_PROVIDER,
+  fetchOpenRankingCapabilities,
+  useOpenRankingProvider,
+} from "../lib/open-ranking";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
-type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup" | "advanced";
+type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup" | "discovery" | "advanced";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "profile", label: "Profile", icon: <UserIcon size={18} /> },
@@ -24,6 +29,7 @@ const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "dm", label: "DM Inbox Relays", icon: <Inbox size={18} /> },
   { id: "blossom", label: "Blossom Servers", icon: <Flower2 size={18} /> },
   { id: "lookup", label: "Indexer Relays", icon: <Radar size={18} /> },
+  { id: "discovery", label: "Discovery", icon: <Search size={18} /> },
   { id: "advanced", label: "Advanced", icon: <FlaskConical size={18} /> },
 ];
 
@@ -83,6 +89,7 @@ export function SettingsView({
           {page === "dm" && <DmRelaysPage signer={signer} pubkey={pubkey} />}
           {page === "blossom" && <BlossomPage signer={signer} pubkey={pubkey} />}
           {page === "lookup" && <LookupPage signer={signer} pubkey={pubkey} />}
+          {page === "discovery" && <DiscoveryPage />}
           {page === "advanced" && <AdvancedPage />}
         </div>
       </div>
@@ -135,6 +142,90 @@ function AppearancePage() {
             </label>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+// ---- Discovery ------------------------------------------------------------
+
+function DiscoveryPage() {
+  const { provider, setProvider, resetProvider } = useOpenRankingProvider();
+  const [value, setValue] = useState(provider);
+  const [seededProvider, setSeededProvider] = useState(provider);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (provider !== seededProvider) {
+    setSeededProvider(provider);
+    setValue(provider);
+  }
+
+  async function save(test: boolean) {
+    setBusy(true);
+    setStatus(null);
+    setError(null);
+    try {
+      const next = setProvider(value);
+      setValue(next);
+      if (test) {
+        const caps = await fetchOpenRankingCapabilities(next);
+        const search = caps["/search/pubkeys"];
+        if (!search?.length) throw new Error("Provider does not advertise /search/pubkeys");
+        setStatus(`Provider ready: ${search[0].name || search[0].id}`);
+      } else {
+        setStatus("Saved");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save provider");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reset() {
+    resetProvider();
+    setValue(DEFAULT_OPEN_RANKING_PROVIDER);
+    setStatus("Reset to default provider");
+    setError(null);
+  }
+
+  return (
+    <>
+      <h2 className="text-2xl font-bold mb-1">Discovery</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">
+        Direct invite global search uses an Open Ranking provider. This stays local to this browser.
+      </p>
+      {error && <div className="alert alert-error text-sm mb-4">{error}</div>}
+      {status && <div className="alert alert-success text-sm mb-4">{status}</div>}
+      <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="open-ranking-provider">
+        Open Ranking provider
+      </label>
+      <input
+        id="open-ranking-provider"
+        className="input input-bordered w-full max-w-[520px]"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setStatus(null);
+          setError(null);
+        }}
+        placeholder={DEFAULT_OPEN_RANKING_PROVIDER}
+      />
+      <p className="text-xs opacity-60 mt-2 max-w-[520px]">
+        The default is Brainstorm staging. The provider must support <code>/search/pubkeys</code>.
+      </p>
+      <div className="flex gap-2 mt-4 flex-wrap">
+        <button className="btn btn-primary" disabled={busy} onClick={() => void save(false)}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button className="btn" disabled={busy} onClick={() => void save(true)}>
+          Test provider
+        </button>
+        <button className="btn btn-ghost" disabled={busy} onClick={reset}>
+          Reset default
+        </button>
       </div>
     </>
   );

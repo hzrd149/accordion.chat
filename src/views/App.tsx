@@ -65,6 +65,7 @@ import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/Cli
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
+import { DirectInviteModal } from "../components/DirectInviteModal";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
@@ -844,7 +845,12 @@ function ChatView({
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [leaveChannelOpen, setLeaveChannelOpen] = useState(false);
+  const [directInviteOpen, setDirectInviteOpen] = useState(false);
+  const [privateDebugOpen, setPrivateDebugOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const devMode = useDevMode();
+  const canCreateInvite = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
+  const canManageChannels = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
 
   // Messages are folded oldest → newest, so the tail is the read cursor.
   const newestMs = messages.length ? messages[messages.length - 1].ms : 0;
@@ -858,6 +864,8 @@ function ChatView({
     Boolean(channel?.private) &&
     pubkey !== state.material.owner &&
     (community?.material.channels.some((c) => c.id === channelId) ?? false);
+  const hasChannelKey = !channel?.private || (community?.material.channels.some((c) => c.id === channelId) ?? false);
+  const canDirectInvite = Boolean(community && hasChannelKey && (channel?.private ? canManageChannels : canCreateInvite));
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
   const favorites = useFavoriteEmojis(pubkey);
@@ -944,6 +952,23 @@ function ChatView({
             <DoorOpen size={18} />
           </button>
         )}
+        {devMode && channel?.private && (
+          <button
+            className="btn btn-ghost btn-sm btn-circle text-warning"
+            title="Private channel debug"
+            onClick={() => setPrivateDebugOpen(true)}
+          >
+            <Wrench size={18} />
+          </button>
+        )}
+        <button
+          className="btn btn-ghost btn-sm btn-circle"
+          title={canDirectInvite ? "Direct invite" : "You do not have permission to invite here"}
+          disabled={!canDirectInvite}
+          onClick={() => setDirectInviteOpen(true)}
+        >
+          <UserPlus size={18} />
+        </button>
         <button className={`btn btn-ghost btn-sm btn-circle ${threadsOpen ? "btn-active" : ""}`} title="Threads" onClick={onToggleThreads}>
           <MessageSquare size={18} />
         </button>
@@ -967,6 +992,24 @@ function ChatView({
               re-add you from the community's Channels settings.
             </p>
           }
+        />
+      )}
+      {directInviteOpen && community && (
+        <DirectInviteModal community={community} state={state} channel={channel} onClose={() => setDirectInviteOpen(false)} />
+      )}
+      {privateDebugOpen && community && channel?.private && (
+        <PrivateChannelDebugModal
+          community={community}
+          state={state}
+          channel={channel}
+          channelId={channelId}
+          myPubkey={pubkey}
+          canCreateInvite={canCreateInvite}
+          canManageChannels={canManageChannels}
+          hasChannelKey={hasChannelKey}
+          canDirectInvite={canDirectInvite}
+          canWrite={canWrite}
+          onClose={() => setPrivateDebugOpen(false)}
         />
       )}
       {channel?.voice && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
@@ -997,6 +1040,135 @@ function ChatView({
           onSend={handleSend}
         />
       )}
+    </div>
+  );
+}
+
+function PrivateChannelDebugModal({
+  community,
+  state,
+  channel,
+  channelId,
+  myPubkey,
+  canCreateInvite,
+  canManageChannels,
+  hasChannelKey,
+  canDirectInvite,
+  canWrite,
+  onClose,
+}: {
+  community: ConcordCommunity;
+  state: CommunityState;
+  channel: ChannelMetadata;
+  channelId: string;
+  myPubkey: string;
+  canCreateInvite: boolean;
+  canManageChannels: boolean;
+  hasChannelKey: boolean;
+  canDirectInvite: boolean;
+  canWrite: boolean;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const materialChannel = community.material.channels.find((c) => c.id === channelId);
+  const isOwner = myPubkey === state.material.owner;
+  const foldedHasKey = Boolean(channel.key);
+  const materialHasKey = Boolean(materialChannel?.key);
+  const foldedMatchesMaterial = Boolean(channel.key && materialChannel?.key && channel.key === materialChannel.key);
+  const suspectedFallbackRisk = channel.private && !foldedHasKey;
+  const snapshot = {
+    communityId: state.material.community_id,
+    channelId,
+    channelName: channel.name,
+    channelPrivate: channel.private,
+    channelDeleted: Boolean(channel.deleted),
+    viewer: myPubkey,
+    owner: state.material.owner,
+    isOwner,
+    permissions: {
+      canCreateInvite,
+      canManageChannels,
+      appHasChannelKey: hasChannelKey,
+      canDirectInvite,
+      canWrite,
+    },
+    foldedChannel: {
+      hasKey: foldedHasKey,
+      epoch: channel.epoch,
+      keyPrefix: channel.key ? `${channel.key.slice(0, 8)}…` : null,
+    },
+    materialChannel: materialChannel
+      ? {
+          id: materialChannel.id,
+          name: materialChannel.name,
+          hasKey: materialHasKey,
+          epoch: materialChannel.epoch,
+          heldEpochs: materialChannel.held?.map((h) => h.epoch) ?? [],
+          keyPrefix: materialChannel.key ? `${materialChannel.key.slice(0, 8)}…` : null,
+        }
+      : null,
+    foldedMatchesMaterial,
+    suspectedFallbackRisk,
+  };
+  const json = JSON.stringify(snapshot, null, 2);
+
+  async function copy() {
+    await navigator.clipboard.writeText(json);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-xl font-bold mb-1">Private channel debug</h2>
+      <p className="text-sm opacity-70 mb-4">
+        Dev-only state for checking whether private channel metadata and held key material agree.
+      </p>
+
+      {suspectedFallbackRisk && (
+        <div className="alert alert-warning text-sm mb-4 items-start">
+          <ShieldQuestion size={18} className="mt-0.5" />
+          <span>
+            This private channel is folded without local key material. If sending still works, the upstream package may be
+            deriving a fallback community-root channel key for a private channel.
+          </span>
+        </div>
+      )}
+
+      <div className="rounded-box border border-base-300 overflow-hidden mb-4">
+        <DebugRow label="Viewer is owner" value={isOwner ? "yes" : "no"} good={isOwner} />
+        <DebugRow label="Can manage channels" value={canManageChannels ? "yes" : "no"} good={canManageChannels} />
+        <DebugRow label="Can create invites" value={canCreateInvite ? "yes" : "no"} good={canCreateInvite} />
+        <DebugRow label="Material has channel key" value={materialHasKey ? "yes" : "no"} good={materialHasKey} />
+        <DebugRow label="App hasChannelKey gate" value={hasChannelKey ? "yes" : "no"} good={hasChannelKey} />
+        <DebugRow label="Folded channel has key" value={foldedHasKey ? "yes" : "no"} good={foldedHasKey} />
+        <DebugRow label="Folded key matches material" value={foldedMatchesMaterial ? "yes" : "no"} good={foldedMatchesMaterial} />
+        <DebugRow label="App composer can write" value={canWrite ? "yes" : "no"} good={!suspectedFallbackRisk || !canWrite} />
+        <DebugRow label="Direct invite enabled" value={canDirectInvite ? "yes" : "no"} good={!suspectedFallbackRisk || !canDirectInvite} />
+      </div>
+
+      <div className="flex items-center gap-2 mb-2">
+        <h3 className="font-semibold">Snapshot</h3>
+        <button className="btn btn-xs ml-auto" onClick={() => void copy()}>
+          {copied ? "Copied" : "Copy JSON"}
+        </button>
+      </div>
+      <pre className="text-xs bg-base-200 border border-base-300 rounded-box p-3 overflow-auto max-h-72">{json}</pre>
+
+      <div className="modal-action">
+        <button className="btn btn-primary" onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DebugRow({ label, value, good }: { label: string; value: string; good: boolean }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2 border-b border-base-300 last:border-b-0 text-sm">
+      <span className="flex-1 opacity-70">{label}</span>
+      <span className={`badge ${good ? "badge-success" : "badge-warning"}`}>{value}</span>
     </div>
   );
 }

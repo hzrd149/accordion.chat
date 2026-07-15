@@ -79,10 +79,12 @@ export const NOSTR_CONNECT_RELAYS =
 		.filter(Boolean) ?? ["wss://bucket.coracle.social", "wss://relay.nsec.app"];
 
 // Permissions we request from a remote signer. The user's own key signs the
-// CORD-01 seals (SEAL_ENCRYPTED/PLAINTEXT), the self-encrypted Community/Invite
-// lists (13302/13303 use NIP-44), so we also need nip44 encrypt/decrypt.
+// CORD-01 seals (SEAL_ENCRYPTED/PLAINTEXT), standard NIP-59 seals (13) for
+// Direct Invites, and the self-encrypted Community/Invite lists (13302/13303 use
+// NIP-44), so we also need nip44 encrypt/decrypt.
 export const CONCORD_SIGNER_PERMISSIONS = [
 	...NostrConnectSigner.buildSigningPermissions([
+		13,
 		ENCRYPTED_SEAL_KIND,
 		PLAINTEXT_SEAL_KIND,
 		COMMUNITY_LIST_KIND,
