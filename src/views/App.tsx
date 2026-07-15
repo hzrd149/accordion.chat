@@ -46,7 +46,6 @@ import { useUnreadCounts, useMarkRead, useNewMessagesDivider, type ChannelUnread
 import { sendThreadReply as sendThreadReplyAction } from "../chat/actions";
 import { Login } from "./Login";
 import {
-  ConfirmModal,
   CreateChannelModal,
   CreateCommunityModal,
   InviteModal,
@@ -844,7 +843,6 @@ function ChatView({
   const messages = useMessages(community, channelId);
   const channel = state.channels.find((c) => c.channel_id === channelId);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
-  const [leaveChannelOpen, setLeaveChannelOpen] = useState(false);
   const [directInviteOpen, setDirectInviteOpen] = useState(false);
   const [privateDebugOpen, setPrivateDebugOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -858,12 +856,6 @@ function ChatView({
   const [atBottom, setAtBottom] = useState(true);
   useMarkRead(pubkey, cid, channelId, newestMs, atBottom);
 
-  // A private channel we actually hold the key for and don't own — the only case
-  // where "Leave channel" (a local key-drop) is meaningful.
-  const canLeaveChannel =
-    Boolean(channel?.private) &&
-    pubkey !== state.material.owner &&
-    (community?.material.channels.some((c) => c.id === channelId) ?? false);
   const hasChannelKey = !channel?.private || (community?.material.channels.some((c) => c.id === channelId) ?? false);
   const canDirectInvite = Boolean(community && hasChannelKey && (channel?.private ? canManageChannels : canCreateInvite));
 
@@ -947,11 +939,6 @@ function ChatView({
         <span className="font-semibold text-base-content">{channel?.name}</span>
         <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">{state.metadata?.description}</span>
         <div className="flex-1" />
-        {canLeaveChannel && (
-          <button className="btn btn-ghost btn-sm btn-circle" title="Leave channel" onClick={() => setLeaveChannelOpen(true)}>
-            <DoorOpen size={18} />
-          </button>
-        )}
         {devMode && channel?.private && (
           <button
             className="btn btn-ghost btn-sm btn-circle text-warning"
@@ -976,24 +963,6 @@ function ChatView({
           <Users size={18} />
         </button>
       </div>
-      {leaveChannelOpen && (
-        <ConfirmModal
-          title={`Leave #${channel?.name ?? "channel"}`}
-          danger
-          confirmLabel="Leave channel"
-          onClose={() => setLeaveChannelOpen(false)}
-          onConfirm={async () => {
-            await community?.leaveChannel(channelId);
-          }}
-          body={
-            <p>
-              Leave <strong>#{channel?.name}</strong>. Your copy of the channel key is dropped, so new
-              messages stop decrypting. Other members are unaffected. To get back in, an admin must
-              re-add you from the community's Channels settings.
-            </p>
-          }
-        />
-      )}
       {directInviteOpen && community && (
         <DirectInviteModal community={community} state={state} channel={channel} onClose={() => setDirectInviteOpen(false)} />
       )}
