@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 
 export const DEFAULT_OPEN_RANKING_PROVIDER = "https://staging.brainstorm.world";
 
+export const OPEN_RANKING_PRESETS: { url: string; label: string; hint: string }[] = [
+  { url: "https://staging.brainstorm.world", label: "Brainstorm", hint: "staging.brainstorm.world — default" },
+  { url: "https://ranking.vertexlab.io", label: "Vertex Lab", hint: "ranking.vertexlab.io" },
+];
+
 const KEY = "accordion:open-ranking-provider";
 const CHANGE_EVENT = "accordion:open-ranking-provider-change";
 

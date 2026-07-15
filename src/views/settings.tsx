@@ -14,6 +14,7 @@ import { useTheme, type ThemePref } from "../lib/theme";
 import { useDevMode, setDevMode } from "../lib/dev-mode";
 import {
   DEFAULT_OPEN_RANKING_PROVIDER,
+  OPEN_RANKING_PRESETS,
   fetchOpenRankingCapabilities,
   useOpenRankingProvider,
 } from "../lib/open-ranking";
@@ -202,6 +203,26 @@ function DiscoveryPage() {
       <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="open-ranking-provider">
         Open Ranking provider
       </label>
+      <div className="flex gap-2 flex-wrap mb-2">
+        {OPEN_RANKING_PRESETS.map((preset) => {
+          const active = preset.url === value;
+          return (
+            <button
+              key={preset.url}
+              type="button"
+              className={`btn btn-sm ${active ? "btn-primary" : "btn-outline"}`}
+              onClick={() => {
+                setValue(preset.url);
+                setStatus(null);
+                setError(null);
+              }}
+              title={preset.hint}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
       <input
         id="open-ranking-provider"
         className="input input-bordered w-full max-w-[520px]"
@@ -214,7 +235,8 @@ function DiscoveryPage() {
         placeholder={DEFAULT_OPEN_RANKING_PROVIDER}
       />
       <p className="text-xs opacity-60 mt-2 max-w-[520px]">
-        The default is Brainstorm staging. The provider must support <code>/search/pubkeys</code>.
+        Default is Brainstorm staging. Pick a preset above or enter any provider that supports{" "}
+        <code>/search/pubkeys</code>.
       </p>
       <div className="flex gap-2 mt-4 flex-wrap">
         <button className="btn btn-primary" disabled={busy} onClick={() => void save(false)}>
