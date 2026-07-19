@@ -18,3 +18,41 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@layer utilities {
+  .safe-fixed-y {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .safe-topbar {
+    min-height: calc(3rem + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .safe-topnav {
+    padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  }
+
+  .safe-rail-y {
+    padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .safe-bottombar {
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .safe-bottom-sheet {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .safe-floating-top {
+    top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  }
+}

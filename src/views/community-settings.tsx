@@ -78,7 +78,7 @@ export function CommunitySettingsView({
 
   return (
     <div className="flex-1 flex min-w-0 bg-base-100 max-md:flex-col">
-      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300">
+      <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:safe-topnav max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300">
         {mobileNav}
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
           <CommunityIcon name={name} icon={metadata?.icon} />

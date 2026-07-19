@@ -245,7 +245,7 @@ function Shell() {
 
       {/* Community rail */}
       <div
-        className={`w-18 bg-base-300 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:transition-transform ${
+        className={`w-18 bg-base-300 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:safe-rail-y max-md:safe-x max-md:transition-transform ${
           navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"
         }`}
       >
@@ -363,7 +363,7 @@ function Shell() {
         ) : (
         <>
           <div
-            className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:transition-transform ${
+            className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:safe-fixed-y max-md:transition-transform ${
               navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-[calc(100%+4.5rem)]"
             }`}
           >
@@ -435,7 +435,7 @@ function Shell() {
         )
       ) : (
         <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
-          <div className="h-12 flex items-center px-4 border-b border-base-300 shadow-sm shrink-0 md:hidden">
+          <div className="h-12 safe-topbar flex items-center px-4 border-b border-base-300 shadow-sm shrink-0 md:hidden">
             <MobileNavButton onClick={() => setNavOpen(true)} />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center text-base-content/60 gap-2 text-center p-10">
@@ -908,7 +908,7 @@ function MentionsView({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
-      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+      <div className="h-12 safe-topbar flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
         {mobileNav}
         <span className="inline-flex items-center text-base-content/60"><AtSign size={20} /></span>
         <span className="font-semibold text-base-content">Mentions</span>
@@ -1104,7 +1104,7 @@ function ChatView({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
-      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+      <div className="h-12 safe-topbar flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
         {mobileNav}
         <span className="inline-flex items-center text-base-content/60">
           {channel?.voice ? <Volume2 size={20} /> : channel?.private ? <Lock size={20} /> : <Hash size={20} />}
@@ -1647,7 +1647,7 @@ const Message = memo(function Message({
       </div>
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex items-end bg-black/45" onClick={() => setDrawerOpen(false)}>
-          <div className="w-full rounded-t-2xl bg-base-100 border-t border-base-300 p-4 shadow-2xl" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full rounded-t-2xl bg-base-100 border-t border-base-300 p-4 safe-bottom-sheet shadow-2xl" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-semibold truncate" style={{ color: colorFor(m.author) }}>
@@ -1793,7 +1793,7 @@ function SidePanel({
 }) {
   const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
-    <aside className="w-88 shrink-0 flex flex-col bg-base-200 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(400px,92vw)] max-md:shadow-2xl">
+    <aside className="w-88 shrink-0 flex flex-col bg-base-200 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(400px,92vw)] max-md:safe-fixed-y max-md:shadow-2xl">
       <div className="h-12 shrink-0 flex items-center justify-between gap-3 px-4">
         <span className="font-bold text-base-content">{title}</span>
         <button className="btn btn-ghost btn-sm btn-circle" title="Close panel" onClick={onClose}>
@@ -2254,7 +2254,7 @@ const Composer = memo(function Composer({
   }
 
   return (
-    <div className="px-4 pb-5 shrink-0 max-sm:px-2">
+    <div className="px-4 pb-5 safe-bottombar shrink-0 max-sm:px-2">
       {replyTo && (
         <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
           <span>

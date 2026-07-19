@@ -328,7 +328,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
   const host = (node: ReactNode, draggable = false) => {
     if (expanded) {
       return createPortal(
-        <div className="fixed inset-0 z-[70] flex min-h-0 flex-col overflow-hidden bg-base-100 text-base-content">
+        <div className="fixed inset-0 z-[70] safe-fixed-y safe-x flex min-h-0 flex-col overflow-hidden bg-base-100 text-base-content">
           {node}
         </div>,
         document.body,
@@ -344,7 +344,7 @@ export function VoiceRoom({ call, onLeave }: { call: ActiveCall; onLeave: () => 
     }
     if (draggable) return createPortal(<FloatingCallBox>{node}</FloatingCallBox>, document.body);
     return createPortal(
-      <div className="fixed left-1/2 top-3 z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
+      <div className="fixed left-1/2 safe-floating-top z-[60] flex w-[min(420px,calc(100vw-24px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-base-300 bg-base-200 shadow-2xl">
         {node}
       </div>,
       document.body,

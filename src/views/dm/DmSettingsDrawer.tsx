@@ -29,7 +29,7 @@ export function DmSettingsDrawer({
   return (
     <>
       <div className="fixed inset-0 z-[35] bg-black/40 md:hidden" onClick={onClose} />
-      <aside className="w-[21.5rem] max-w-[calc(100vw-4rem)] bg-base-200 border-l border-base-300 shadow-xl shrink-0 fixed md:static md:shadow-none right-0 inset-y-0 z-40 flex flex-col min-h-0">
+      <aside className="w-[21.5rem] max-w-[calc(100vw-4rem)] bg-base-200 border-l border-base-300 shadow-xl shrink-0 fixed md:static md:shadow-none right-0 inset-y-0 z-40 max-md:safe-fixed-y flex flex-col min-h-0">
         <div className="h-12 flex items-center gap-2 px-4 border-b border-base-300 shrink-0">
           <Info size={18} className="opacity-60" />
           <span className="font-semibold">DM Settings</span>

@@ -34,7 +34,7 @@ export function DmSidebar({
 
   return (
     <aside
-      className={`w-72 shrink-0 bg-base-200 border-r border-base-300 flex flex-col min-h-0 max-md:w-[min(18rem,calc(100vw-4.5rem))] max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:transition-transform ${
+      className={`w-72 shrink-0 bg-base-200 border-r border-base-300 flex flex-col min-h-0 max-md:w-[min(18rem,calc(100vw-4.5rem))] max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:safe-fixed-y max-md:transition-transform ${
         open ? "max-md:translate-x-0" : "max-md:-translate-x-[calc(100%+4.5rem)]"
       }`}
     >

@@ -33,7 +33,7 @@ export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100">
-      <div className="h-12 flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
+      <div className="h-12 safe-topbar flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
         {mobileNav}
         <Inbox size={20} className="text-base-content/60" />
         <span className="font-semibold text-base-content">Invites</span>

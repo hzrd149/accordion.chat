@@ -18,7 +18,7 @@ export function DmComposer({
   onSubmit: (event: FormEvent) => void;
 }) {
   return (
-    <div className="shrink-0">
+    <div className="shrink-0 safe-bottombar">
       <form className="p-3 border-t border-base-300 flex gap-2" onSubmit={onSubmit}>
         <input
           className="input input-bordered flex-1 min-w-0"
