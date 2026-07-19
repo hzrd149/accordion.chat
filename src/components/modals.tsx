@@ -27,8 +27,8 @@ const EXPIRY_OPTIONS: { key: ExpiryKey; label: string; ms?: number }[] = [
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
   return (
-    <div className="modal modal-open" onClick={onClose}>
-      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+    <div className="modal modal-open safe-modal" onClick={onClose}>
+      <div className="modal-box safe-modal-box" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
       <div className="modal-backdrop" />
