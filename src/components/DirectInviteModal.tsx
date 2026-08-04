@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Globe2, Loader2, Lock, Search, Users } from "lucide-react";
-import { useActiveAccount } from "applesauce-react/hooks";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { nip19 } from "nostr-tools";
-import type { ChannelMetadata, CommunityState, ConcordCommunity } from "applesauce-concord";
+import type { ChannelMetadata, ConcordCommunity } from "applesauce-concord";
 import { hasChannelKey } from "applesauce-concord/helpers";
 import { useMentionCandidates, useMentionSearch, type MentionCandidate } from "../hooks/mentions";
 import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../lib/open-ranking";
@@ -12,6 +12,7 @@ import { Modal } from "./modals";
 import { UserAvatar, UserName } from "./User";
 
 type Scope = "members" | "global";
+const EMPTY_MEMBERS: ReadonlySet<string> = new Set();
 
 interface UserResult {
   pubkey: string;
@@ -46,12 +47,10 @@ function dedupeResults(results: UserResult[]): UserResult[] {
 
 export function DirectInviteModal({
   community,
-  state,
   channel,
   onClose,
 }: {
   community: ConcordCommunity;
-  state: CommunityState;
   channel: ChannelMetadata | undefined;
   onClose: () => void;
 }) {
@@ -67,8 +66,8 @@ export function DirectInviteModal({
   const [error, setError] = useState("");
   const [sent, setSent] = useState("");
 
-  const members = useMemo(() => [...state.members], [state.members]);
-  const memberSet = state.members;
+  const memberSet = use$(community.members$) ?? EMPTY_MEMBERS;
+  const members = useMemo(() => [...memberSet], [memberSet]);
   const candidates = useMentionCandidates(members);
   const searchMembers = useMentionSearch(candidates);
   const provider = getOpenRankingProvider();

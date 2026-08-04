@@ -70,10 +70,11 @@ import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
 import { getMentionsLastRead, markMentionsRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "../chat/fold";
-import type { ChannelMetadata, CommunityState, Role, ConcordCommunity, Storage } from "applesauce-concord";
+import type { ChannelMetadata, Role, ConcordCommunity, Storage } from "applesauce-concord";
 import { MissingChannelKeyError, PERM } from "applesauce-concord";
 import { hasChannelKey } from "applesauce-concord/helpers";
 import { kinds } from "nostr-tools";
+import { distinctUntilChanged, map } from "rxjs";
 
 /** How close to the bottom still counts as "following the conversation" (px). */
 const BOTTOM_THRESHOLD_PX = 80;
@@ -117,16 +118,28 @@ export function App() {
 /** Overlay names carried in the `?modal=` query param. */
 type ModalName = "create" | "join" | "channel" | "invite" | "addMenu";
 
-// Stable empty fallback so `communities` keeps a constant identity while the
-// stream is still empty — otherwise a fresh `[]` each render would retrigger the
-// auto-select effect below on every render.
-const NO_COMMUNITIES: CommunityState[] = [];
+// Stable empty fallbacks keep slice values at a constant identity before their
+// folds emit, avoiding spurious memo/effect invalidation during hydration.
+const NO_COMMUNITY_IDS: string[] = [];
+const NO_CHANNELS: ChannelMetadata[] = [];
+const NO_MEMBERS: ReadonlySet<string> = new Set();
+const NO_ROLES: Role[] = [];
+const NO_GRANTS: ReadonlyMap<string, string[]> = new Map();
+
+function sameStrings(a: string[], b: string[]) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
 
 function Shell() {
   const client = useConcord();
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
-  const communities = use$(client.communities$) ?? NO_COMMUNITIES;
+  // The manager's list contains aggregate CommunityState objects. Project it to
+  // stable ids here so a chat/control fold inside one community does not
+  // re-render the entire application shell and every community rail item.
+  const communityIds =
+    use$(() => client.communities$.pipe(map((states) => states.map((state) => state.material.community_id)), distinctUntilChanged(sameStrings)), [client]) ??
+    NO_COMMUNITY_IDS;
   const navigate = useNavigate();
   const { cid: cidParam, channelId: channelParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -221,22 +234,22 @@ function Shell() {
   // a choice. Deep links may point at communities/channels that are still being
   // restored from the local mirror or relay list, so don't replace them just
   // because the current fold has not surfaced them yet.
-  const activeState = communities.find((c) => c.material.community_id === selectedCid);
+  const activeCommunity = useCommunity(selectedCid ?? undefined);
+  const activeChannels = use$(activeCommunity?.channels$) ?? NO_CHANNELS;
   useEffect(() => {
     // Don't auto-jump into a community from the invites/settings routes — only
     // from root.
-    if (communities.length > 0 && !selectedCid && !onDm && !onInvites && !onSettings && !onDev) {
-      navigate(`/c/${communities[0].material.community_id}`, { replace: true });
+    if (communityIds.length > 0 && !selectedCid && !onDm && !onInvites && !onSettings && !onDev) {
+      navigate(`/c/${communityIds[0]}`, { replace: true });
     }
-  }, [communities, selectedCid, onDm, onInvites, onSettings, onDev, navigate]);
+  }, [communityIds, selectedCid, onDm, onInvites, onSettings, onDev, navigate]);
 
   useEffect(() => {
-    if (!activeState || onCommunitySettings || onMentions) return;
-    const channels = activeState.channels;
-    if (channels.length && !selectedChannel) {
-      navigate(`/c/${activeState.material.community_id}/${channels[0].channel_id}`, { replace: true });
+    if (!activeCommunity || onCommunitySettings || onMentions) return;
+    if (activeChannels.length && !selectedChannel) {
+      navigate(`/c/${activeCommunity.material.community_id}/${activeChannels[0].channel_id}`, { replace: true });
     }
-  }, [activeState, selectedChannel, onCommunitySettings, onMentions, navigate]);
+  }, [activeCommunity, activeChannels, selectedChannel, onCommunitySettings, onMentions, navigate]);
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
@@ -250,13 +263,13 @@ function Shell() {
           navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"
         }`}
       >
-        {communities.map((c) => (
+        {communityIds.map((cid) => (
           <RailIcon
-            key={c.material.community_id}
-            state={c}
-            active={c.material.community_id === selectedCid}
+            key={cid}
+            cid={cid}
+            active={cid === selectedCid}
             onClick={() => {
-              navigate(`/c/${c.material.community_id}`);
+              navigate(`/c/${cid}`);
               setNavOpen(false);
             }}
           />
@@ -352,14 +365,14 @@ function Shell() {
           mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
           onSelectPage={(p) => navigate(`/dev/${p}`)}
         />
-      ) : activeState ? (
+      ) : activeCommunity ? (
         onCommunitySettings ? (
           <CommunitySettingsView
-            cid={activeState.material.community_id}
+            cid={activeCommunity.material.community_id}
             page={communitySettingsPage}
             mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
-            onSelectPage={(p) => navigate(`/c/${activeState.material.community_id}/settings/${p}`)}
-            onClose={() => navigate(`/c/${activeState.material.community_id}`)}
+            onSelectPage={(p) => navigate(`/c/${activeCommunity.material.community_id}/settings/${p}`)}
+            onClose={() => navigate(`/c/${activeCommunity.material.community_id}`)}
           />
         ) : (
         <>
@@ -369,40 +382,38 @@ function Shell() {
             }`}
           >
             <Sidebar
-              state={activeState}
+              cid={activeCommunity.material.community_id}
               selectedChannel={selectedChannel}
               mentionsActive={onMentions}
               onSelectChannel={(id) => {
-                navigate(`/c/${activeState.material.community_id}/${id}`);
+                navigate(`/c/${activeCommunity.material.community_id}/${id}`);
                 setNavOpen(false);
               }}
               onSelectMentions={() => {
-                navigate(`/c/${activeState.material.community_id}/mentions`);
+                navigate(`/c/${activeCommunity.material.community_id}/mentions`);
                 setNavOpen(false);
               }}
               onNewChannel={() => setModal("channel")}
               onInvite={() => setModal("invite")}
-              onSettings={() => navigate(`/c/${activeState.material.community_id}/settings`)}
+              onSettings={() => navigate(`/c/${activeCommunity.material.community_id}/settings`)}
             />
           </div>
           {onMentions ? (
             <MentionsView
-              cid={activeState.material.community_id}
-              state={activeState}
+              cid={activeCommunity.material.community_id}
               mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
               onOpenChannel={(channelId, msgId) => {
                 const url = msgId
-                  ? `/c/${activeState.material.community_id}/${channelId}?msg=${msgId}`
-                  : `/c/${activeState.material.community_id}/${channelId}`;
+                  ? `/c/${activeCommunity.material.community_id}/${channelId}?msg=${msgId}`
+                  : `/c/${activeCommunity.material.community_id}/${channelId}`;
                 navigate(url);
                 setNavOpen(false);
               }}
             />
           ) : selectedChannel ? (
             <ChatView
-              cid={activeState.material.community_id}
+              cid={activeCommunity.material.community_id}
               channelId={selectedChannel}
-              state={activeState}
               mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
               threadsOpen={panelMode === "threads"}
               membersOpen={panelMode === "members"}
@@ -421,12 +432,10 @@ function Shell() {
           {panelMode && (
             <SidePanel
               mode={panelMode}
-              state={activeState}
-              cid={activeState.material.community_id}
+              cid={activeCommunity.material.community_id}
               channelId={selectedChannel}
               threadRootId={threadRootId}
               favorites={favorites}
-              canWrite={!activeState.dissolved}
               onOpenThread={openThread}
               onCloseThread={() => setThreadRootId(null)}
               onClose={() => setPanelMode(null)}
@@ -480,11 +489,11 @@ function Shell() {
           onJoined={(id) => navigate(`/c/${id}`)}
         />
       )}
-      {modal === "channel" && activeState && (
-        <CreateChannelModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
+      {modal === "channel" && activeCommunity && (
+        <CreateChannelModal cid={activeCommunity.material.community_id} onClose={() => setModal(null)} />
       )}
-      {modal === "invite" && activeState && (
-        <InviteModal cid={activeState.material.community_id} onClose={() => setModal(null)} />
+      {modal === "invite" && activeCommunity && (
+        <InviteModal cid={activeCommunity.material.community_id} onClose={() => setModal(null)} />
       )}
     </div>
   );
@@ -498,9 +507,11 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function RailIcon({ state, active, onClick }: { state: CommunityState; active: boolean; onClick: () => void }) {
-  const name = state.metadata?.name ?? state.material.name;
-  const iconUrl = useDecryptedImage(state.metadata?.icon);
+function RailIcon({ cid, active, onClick }: { cid: string; active: boolean; onClick: () => void }) {
+  const community = useCommunity(cid);
+  const metadata = use$(community?.metadata$);
+  const name = metadata?.name ?? community?.material.name ?? "";
+  const iconUrl = useDecryptedImage(metadata?.icon);
   return (
     <div className="relative w-12 h-12 shrink-0">
       <button
@@ -514,7 +525,7 @@ function RailIcon({ state, active, onClick }: { state: CommunityState; active: b
       >
         {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
       </button>
-      <CommunityStatusDot cid={state.material.community_id} />
+      <CommunityStatusDot cid={cid} />
     </div>
   );
 }
@@ -610,7 +621,7 @@ function ChannelRow({
 }
 
 function Sidebar({
-  state,
+  cid,
   selectedChannel,
   mentionsActive,
   onSelectChannel,
@@ -619,7 +630,7 @@ function Sidebar({
   onInvite,
   onSettings,
 }: {
-  state: CommunityState;
+  cid: string;
   selectedChannel: string | null;
   mentionsActive: boolean;
   onSelectChannel: (id: string) => void;
@@ -628,21 +639,24 @@ function Sidebar({
   onInvite: () => void;
   onSettings: () => void;
 }) {
-  const community = useCommunity(state.material.community_id);
+  const community = useCommunity(cid);
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
+  const metadata = use$(community?.metadata$);
+  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const dissolved = use$(community?.dissolved$) ?? false;
   // The `$` forms, not the `canDo` snapshots: these gate rendered controls, so
   // they have to re-emit when a role grant changes the answer.
   const canManageChannels = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
   const canInvite = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
-  const bannerUrl = useDecryptedImage(state.metadata?.banner);
+  const bannerUrl = useDecryptedImage(metadata?.banner);
   const readState = useReadState(pubkey);
 
   // Every channel carries chat, so every channel can be unread.
-  const channelIds = useMemo(() => state.channels.map((c) => c.channel_id), [state.channels]);
+  const channelIds = useMemo(() => channels.map((c) => c.channel_id), [channels]);
   const unread = useUnreadCounts(
     community,
-    state.material.community_id,
+    cid,
     channelIds,
     pubkey,
   );
@@ -651,13 +665,13 @@ function Sidebar({
   // the user can read are scanned (public + held private channels).
   const readableChannelIds = useMemo(
     () =>
-      state.channels
+      channels
         .filter((c) => !c.private || community?.material.channels.some((mc) => mc.id === c.channel_id))
         .map((c) => c.channel_id),
-    [state.channels, community],
+    [channels, community],
   );
-  const mentionRows = useMentions(community, state.material.community_id, readableChannelIds, pubkey);
-  const mentionsLastRead = getMentionsLastRead(readState, state.material.community_id);
+  const mentionRows = useMentions(community, cid, readableChannelIds, pubkey);
+  const mentionsLastRead = getMentionsLastRead(readState, cid);
   const mentionUnread = useMemo(
     () => mentionRows.filter((m) => m.ms > mentionsLastRead).length,
     [mentionRows, mentionsLastRead],
@@ -671,14 +685,14 @@ function Sidebar({
           bannerUrl ? "-mt-5 bg-gradient-to-b from-transparent to-base-200" : ""
         }`}
       >
-        <span className="truncate" title={state.material.community_id}>{state.metadata?.name ?? state.material.name}</span>
+        <span className="truncate" title={cid}>{metadata?.name ?? community?.material.name}</span>
         <div className="flex items-center gap-1 shrink-0">
           <button className="btn btn-ghost btn-sm btn-circle" title="Community settings" onClick={onSettings}>
             <Settings size={18} />
           </button>
         </div>
       </div>
-      {state.dissolved && (
+      {dissolved && (
         <div className="text-error text-sm p-3">
           This community has been dissolved. It is now read-only.
         </div>
@@ -708,23 +722,23 @@ function Sidebar({
         </button>
         <div className="flex justify-between items-center text-[11px] uppercase text-base-content/60 font-semibold pt-4 px-2 pb-1">
           <span>Channels</span>
-          {canManageChannels && !state.dissolved && (
+          {canManageChannels && !dissolved && (
             <button className="btn btn-ghost btn-xs btn-circle" title="Create channel" onClick={onNewChannel}>
               <Plus size={16} />
             </button>
           )}
         </div>
-        {state.channels.map((ch) => (
+        {channels.map((ch) => (
           <ChannelRow
             key={ch.channel_id}
-            cid={state.material.community_id}
+            cid={cid}
             channel={ch}
             selected={ch.channel_id === selectedChannel}
             unread={unread[ch.channel_id]}
             onSelect={() => onSelectChannel(ch.channel_id)}
           />
         ))}
-        {canInvite && !state.dissolved && (
+        {canInvite && !dissolved && (
           <button
             className="flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium mt-3 text-success hover:bg-base-300"
             onClick={onInvite}
@@ -740,7 +754,7 @@ function Sidebar({
           <div className="text-sm font-semibold text-base-content truncate">
             <UserName pubkey={account?.pubkey ?? ""} />
           </div>
-          <div className="text-[11px] text-base-content/60 truncate">{account?.pubkey === state.material.owner ? "Owner" : "Member"}</div>
+          <div className="text-[11px] text-base-content/60 truncate">{account?.pubkey === community?.material.owner ? "Owner" : "Member"}</div>
         </div>
         <ThemeToggle />
         <button
@@ -857,27 +871,27 @@ function reactionLabel(r: string | Emoji) {
 
 function MentionsView({
   cid,
-  state,
   mobileNav,
   onOpenChannel,
 }: {
   cid: string;
-  state: CommunityState;
   mobileNav: React.ReactNode;
   onOpenChannel: (channelId: string, msgId?: string) => void;
 }) {
   const community = useCommunity(cid);
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
+  const metadata = use$(community?.metadata$);
+  const channels = use$(community?.channels$) ?? NO_CHANNELS;
   const readState = useReadState(pubkey);
 
   // Only scan text channels the user can read (public + held private channels).
   const readableChannelIds = useMemo(
     () =>
-      state.channels
+      channels
         .filter((c) => !c.private || community?.material.channels.some((mc) => mc.id === c.channel_id))
         .map((c) => c.channel_id),
-    [state.channels, community],
+    [channels, community],
   );
   const mentions = useMentions(community, cid, readableChannelIds, pubkey);
 
@@ -897,8 +911,8 @@ function MentionsView({
   }, [pubkey, cid, newestMs]);
 
   const channelName = useCallback(
-    (channelId: string) => state.channels.find((c) => c.channel_id === channelId)?.name ?? "unknown",
-    [state.channels],
+    (channelId: string) => channels.find((c) => c.channel_id === channelId)?.name ?? "unknown",
+    [channels],
   );
 
   return (
@@ -908,7 +922,7 @@ function MentionsView({
         <span className="inline-flex items-center text-base-content/60"><AtSign size={20} /></span>
         <span className="font-semibold text-base-content">Mentions</span>
         <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">
-          {state.metadata?.name ?? state.material.name}
+          {metadata?.name ?? community?.material.name}
         </span>
       </div>
       <div className="flex-1 overflow-y-auto">
@@ -968,7 +982,6 @@ function MentionsView({
 function ChatView({
   cid,
   channelId,
-  state,
   mobileNav,
   threadsOpen,
   membersOpen,
@@ -978,7 +991,6 @@ function ChatView({
 }: {
   cid: string;
   channelId: string;
-  state: CommunityState;
   mobileNav: React.ReactNode;
   threadsOpen: boolean;
   membersOpen: boolean;
@@ -989,8 +1001,12 @@ function ChatView({
   const community = useCommunity(cid);
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
+  const metadata = use$(community?.metadata$);
+  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const membersState = use$(community?.members$) ?? NO_MEMBERS;
+  const dissolved = use$(community?.dissolved$) ?? false;
   const messages = useMessages(community, channelId);
-  const channel = state.channels.find((c) => c.channel_id === channelId);
+  const channel = channels.find((c) => c.channel_id === channelId);
   const [searchParams] = useSearchParams();
   const jumpTargetId = searchParams.get("msg");
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
@@ -1076,11 +1092,11 @@ function ChatView({
   // Writing needs the channel's key as well as a live community: every channel
   // write path now throws MissingChannelKeyError for a private channel we can't
   // decrypt, so offering the composer there would only produce a failed send.
-  const canWrite = !state.dissolved && channelAccessible;
+  const canWrite = !dissolved && channelAccessible;
 
   // Roster of pubkeys the composer's @-mention menu searches. Memoized on the
   // Set reference so the composer's memo isn't defeated by unrelated re-renders.
-  const members = useMemo(() => [...state.members], [state.members]);
+  const members = useMemo(() => [...membersState], [membersState]);
 
   const handleSend = useCallback(
     async (
@@ -1112,7 +1128,7 @@ function ChatView({
           {channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
         <span className="font-semibold text-base-content">{channel?.name}</span>
-        <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">{state.metadata?.description}</span>
+        <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">{metadata?.description}</span>
         <div className="flex-1" />
         {channel && <ChannelCallButton cid={cid} channelId={channelId} name={channel.name} />}
         {devMode && channel?.private && (
@@ -1140,12 +1156,11 @@ function ChatView({
         </button>
       </div>
       {directInviteOpen && community && (
-        <DirectInviteModal community={community} state={state} channel={channel} onClose={() => setDirectInviteOpen(false)} />
+        <DirectInviteModal community={community} channel={channel} onClose={() => setDirectInviteOpen(false)} />
       )}
       {privateDebugOpen && community && channel?.private && (
         <PrivateChannelDebugModal
           community={community}
-          state={state}
           channel={channel}
           channelId={channelId}
           myPubkey={pubkey}
@@ -1162,7 +1177,7 @@ function ChatView({
         ref={scrollRef}
         messages={messages}
         channelName={channel?.name}
-        ownerPubkey={state.material.owner}
+        ownerPubkey={community?.material.owner ?? ""}
         myPubkey={pubkey}
         canWrite={canWrite}
         community={community}
@@ -1192,7 +1207,6 @@ function ChatView({
 
 function PrivateChannelDebugModal({
   community,
-  state,
   channel,
   channelId,
   myPubkey,
@@ -1204,7 +1218,6 @@ function PrivateChannelDebugModal({
   onClose,
 }: {
   community: ConcordCommunity;
-  state: CommunityState;
   channel: ChannelMetadata;
   channelId: string;
   myPubkey: string;
@@ -1221,17 +1234,17 @@ function PrivateChannelDebugModal({
   // a "folded key" to compare against — the disagreement this modal used to hunt
   // for is structurally impossible now.
   const materialChannel = community.material.channels.find((c) => c.id === channelId);
-  const isOwner = myPubkey === state.material.owner;
+  const isOwner = myPubkey === community.material.owner;
   const materialHasKey = Boolean(materialChannel?.key);
   const suspectedFallbackRisk = channel.private && !materialHasKey;
   const snapshot = {
-    communityId: state.material.community_id,
+    communityId: community.material.community_id,
     channelId,
     channelName: channel.name,
     channelPrivate: channel.private,
     channelDeleted: Boolean(channel.deleted),
     viewer: myPubkey,
-    owner: state.material.owner,
+    owner: community.material.owner,
     isOwner,
     permissions: {
       canCreateInvite,
@@ -1767,27 +1780,25 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
  */
 function SidePanel({
   mode,
-  state,
   cid,
   channelId,
   threadRootId,
   favorites,
-  canWrite,
   onOpenThread,
   onCloseThread,
   onClose,
 }: {
   mode: "members" | "threads";
-  state: CommunityState;
   cid: string;
   channelId: string | null;
   threadRootId: string | null;
   favorites: Emoji[];
-  canWrite: boolean;
   onOpenThread: (id: string) => void;
   onCloseThread: () => void;
   onClose: () => void;
 }) {
+  const community = useCommunity(cid);
+  const dissolved = use$(community?.dissolved$) ?? false;
   const title = mode === "members" ? "Members" : threadRootId ? "Thread" : "Threads";
   return (
     <aside className="w-88 shrink-0 flex flex-col bg-base-200 min-h-0 max-md:fixed max-md:inset-y-0 max-md:right-0 max-md:z-40 max-md:w-[min(400px,92vw)] max-md:safe-fixed-y max-md:shadow-2xl">
@@ -1799,13 +1810,13 @@ function SidePanel({
       </div>
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {mode === "members" ? (
-          <MemberList state={state} />
+          <MemberList cid={cid} />
         ) : channelId ? (
           <ThreadsPanel
             cid={cid}
             channelId={channelId}
             threadRootId={threadRootId}
-            canWrite={canWrite}
+            canWrite={!dissolved}
             favorites={favorites}
             onOpenThread={onOpenThread}
             onCloseThread={onCloseThread}
@@ -2437,22 +2448,27 @@ function roleColor(color: number): string | undefined {
   return color ? `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}` : undefined;
 }
 
-function MemberList({ state }: { state: CommunityState }) {
-  const owner = state.material.owner;
-  const rolesById = useMemo(() => new Map(state.roles.map((r) => [r.role_id, r])), [state.roles]);
+function MemberList({ cid }: { cid: string }) {
+  const community = useCommunity(cid);
+  const membersState = use$(community?.members$) ?? NO_MEMBERS;
+  const roles = use$(community?.roles$) ?? NO_ROLES;
+  const grants = use$(community?.grants$) ?? NO_GRANTS;
+  const banlist = use$(community?.banlist$) ?? NO_MEMBERS;
+  const owner = community?.material.owner ?? "";
+  const rolesById = useMemo(() => new Map(roles.map((r) => [r.role_id, r])), [roles]);
 
   // Each member's highest-authority Role (lowest `position`), Discord-style: a
   // member is hoisted under one role only. The owner is special-cased above.
   const primaryRole = useCallback(
     (m: string): Role | undefined => {
       let best: Role | undefined;
-      for (const id of state.grants.get(m) ?? []) {
+      for (const id of grants.get(m) ?? []) {
         const r = rolesById.get(id);
         if (r && (!best || r.position < best.position)) best = r;
       }
       return best;
     },
-    [state.grants, rolesById],
+    [grants, rolesById],
   );
 
   const row = (m: string, role?: Role) => (
@@ -2473,13 +2489,13 @@ function MemberList({ state }: { state: CommunityState }) {
     </div>
   );
 
-  const members = [...state.members];
+  const members = [...membersState];
   const ownerMembers = members.filter((m) => m === owner);
   // Group the rest under their highest role, in authority order (lowest
   // `position` first), then a trailing roleless "Members" section.
   const nonOwner = members.filter((m) => m !== owner);
   const roleless = nonOwner.filter((m) => !primaryRole(m)).sort();
-  const sections = [...state.roles]
+  const sections = [...roles]
     .sort((a, b) => a.position - b.position || (a.role_id < b.role_id ? -1 : 1))
     .map((r) => ({ role: r, members: nonOwner.filter((m) => primaryRole(m)?.role_id === r.role_id).sort() }))
     .filter((s) => s.members.length > 0);
@@ -2507,10 +2523,10 @@ function MemberList({ state }: { state: CommunityState }) {
         </>
       )}
       {members.length === 0 && <p className="text-base-content/60 p-2">No members yet.</p>}
-      {state.banlist.size > 0 && (
+      {banlist.size > 0 && (
         <>
-          <h4 className="text-[11px] uppercase text-error px-2 pb-1.5 mt-3 mb-1">Banned — {state.banlist.size}</h4>
-          {[...state.banlist].sort().map((m) => (
+          <h4 className="text-[11px] uppercase text-error px-2 pb-1.5 mt-3 mb-1">Banned — {banlist.size}</h4>
+          {[...banlist].sort().map((m) => (
             <div className="flex items-center gap-2.5 px-2 py-1.5 rounded opacity-60" key={m} title={m}>
               <UserAvatar pubkey={m} />
               <span className="font-medium truncate">
