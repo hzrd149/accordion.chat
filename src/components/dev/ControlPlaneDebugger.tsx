@@ -146,7 +146,6 @@ function StatePanel({ state }: { state: CommunityState }) {
               <div key={c.channel_id} className="flex items-baseline gap-2 ">
                 <span>#{c.name}</span>
                 <span className={`badge badge-xs ${c.private ? "badge-secondary" : "badge-ghost"}`}>{c.private ? "private" : "public"}</span>
-                {c.voice && <span className="badge badge-xs badge-info">voice</span>}
                 {c.deleted && <span className="badge badge-xs badge-error">deleted</span>}
                 <code className="opacity-40">{shortHex(c.channel_id)}</code>
               </div>

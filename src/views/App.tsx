@@ -522,48 +522,89 @@ function RailIcon({ state, active, onClick }: { state: CommunityState; active: b
 // (an unselected read one is dimmed), with the count as a trailing pill —
 // tinted `error` when something in it mentions you, so a mention is findable
 // without reading every badge.
+/**
+ * One channel in the sidebar. Every channel carries chat *and* can host a call
+ * (the package models no voice/text split), so a row shows the unread badge and,
+ * whenever a call is live in it, the participant count and roster underneath.
+ */
 function ChannelRow({
+  cid,
   channel,
   selected,
   unread,
   onSelect,
 }: {
+  cid: string;
   channel: ChannelMetadata;
   selected: boolean;
   unread: ChannelUnread | undefined;
   onSelect: () => void;
 }) {
+  const call = useCall();
+  const { fold, roster } = useRoster(cid, channel.channel_id);
+  const inThisCall = call.active?.channelId === channel.channel_id && call.active?.cid === cid;
+  const inCall = fold.present.length > 0;
   const count = unread?.count ?? 0;
   const has = count > 0;
   return (
-    <button
-      data-channel-row={channel.name}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left mb-px ${
-        selected
-          ? "bg-base-300 text-base-content font-medium"
-          : has
-            ? "text-base-content font-semibold hover:bg-base-300"
-            : "text-base-content/60 font-medium hover:bg-base-300 hover:text-base-content"
-      }`}
-      onClick={onSelect}
-    >
-      <span className="inline-flex items-center text-base-content/60">
-        {channel.private ? <Lock size={16} /> : <Hash size={16} />}
-      </span>
-      <span className="truncate">{channel.name}</span>
-      {has && (
-        <span
-          data-unread-badge
-          data-mention={unread?.mention ? "true" : "false"}
-          className={`ml-auto shrink-0 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center pointer-events-none ${
-            unread?.mention ? "bg-error text-error-content" : "bg-base-content/20 text-base-content"
-          }`}
-          title={`${count} unread message${count === 1 ? "" : "s"}${unread?.mention ? ", mentions you" : ""}`}
-        >
-          {count > 99 ? "99+" : count}
+    <div className="mb-px">
+      <button
+        data-channel-row={channel.name}
+        className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left ${
+          selected
+            ? "bg-base-300 text-base-content font-medium"
+            : has
+              ? "text-base-content font-semibold hover:bg-base-300"
+              : "text-base-content/60 font-medium hover:bg-base-300 hover:text-base-content"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="inline-flex items-center text-base-content/60">
+          {channel.private ? <Lock size={16} /> : <Hash size={16} />}
         </span>
+        <span className="truncate">{channel.name}</span>
+        {inThisCall && <span className="w-2 h-2 rounded-full bg-success ml-auto shrink-0" title="You're in this call" />}
+        {inCall && (
+          <span
+            className={`shrink-0 inline-flex items-center gap-0.5 text-[11px] font-semibold text-base-content/60 bg-base-300 rounded-lg px-1.5 py-px ${
+              inThisCall ? "ml-1.5" : "ml-auto"
+            }`}
+            title={`${fold.present.length} in call`}
+          >
+            <Volume2 size={11} />
+            {fold.present.length}
+          </span>
+        )}
+        {has && (
+          <span
+            data-unread-badge
+            data-mention={unread?.mention ? "true" : "false"}
+            className={`shrink-0 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center pointer-events-none ${
+              inThisCall || inCall ? "ml-1.5" : "ml-auto"
+            } ${unread?.mention ? "bg-error text-error-content" : "bg-base-content/20 text-base-content"}`}
+            title={`${count} unread message${count === 1 ? "" : "s"}${unread?.mention ? ", mentions you" : ""}`}
+          >
+            {count > 99 ? "99+" : count}
+          </span>
+        )}
+      </button>
+      {roster.length > 0 && (
+        <div className="flex flex-col gap-0.5 pt-0.5 pb-1 pl-[26px]">
+          {roster.map((r) => (
+            <div key={r.identity} className="flex items-center gap-1.5 text-[13px] text-base-content/60">
+              {r.author ? (
+                <>
+                  <UserAvatar pubkey={r.author} className="w-5 h-5" />
+                  <span className="truncate"><UserName pubkey={r.author} /></span>
+                </>
+              ) : (
+                <span className="italic opacity-70">Unverified</span>
+              )}
+            </div>
+          ))}
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -594,26 +635,21 @@ function Sidebar({
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
   const readState = useReadState(pubkey);
 
-  // Only text channels carry chat, so only they can be unread — and counting a
-  // voice channel would open a rumor store (and its IndexedDB database) for a
-  // plane that never holds messages.
-  const textChannelIds = useMemo(
-    () => state.channels.filter((c) => !c.voice).map((c) => c.channel_id),
-    [state.channels],
-  );
+  // Every channel carries chat, so every channel can be unread.
+  const channelIds = useMemo(() => state.channels.map((c) => c.channel_id), [state.channels]);
   const unread = useUnreadCounts(
     community,
     state.material.community_id,
-    textChannelIds,
+    channelIds,
     pubkey,
   );
 
-  // Mentions badge: count mentions newer than the mentions cursor. Only text
-  // channels the user can read are scanned (public + held private channels).
+  // Mentions badge: count mentions newer than the mentions cursor. Only channels
+  // the user can read are scanned (public + held private channels).
   const readableChannelIds = useMemo(
     () =>
       state.channels
-        .filter((c) => !c.voice && (!c.private || community?.material.channels.some((mc) => mc.id === c.channel_id)))
+        .filter((c) => !c.private || community?.material.channels.some((mc) => mc.id === c.channel_id))
         .map((c) => c.channel_id),
     [state.channels, community],
   );
@@ -675,26 +711,16 @@ function Sidebar({
             </button>
           )}
         </div>
-        {state.channels.map((ch) =>
-          ch.voice ? (
-            <VoiceChannelRow
-              key={ch.channel_id}
-              cid={state.material.community_id}
-              channelId={ch.channel_id}
-              name={ch.name}
-              selected={ch.channel_id === selectedChannel}
-              onSelect={() => onSelectChannel(ch.channel_id)}
-            />
-          ) : (
-            <ChannelRow
-              key={ch.channel_id}
-              channel={ch}
-              selected={ch.channel_id === selectedChannel}
-              unread={unread[ch.channel_id]}
-              onSelect={() => onSelectChannel(ch.channel_id)}
-            />
-          ),
-        )}
+        {state.channels.map((ch) => (
+          <ChannelRow
+            key={ch.channel_id}
+            cid={state.material.community_id}
+            channel={ch}
+            selected={ch.channel_id === selectedChannel}
+            unread={unread[ch.channel_id]}
+            onSelect={() => onSelectChannel(ch.channel_id)}
+          />
+        ))}
         {canInvite && !state.dissolved && (
           <button
             className="flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium mt-3 text-success hover:bg-base-300"
@@ -746,65 +772,30 @@ function useRoster(cid: string, channelId: string) {
  * A live-count badge and the roster of present members show at a glance who's
  * in the call.
  */
-function VoiceChannelRow({
-  cid,
-  channelId,
-  name,
-  selected,
-  onSelect,
-}: {
-  cid: string;
-  channelId: string;
-  name: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const call = useCall();
-  const { fold, roster } = useRoster(cid, channelId);
-  const inThisCall = call.active?.channelId === channelId && call.active?.cid === cid;
-
+/** Start (or return to) this channel's call. Present on every channel — the
+ *  package models no voice/text split, so any channel can host one. */
+function ChannelCallButton({ cid, channelId, name }: { cid: string; channelId: string; name: string }) {
+  const { active, pending, join } = useCall();
+  const isActiveHere = active?.cid === cid && active?.channelId === channelId;
+  const isPendingHere = pending?.cid === cid && pending?.channelId === channelId;
+  if (isActiveHere || isPendingHere) return null;
   return (
-    <div className="mb-px">
-      <button
-        className={`flex items-center gap-1.5 px-2 py-1.5 rounded w-full text-left font-medium ${
-          selected ? "bg-base-300 text-base-content" : "text-base-content/60 hover:bg-base-300 hover:text-base-content"
-        }`}
-        onClick={onSelect}
-      >
-        <span className="inline-flex items-center text-base-content/60"><Volume2 size={16} /></span>
-        <span>{name}</span>
-        {inThisCall && <span className="w-2 h-2 rounded-full bg-success ml-auto" title="You're in this call" />}
-        {fold.present.length > 0 && (
-          <span className={`text-[11px] font-semibold text-base-content/60 bg-base-300 rounded-lg px-1.5 py-px ${inThisCall ? "ml-1.5" : "ml-auto"}`}>
-            {fold.present.length}
-          </span>
-        )}
-      </button>
-      {roster.length > 0 && (
-        <div className="flex flex-col gap-0.5 pt-0.5 pb-1 pl-[26px]">
-          {roster.map((r) => (
-            <div key={r.identity} className="flex items-center gap-1.5 text-[13px] text-base-content/60">
-              {r.author ? (
-                <>
-                  <UserAvatar pubkey={r.author} className="w-5 h-5" />
-                  <span className="truncate"><UserName pubkey={r.author} /></span>
-                </>
-              ) : (
-                <span className="italic opacity-70">Unverified</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <button
+      className="btn btn-ghost btn-sm btn-circle"
+      title={`Start a call in #${name}`}
+      onClick={() => join({ cid, channelId, channelName: name })}
+    >
+      <Volume2 size={18} />
+    </button>
   );
 }
 
 /**
- * The call surface at the top of a voice channel's view. When you're in this
- * channel's call, it hosts the live stage (the persistent VoiceRoom portals into
- * the slot). Otherwise it's a pre-join toolbar: who's in the call + a Join
- * button. Chat renders below it either way.
+ * The call surface at the top of a channel's view. Every channel can host a call,
+ * so this only materialises once one is actually happening: when you're in it (it
+ * hosts the live stage the persistent VoiceRoom portals into), when you're joining,
+ * or when someone else is already in. Starting a call from an empty channel goes
+ * through the header's call button. Chat renders below it either way.
  */
 function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: string; name: string }) {
   const { active, pending, error, join, setStageEl } = useCall();
@@ -815,6 +806,7 @@ function VoiceCallPanel({ cid, channelId, name }: { cid: string; channelId: stri
   // Host the persistent call surface here. `setStageEl` is the stable state
   // setter, so it's safe as a ref callback (node on mount, null on unmount).
   if (isActiveHere) return <div ref={setStageEl} />;
+  if (!isPendingHere && roster.length === 0) return null;
 
   return (
     <div className="flex items-center gap-3 flex-wrap mx-auto mt-2.5 mb-1 w-[min(860px,calc(100%-24px))] bg-base-200 border border-base-300 rounded-xl px-3.5 py-2.5 max-sm:items-stretch">
@@ -880,7 +872,7 @@ function MentionsView({
   const readableChannelIds = useMemo(
     () =>
       state.channels
-        .filter((c) => !c.voice && (!c.private || community?.material.channels.some((mc) => mc.id === c.channel_id)))
+        .filter((c) => !c.private || community?.material.channels.some((mc) => mc.id === c.channel_id))
         .map((c) => c.channel_id),
     [state.channels, community],
   );
@@ -1107,11 +1099,12 @@ function ChatView({
       <div className="h-12 safe-topbar flex items-center px-4 gap-2 border-b border-base-300 shadow-sm shrink-0">
         {mobileNav}
         <span className="inline-flex items-center text-base-content/60">
-          {channel?.voice ? <Volume2 size={20} /> : channel?.private ? <Lock size={20} /> : <Hash size={20} />}
+          {channel?.private ? <Lock size={20} /> : <Hash size={20} />}
         </span>
         <span className="font-semibold text-base-content">{channel?.name}</span>
         <span className="text-base-content/60 text-[13px] border-l border-base-300 pl-2 ml-1 max-md:hidden">{state.metadata?.description}</span>
         <div className="flex-1" />
+        {channel && <ChannelCallButton cid={cid} channelId={channelId} name={channel.name} />}
         {devMode && channel?.private && (
           <button
             className="btn btn-ghost btn-sm btn-circle text-warning"
@@ -1154,7 +1147,7 @@ function ChatView({
           onClose={() => setPrivateDebugOpen(false)}
         />
       )}
-      {channel?.voice && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
+      {channel && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
       <MessageList
         ref={scrollRef}
         messages={messages}
@@ -1213,12 +1206,14 @@ function PrivateChannelDebugModal({
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // `material.channels` is the single source of channel key material: the control
+  // fold strips key/epoch/held from ChannelMetadata outright, so there is no longer
+  // a "folded key" to compare against — the disagreement this modal used to hunt
+  // for is structurally impossible now.
   const materialChannel = community.material.channels.find((c) => c.id === channelId);
   const isOwner = myPubkey === state.material.owner;
-  const foldedHasKey = Boolean(channel.key);
   const materialHasKey = Boolean(materialChannel?.key);
-  const foldedMatchesMaterial = Boolean(channel.key && materialChannel?.key && channel.key === materialChannel.key);
-  const suspectedFallbackRisk = channel.private && !foldedHasKey;
+  const suspectedFallbackRisk = channel.private && !materialHasKey;
   const snapshot = {
     communityId: state.material.community_id,
     channelId,
@@ -1235,11 +1230,6 @@ function PrivateChannelDebugModal({
       canDirectInvite,
       canWrite,
     },
-    foldedChannel: {
-      hasKey: foldedHasKey,
-      epoch: channel.epoch,
-      keyPrefix: channel.key ? `${channel.key.slice(0, 8)}…` : null,
-    },
     materialChannel: materialChannel
       ? {
           id: materialChannel.id,
@@ -1250,7 +1240,6 @@ function PrivateChannelDebugModal({
           keyPrefix: materialChannel.key ? `${materialChannel.key.slice(0, 8)}…` : null,
         }
       : null,
-    foldedMatchesMaterial,
     suspectedFallbackRisk,
   };
   const json = JSON.stringify(snapshot, null, 2);
@@ -1284,8 +1273,6 @@ function PrivateChannelDebugModal({
         <DebugRow label="Can create invites" value={canCreateInvite ? "yes" : "no"} good={canCreateInvite} />
         <DebugRow label="Material has channel key" value={materialHasKey ? "yes" : "no"} good={materialHasKey} />
         <DebugRow label="App hasChannelKey gate" value={hasChannelKey ? "yes" : "no"} good={hasChannelKey} />
-        <DebugRow label="Folded channel has key" value={foldedHasKey ? "yes" : "no"} good={foldedHasKey} />
-        <DebugRow label="Folded key matches material" value={foldedMatchesMaterial ? "yes" : "no"} good={foldedMatchesMaterial} />
         <DebugRow label="App composer can write" value={canWrite ? "yes" : "no"} good={!suspectedFallbackRisk || !canWrite} />
         <DebugRow label="Direct invite enabled" value={canDirectInvite ? "yes" : "no"} good={!suspectedFallbackRisk || !canDirectInvite} />
       </div>
@@ -1451,7 +1438,7 @@ const Message = memo(function Message({
   const [rawOpen, setRawOpen] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const react = (reaction: string | Emoji) => community?.react(channelId, { id: m.id, author: m.author }, reaction);
+  const react = (reaction: string | Emoji) => community?.react(channelId, m.raw, reaction);
 
   useEffect(() => {
     return () => {
@@ -1623,7 +1610,7 @@ const Message = memo(function Message({
                 >
                   <Pencil size={16} />
                 </button>
-                <button className="btn btn-ghost btn-sm btn-circle" title="Delete" onClick={() => community?.deleteMessage(channelId, m.id)}>
+                <button className="btn btn-ghost btn-sm btn-circle" title="Delete" onClick={() => community?.deleteMessage(channelId, m.raw)}>
                   <Trash2 size={16} />
                 </button>
               </>
@@ -1707,7 +1694,7 @@ const Message = memo(function Message({
                       >
                         <Pencil size={18} /> Edit
                       </button>
-                      <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => community?.deleteMessage(channelId, m.id))}>
+                      <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => community?.deleteMessage(channelId, m.raw))}>
                         <Trash2 size={18} /> Delete
                       </button>
                     </>

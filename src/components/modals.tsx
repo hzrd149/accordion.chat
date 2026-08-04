@@ -293,7 +293,6 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   const state = use$(community?.state$);
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
-  const [voice, setVoice] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function create() {
@@ -301,7 +300,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
     setBusy(true);
     try {
       const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
-      const channelId = await community.admin.createChannel(slug, { private: priv, voice });
+      const channelId = await community.admin.createChannel(slug, { private: priv });
       // A private channel's membership is a channel-scoped role (CORD-04 §2, see
       // chat/channel-roles.ts): mint it and self-grant so the creator is roster
       // member #1. Public channels ride the community root — no role needed.
@@ -331,10 +330,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
         <input type="checkbox" className="checkbox checkbox-sm" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
         <span className="text-sm">Private channel (its own key, only role-holders can read)</span>
       </label>
-      <label className="flex items-center gap-2.5 p-2 rounded-lg cursor-pointer hover:bg-base-200">
-        <input type="checkbox" className="checkbox checkbox-sm" checked={voice} onChange={(e) => setVoice(e.target.checked)} />
-        <span className="text-sm">Voice/video channel (end-to-end-encrypted calls)</span>
-      </label>
+      <p className="text-xs opacity-60 px-2 pt-1">Every channel supports end-to-end-encrypted calls — start one from the channel header.</p>
       <div className="modal-action">
         <button className="btn btn-ghost" onClick={onClose}>
           Cancel

@@ -45,7 +45,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (!community) return;
       const engine = voiceEngineFor(community);
       const voice = engine.voiceKeys(req.channelId);
-      if (!voice) return; // not a voice channel
+      // Every channel is voice-capable, so a miss means we can't derive the room:
+      // the channel isn't folded yet, or it's private and we hold no key for it.
+      if (!voice) {
+        setError("You don't have this channel's key, so you can't join its call.");
+        return;
+      }
       const seq = ++joinSeq.current;
       setError(null);
       setExpanded(false);

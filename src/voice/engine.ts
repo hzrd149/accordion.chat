@@ -1,32 +1,20 @@
 // The app-side CORD-07 voice runtime, per community.
 //
-// applesauce-concord's ConcordCommunity deliberately drops voice-presence rumors
-// at ingest, so this engine reimplements the four voice methods the old monolithic
-// client carried: `voiceKeys`, `getVoicePresence$`, `joinVoice`, `leaveVoice`.
+// applesauce-concord derives the CORD-07 keys (`voiceKeysFor`) and routes kind-23313
+// presence rumors into the channel's own plane store — its receive funnel decodes the
+// ephemeral (21059) wrap and applies the CORD-03 channel/epoch binding check before
+// storing. So this engine runs no subscription of its own: it reads presence straight
+// off `community.channelStore(id)` and owns only what the package leaves to the client
+// — the presence fold, the heartbeat, and the join/leave lifecycle.
 //
-// Presence rides the Channel's own Chat-Plane key (§4): we run our own ephemeral
-// (21059) subscription at the channel address and decode with its conv key. That
-// subscription piggy-backs the pool socket the manager's ConcordRelayAuth already
-// NIP-42-authenticates for this channel's stream key (`waitForAuth` holds the REQ
-// until it is). Publishing goes through `community.sendEvent(..., {ephemeral})`,
-// whose local echo the community's voice filter swallows — so we self-reflect our
-// own presence into the fold directly.
+// Publishing goes through `community.sendEvent(..., {ephemeral})`, whose local echo the
+// community's publish path skips for ephemeral wraps — so we self-reflect our own
+// presence into the fold directly, which is our only source for our own roster tile.
 
 import { BehaviorSubject, Subscription } from "rxjs";
-import type { NostrEvent } from "nostr-tools";
 import type { ConcordCommunity } from "applesauce-concord";
-import type { ChannelMetadata, JoinMaterial } from "applesauce-concord";
-import {
-  channelKeyFor,
-  voiceKeysFor,
-  decodeWrapCached,
-  checkChatBinding,
-  EPHEMERAL_GIFT_WRAP_KIND,
-  VOICE_PRESENCE_KIND,
-  STOCK_RELAYS,
-  type VoiceKeys,
-} from "applesauce-concord/helpers";
-import { pool } from "../nostr";
+import type { ChannelMetadata } from "applesauce-concord";
+import { voiceKeysFor, VOICE_PRESENCE_KIND, type VoiceKeys } from "applesauce-concord/helpers";
 import {
   foldVoicePresence,
   parsePresence,
@@ -38,12 +26,6 @@ import {
 } from "./presence";
 
 const EMPTY_FOLD: VoicePresenceFold = { present: [], claims: new Map() };
-
-/** The Chat-Plane epoch a channel's rumors bind to (mirrors the package's
- *  internal `channelSecret`: private channels carry their own key+epoch). */
-function channelEpoch(material: JoinMaterial, channel: ChannelMetadata): number {
-  return channel.private && channel.key ? (channel.epoch ?? 1) : material.root_epoch;
-}
 
 export class VoiceEngine {
   private readonly presence$ = new Map<string, BehaviorSubject<VoicePresenceFold>>();
@@ -61,16 +43,21 @@ export class VoiceEngine {
     return this.community.state$.value.channels.find((c) => c.channel_id === channelId);
   }
 
-  /** The voice keys (SFU room + media root) for a channel, or undefined if the
-   *  channel isn't a voice channel or isn't known. */
-  voiceKeys(channelId: string): VoiceKeys | undefined {
+  /**
+   * The voice keys (SFU room + media root) for a channel. Every channel is
+   * voice-capable, so `null` means we cannot *derive* them: either the channel
+   * isn't folded yet, or it's private and `material.channels` holds no key for it
+   * (CHAN-01 — a keyless private channel derives nothing rather than falling back
+   * to the public root address). Callers should surface that, not no-op silently.
+   */
+  voiceKeys(channelId: string): VoiceKeys | null {
     const ch = this.channel(channelId);
-    if (!ch?.voice) return undefined;
+    if (!ch) return null;
     return voiceKeysFor(this.community.material, ch);
   }
 
-  /** The folded call-presence view for a voice channel (CORD-07 §4). Lazily opens
-   *  the presence subscription on first read. */
+  /** The folded call-presence view for a channel (CORD-07 §4). Lazily opens the
+   *  read off the channel's plane store on first use. */
   getVoicePresence$(channelId: string): BehaviorSubject<VoicePresenceFold> {
     let subj = this.presence$.get(channelId);
     if (!subj) {
@@ -82,38 +69,32 @@ export class VoiceEngine {
     return subj;
   }
 
-  private relays(): string[] {
-    const r = this.community.material.relays;
-    return r.length ? r : STOCK_RELAYS;
-  }
-
-  /** Subscribe to the channel's ephemeral (21059) wraps and fold the presence
-   *  rumors they carry. Decode succeeds only under the current epoch's conv key,
-   *  so a replayed prior-epoch ping can't decode — the explicit binding check is
-   *  defense in depth. */
+  /**
+   * Read presence off the channel's own plane store. The package's receive funnel
+   * has already decoded the ephemeral wrap under the channel's conv key and applied
+   * the CORD-03 channel/epoch binding check, so a replayed prior-epoch ping never
+   * reaches us — all that's left is the presence shape and the fold.
+   */
   private openPresenceSub(channelId: string): void {
-    const ch = this.channel(channelId);
-    if (!ch) return;
-    const key = channelKeyFor(this.community.material, ch);
-    const epoch = channelEpoch(this.community.material, ch);
-    const sub = pool
-      .subscription(this.relays(), [{ kinds: [EPHEMERAL_GIFT_WRAP_KIND], authors: [key.pk] }], {
-        waitForAuth: [key.pk],
-      })
-      .subscribe((event) => {
-        if (typeof event === "string") return; // EOSE marker
-        const decoded = decodeWrapCached(event as NostrEvent, key.convKey);
-        if (!decoded || decoded.rumor.kind !== VOICE_PRESENCE_KIND) return;
-        if (!checkChatBinding(decoded.rumor.tags, channelId, epoch)) return;
-        const entry = parsePresence(decoded);
-        if (entry) this.ingestEntry(channelId, entry);
+    const sub = this.community
+      .channelStore(channelId)
+      .timeline([{ kinds: [VOICE_PRESENCE_KIND] }])
+      .subscribe((rumors) => {
+        let changed = false;
+        for (const rumor of rumors) {
+          const entry = parsePresence(rumor);
+          if (entry && this.accept(channelId, entry)) changed = true;
+        }
+        if (changed) this.recompute(channelId);
       });
     this.subs.set(channelId, sub);
   }
 
-  private ingestEntry(channelId: string, entry: VoicePresenceEntry): void {
+  /** Accept one entry into the per-channel latest-wins map. Returns whether it
+   *  displaced what was there, so batch callers can recompute exactly once. */
+  private accept(channelId: string, entry: VoicePresenceEntry): boolean {
     // Reject far-future stamps so a forged date can't squat "latest".
-    if (entry.ms > Date.now() + 60_000) return;
+    if (entry.ms > Date.now() + 60_000) return false;
     let byAuthor = this.entries.get(channelId);
     if (!byAuthor) {
       byAuthor = new Map();
@@ -121,9 +102,13 @@ export class VoiceEngine {
     }
     const prev = byAuthor.get(entry.author);
     // Latest wins (ms basis, rumor-id tiebreak) — a replayed older ping loses.
-    if (prev && !(entry.ms > prev.ms || (entry.ms === prev.ms && entry.rumorId < prev.rumorId))) return;
+    if (prev && !(entry.ms > prev.ms || (entry.ms === prev.ms && entry.rumorId < prev.rumorId))) return false;
     byAuthor.set(entry.author, entry);
-    this.recompute(channelId);
+    return true;
+  }
+
+  private ingestEntry(channelId: string, entry: VoicePresenceEntry): void {
+    if (this.accept(channelId, entry)) this.recompute(channelId);
   }
 
   private recompute(channelId: string): void {

@@ -1,18 +1,19 @@
 // Concord voice — CORD-07 (app-side).
 //
-// applesauce-concord ships no CORD-07 runtime: its ConcordCommunity ingest funnel
-// *drops* voice-presence rumors, and the package exposes only the key derivations
-// (voiceKeysFor / voiceSenderKey) + the VOICE_PRESENCE_KIND constant. So the whole
-// broker-token flow, presence fold, and sole-claimant verification live here in
-// the app, on top of the package's crypto helpers.
+// applesauce-concord ships no CORD-07 *runtime*: it exposes the key derivations
+// (voiceKeysFor / voiceSenderKey) and the VOICE_PRESENCE_KIND constant, and its
+// ingest funnel delivers presence rumors into the channel's plane store — but the
+// broker-token flow, presence fold, and sole-claimant verification are left to the
+// client, so they live here.
 //
-// A voice Channel is any Channel whose metadata carries `"voice": true`. Two
-// sub-keys derive from the Channel's secret (CORD-07 §1): `voice_key` (its pk is
-// the SFU room name, its sk signs token grants) and `voice_media_key` (the root
-// of per-sender media encryption). Anyone holding the Channel's key can fetch a
-// short-lived token from a **blind broker** and connect to the SFU; media is
-// end-to-end encrypted under keys only members can derive, so the broker and SFU
-// only ever forward ciphertext.
+// Every Channel is voice-capable: the package models no voice/text distinction, and
+// `voiceKeysFor` derives CORD-07 §1 keys for any Channel whose key we hold. Two
+// sub-keys derive from the Channel's secret: `voice_key` (its pk is the SFU room
+// name, its sk signs token grants) and `voice_media_key` (the root of per-sender
+// media encryption). Anyone holding the Channel's key can fetch a short-lived token
+// from a **blind broker** and connect to the SFU; media is end-to-end encrypted
+// under keys only members can derive, so the broker and SFU only ever forward
+// ciphertext.
 //
 // Who is in a call is announced over the Channel itself (§4): ephemeral
 // kind-23313 rumors in 21059 wraps at the Channel's own address, sealed encrypted
@@ -23,9 +24,9 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { finalizeEvent } from "nostr-tools";
 
 import { fromHex, toHex, utf8 } from "../lib/bytes";
-import type { DecodedEvent } from "applesauce-concord";
+import type { Rumor } from "applesauce-core/helpers";
 import type { GroupKey } from "applesauce-concord/helpers";
-import { VOICE_PRESENCE_KIND } from "applesauce-concord/helpers";
+import { rumorMs, VOICE_PRESENCE_KIND } from "applesauce-concord/helpers";
 
 /** NIP-98 HTTP-auth kind — the blind-broker token grant (§2). */
 const HTTP_AUTH_KIND = 27235;
@@ -184,12 +185,12 @@ export function presenceTags(status: "joined" | "left", identity?: string, broke
 }
 
 /**
- * Parse a decoded kind-23313 event into a presence entry. The channel/epoch
- * binding is checked by the caller (like every Chat rumor); this validates the
- * presence shape. Returns null for malformed entries.
+ * Parse a kind-23313 rumor into a presence entry. The channel/epoch binding is
+ * checked by the package's receive funnel before the rumor ever reaches the
+ * channel store (CORD-03), so this only validates the presence shape. Returns
+ * null for malformed entries.
  */
-export function parsePresence(decoded: DecodedEvent): VoicePresenceEntry | null {
-  const { rumor } = decoded;
+export function parsePresence(rumor: Rumor): VoicePresenceEntry | null {
   if (rumor.kind !== VOICE_PRESENCE_KIND) return null;
   if (rumor.content !== "joined" && rumor.content !== "left") return null;
   const status = rumor.content;
@@ -206,7 +207,7 @@ export function parsePresence(decoded: DecodedEvent): VoicePresenceEntry | null 
     status === "joined" && typeof rawBroker === "string" && rawBroker.length <= 512
       ? canonicalOrigin(rawBroker) ?? undefined
       : undefined;
-  return { author: decoded.author, status, identity, broker, ms: decoded.ms, rumorId: rumor.id };
+  return { author: rumor.pubkey, status, identity, broker, ms: rumorMs(rumor), rumorId: rumor.id };
 }
 
 /** A verified-present participant: one fresh `joined` per author. */

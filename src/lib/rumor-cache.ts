@@ -24,7 +24,7 @@
 // changing its id, so per-plane databases are the only clean namespacing.
 
 import { RumorStore } from "applesauce-core";
-import { isFromCache, markFromCache, type Rumor } from "applesauce-core/helpers";
+import { isEphemeralKind, isFromCache, markFromCache, type Rumor } from "applesauce-core/helpers";
 import {
   addEvents,
   deleteDB,
@@ -112,9 +112,15 @@ export function createRumorStoreFactory(): (communityId: string, planeKey: strin
     // synchronously so nothing added during the open is missed; the handler waits
     // on dbReady. nostr-idb stores rumors by id without a signature check, so the
     // sig-less rumors persist as-is.
+    //
+    // Ephemeral rumors are excluded: CORD-07 voice presence (23313) lands in the
+    // channel plane like any other rumor, but it's a heartbeat with a 90s staleness
+    // window — persisting it would burn the per-plane cap on beacons that are dead
+    // on arrival after a reload.
     plane.subs.push(
       store.insert$
         .pipe(
+          filter((rumor) => !isEphemeralKind(rumor.kind)),
           filter((rumor) => !isFromCache(rumor as unknown as NostrEvent)),
           bufferTime(WRITE_BATCH_MS),
           filter((batch) => batch.length > 0),
