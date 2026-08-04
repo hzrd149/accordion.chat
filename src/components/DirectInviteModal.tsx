@@ -3,6 +3,7 @@ import { AlertTriangle, Globe2, Loader2, Lock, Search, Users } from "lucide-reac
 import { useActiveAccount } from "applesauce-react/hooks";
 import { nip19 } from "nostr-tools";
 import type { ChannelMetadata, CommunityState, ConcordCommunity } from "applesauce-concord";
+import { hasChannelKey } from "applesauce-concord/helpers";
 import { useMentionCandidates, useMentionSearch, type MentionCandidate } from "../hooks/mentions";
 import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../lib/open-ranking";
 import { sendDirectInvite } from "../lib/direct-invites";
@@ -72,7 +73,9 @@ export function DirectInviteModal({
   const searchMembers = useMentionSearch(candidates);
   const provider = getOpenRankingProvider();
 
-  const heldChannel = channel?.private ? community.material.channels.find((c) => c.id === channel.channel_id) : undefined;
+  // The package's own key-presence check against material — a private channel we
+  // hold no key for cannot be granted, since we have no key to hand over.
+  const heldChannel = channel?.private ? hasChannelKey(community.material, channel.channel_id) : false;
 
   useEffect(() => {
     if (scope !== "global") return;

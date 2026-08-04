@@ -71,7 +71,8 @@ import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
 import { getMentionsLastRead, markMentionsRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "../chat/fold";
 import type { ChannelMetadata, CommunityState, Role, ConcordCommunity, Storage } from "applesauce-concord";
-import { PERM } from "applesauce-concord";
+import { MissingChannelKeyError, PERM } from "applesauce-concord";
+import { hasChannelKey } from "applesauce-concord/helpers";
 import { kinds } from "nostr-tools";
 
 /** How close to the bottom still counts as "following the conversation" (px). */
@@ -630,8 +631,10 @@ function Sidebar({
   const community = useCommunity(state.material.community_id);
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
-  const canManageChannels = community?.canDo(PERM.MANAGE_CHANNELS) ?? false;
-  const canInvite = community?.canDo(PERM.CREATE_INVITE) ?? false;
+  // The `$` forms, not the `canDo` snapshots: these gate rendered controls, so
+  // they have to re-emit when a role grant changes the answer.
+  const canManageChannels = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
+  const canInvite = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
   const bannerUrl = useDecryptedImage(state.metadata?.banner);
   const readState = useReadState(pubkey);
 
@@ -1004,8 +1007,12 @@ function ChatView({
   const [atBottom, setAtBottom] = useState(true);
   useMarkRead(pubkey, cid, channelId, newestMs, atBottom);
 
-  const hasChannelKey = !channel?.private || (community?.material.channels.some((c) => c.id === channelId) ?? false);
-  const canDirectInvite = Boolean(community && hasChannelKey && (channel?.private ? canManageChannels : canCreateInvite));
+  // Public channels are readable by every member; a private one only if we hold
+  // its key. `hasChannelKey` is the package's own check against material — the
+  // same rule its ChannelView.accessible flag exposes.
+  const channelAccessible =
+    !channel?.private || (community ? hasChannelKey(community.material, channelId) : false);
+  const canDirectInvite = Boolean(community && channelAccessible && (channel?.private ? canManageChannels : canCreateInvite));
 
   // The user's NIP-30 favorite custom emojis (kind 10030 + referenced packs).
   const favorites = useFavoriteEmojis(pubkey, account?.signer);
@@ -1066,7 +1073,10 @@ function ChatView({
     setReplyTo(null);
   }
 
-  const canWrite = !state.dissolved;
+  // Writing needs the channel's key as well as a live community: every channel
+  // write path now throws MissingChannelKeyError for a private channel we can't
+  // decrypt, so offering the composer there would only produce a failed send.
+  const canWrite = !state.dissolved && channelAccessible;
 
   // Roster of pubkeys the composer's @-mention menu searches. Memoized on the
   // Set reference so the composer's memo isn't defeated by unrelated re-renders.
@@ -1141,7 +1151,7 @@ function ChatView({
           myPubkey={pubkey}
           canCreateInvite={canCreateInvite}
           canManageChannels={canManageChannels}
-          hasChannelKey={hasChannelKey}
+          channelAccessible={channelAccessible}
           canDirectInvite={canDirectInvite}
           canWrite={canWrite}
           onClose={() => setPrivateDebugOpen(false)}
@@ -1188,7 +1198,7 @@ function PrivateChannelDebugModal({
   myPubkey,
   canCreateInvite,
   canManageChannels,
-  hasChannelKey,
+  channelAccessible,
   canDirectInvite,
   canWrite,
   onClose,
@@ -1200,7 +1210,7 @@ function PrivateChannelDebugModal({
   myPubkey: string;
   canCreateInvite: boolean;
   canManageChannels: boolean;
-  hasChannelKey: boolean;
+  channelAccessible: boolean;
   canDirectInvite: boolean;
   canWrite: boolean;
   onClose: () => void;
@@ -1226,7 +1236,7 @@ function PrivateChannelDebugModal({
     permissions: {
       canCreateInvite,
       canManageChannels,
-      appHasChannelKey: hasChannelKey,
+      appChannelAccessible: channelAccessible,
       canDirectInvite,
       canWrite,
     },
@@ -1272,7 +1282,7 @@ function PrivateChannelDebugModal({
         <DebugRow label="Can manage channels" value={canManageChannels ? "yes" : "no"} good={canManageChannels} />
         <DebugRow label="Can create invites" value={canCreateInvite ? "yes" : "no"} good={canCreateInvite} />
         <DebugRow label="Material has channel key" value={materialHasKey ? "yes" : "no"} good={materialHasKey} />
-        <DebugRow label="App hasChannelKey gate" value={hasChannelKey ? "yes" : "no"} good={hasChannelKey} />
+        <DebugRow label="App accessibility gate" value={channelAccessible ? "yes" : "no"} good={channelAccessible} />
         <DebugRow label="App composer can write" value={canWrite ? "yes" : "no"} good={!suspectedFallbackRisk || !canWrite} />
         <DebugRow label="Direct invite enabled" value={canDirectInvite ? "yes" : "no"} good={!suspectedFallbackRisk || !canDirectInvite} />
       </div>
@@ -2148,6 +2158,7 @@ const Composer = memo(function Composer({
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
   const [upload, setUpload] = useState<Storage.ConcordUploadProgress | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2227,10 +2238,18 @@ const Composer = memo(function Composer({
     setFiles([]);
     setSending(true);
     setUpload(null);
+    setSendError("");
     try {
       await onSend(value, attach, reply, setUpload);
     } catch (err) {
       console.error("send failed", err);
+      // A key can be rotated out from under an open composer, so name that case
+      // rather than reporting it as a generic failure.
+      setSendError(
+        err instanceof MissingChannelKeyError
+          ? "You no longer hold this channel's key, so your message can't be encrypted."
+          : `Couldn't send: ${(err as Error).message}`,
+      );
       // Restore the draft so the user doesn't lose their message/attachments.
       setText(value);
       setFiles(attach);
@@ -2242,6 +2261,14 @@ const Composer = memo(function Composer({
 
   return (
     <div className="px-4 pb-5 safe-bottombar shrink-0 max-sm:px-2">
+      {sendError && (
+        <div className="flex justify-between items-center gap-2 bg-error/10 text-error rounded-t-lg px-4 py-1.5 text-[13px] -mb-1 max-sm:px-2">
+          <span>{sendError}</span>
+          <button className="btn btn-ghost btn-xs btn-circle" onClick={() => setSendError("")}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {replyTo && (
         <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
           <span>

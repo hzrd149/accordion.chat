@@ -10,11 +10,11 @@ import { UserAvatar, UserName } from "./User";
 import { unixNow } from "applesauce-core/helpers";
 import { rumorMs } from "applesauce-concord/helpers";
 import { PERM } from "applesauce-concord";
-import type { ChannelMetadata, ConcordInviteLink } from "applesauce-concord";
+import type { ChannelView, ConcordInviteLink } from "applesauce-concord";
 import type { ChatMessage } from "../chat/fold";
 
 const NO_INVITES: ConcordInviteLink[] = [];
-const NO_CHANNELS: ChannelMetadata[] = [];
+const NO_CHANNELS: ChannelView[] = [];
 
 type ExpiryKey = "never" | "1d" | "7d" | "30d";
 
@@ -293,7 +293,10 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
   const community = useCommunity(cid);
-  const state = use$(community?.state$);
+  // The granular slices, not the aggregate `state$` — that re-emits on any fold
+  // change, including a chat message in any channel.
+  const roles = use$(community?.roles$);
+  const grants = use$(community?.grants$);
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -307,12 +310,12 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
       // A private channel's membership is a channel-scoped role (CORD-04 §2, see
       // chat/channel-roles.ts): mint it and self-grant so the creator is roster
       // member #1. Public channels ride the community root — no role needed.
-      if (priv && channelId && state) {
-        const roleId = await community.admin.createRole(`#${slug}`, state.roles.length + 1, 0n, {
+      if (priv && channelId && roles && grants) {
+        const roleId = await community.admin.createRole(`#${slug}`, roles.length + 1, 0n, {
           kind: "channel",
           channel_id: channelId,
         });
-        const mine = new Set(state.grants.get(pubkey) ?? []);
+        const mine = new Set(grants.get(pubkey) ?? []);
         mine.add(roleId);
         await community.admin.grantRoles(pubkey, [...mine]);
       }
@@ -361,9 +364,10 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const allChannels = use$(community?.channels$) ?? NO_CHANNELS;
   // Only channels we hold a key for can be granted — the package throws on an id
   // that isn't in our material, and we couldn't hand over a key we don't have.
-  const grantable = allChannels.filter(
-    (c) => c.private && community?.material.channels.some((k) => k.id === c.channel_id),
-  );
+  // `accessible` is the package's own key-presence flag, and it re-emits on a key
+  // grant alone, so a channel we were just given shows up here without waiting
+  // for an unrelated control-plane fold.
+  const grantable = allChannels.filter((c) => c.private && c.accessible);
   const channelNames = new Map(allChannels.map((c) => [c.channel_id, c.name]));
   const [label, setLabel] = useState("");
   const [expiry, setExpiry] = useState<ExpiryKey>("never");
