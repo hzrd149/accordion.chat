@@ -1,4 +1,4 @@
-import { ConcordClient } from "applesauce-concord";
+import { ConcordClient, logger } from "applesauce-concord";
 import { useActiveAccount } from "applesauce-react/hooks";
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
@@ -42,6 +42,11 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       autoUnlock: true,
       autoAuthenticate: true,
       autoSaveCommunityList: false,
+      // The package threads named sub-loggers (`:sync`, `:decode`, `:publish`,
+      // `:invite`, `:auth`) off whatever we hand it, and is careful with secrets —
+      // it never logs a community name or an invite token. Off unless asked for:
+      // enable with `localStorage.debug = 'applesauce:concord*'`.
+      logger: logger.extend("accordion"),
     });
     return ref;
   }, [account]);
@@ -50,14 +55,18 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     if (!client) return;
 
     // Delay start by 100ms so that nos2x-fox has time to inject the
-    setTimeout(() => {
-
+    const timer = setTimeout(() => {
       void client.start();
-    }, 100)
+    }, 100);
     const detachVoice = attachVoiceGc(client);
     return () => {
+      clearTimeout(timer);
       detachVoice();
-      client.stop();
+      // dispose(), not stop(): stop() is a restartable pause that deliberately
+      // keeps the invite manager and any extraRelays subscription alive. This
+      // client is derived from the account and never reused after it changes, so
+      // the terminal release is what we want.
+      client.dispose();
     };
   }, [client]);
 
