@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { lastValueFrom, timeout } from "rxjs";
 import { mapEventsToTimeline } from "applesauce-core";
 import type { NostrEvent } from "applesauce-core/helpers/event";
+import { unixNow } from "applesauce-core/helpers";
 import {
   INVITE_BUNDLE_KIND,
   STOCK_RELAYS,
@@ -75,7 +76,9 @@ export function useInvitePreview(link: string): InvitePreview {
           if (!cancelled) setPreview({ status: "error", error: "Invite link failed verification." });
           return;
         }
-        const expired = Boolean(bundle.expires_at && Date.now() > bundle.expires_at);
+        // CORD-05 `expires_at` is a unix *second* stamp, so compare in seconds —
+        // against Date.now() every live bundle reads as long expired.
+        const expired = Boolean(bundle.expires_at && unixNow() > bundle.expires_at);
         if (!cancelled) setPreview({ status: "ready", bundle, expired });
       } catch (e) {
         if (!cancelled) setPreview({ status: "error", error: (e as Error).message });

@@ -7,6 +7,7 @@ import { useCommunity } from "../hooks/use-community";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { UserAvatar, UserName } from "./User";
+import { unixNow } from "applesauce-core/helpers";
 import { rumorMs } from "applesauce-concord/helpers";
 import { PERM } from "applesauce-concord";
 import type { ChannelMetadata, ConcordInviteLink } from "applesauce-concord";
@@ -17,12 +18,14 @@ const NO_CHANNELS: ChannelMetadata[] = [];
 
 type ExpiryKey = "never" | "1d" | "7d" | "30d";
 
-/** `ms` is the lifetime added to now; `undefined` mints a link that never expires. */
-const EXPIRY_OPTIONS: { key: ExpiryKey; label: string; ms?: number }[] = [
+/** `seconds` is the lifetime added to now; `undefined` mints a link that never expires. */
+// Seconds, not milliseconds: CORD-05 `expires_at` is a unix *second* stamp at
+// every site, and the package treats `CreateInviteOptions.expiresAt` the same.
+const EXPIRY_OPTIONS: { key: ExpiryKey; label: string; seconds?: number }[] = [
   { key: "never", label: "Never" },
-  { key: "1d", label: "1 day", ms: 86_400_000 },
-  { key: "7d", label: "7 days", ms: 7 * 86_400_000 },
-  { key: "30d", label: "30 days", ms: 30 * 86_400_000 },
+  { key: "1d", label: "1 day", seconds: 86_400 },
+  { key: "7d", label: "7 days", seconds: 7 * 86_400 },
+  { key: "30d", label: "30 days", seconds: 30 * 86_400 },
 ];
 
 export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
@@ -371,8 +374,8 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const [copied, setCopied] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   // Captured once: the expiry countdowns are rendered against a fixed "now" so
-  // render stays pure (see ExpiryBadge).
-  const [now] = useState(() => Date.now());
+  // render stays pure (see ExpiryBadge). Unix seconds, to match `expiresAt`.
+  const [now] = useState(() => unixNow());
 
   function toggleChannel(id: string) {
     setGranted((g) => (g.includes(id) ? g.filter((x) => x !== id) : [...g, id]));
@@ -382,13 +385,13 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
     setBusy(true);
     setError("");
     try {
-      const ttl = EXPIRY_OPTIONS.find((o) => o.key === expiry)?.ms;
+      const ttl = EXPIRY_OPTIONS.find((o) => o.key === expiry)?.seconds;
       // Publishes the bundle, registers the link into the community (marking it
       // link-joinable), and saves it to the private Invite List.
       await client.invites.create(cid, {
         base: window.location.origin,
         label: label.trim() || undefined,
-        expiresAt: ttl ? Date.now() + ttl : undefined,
+        expiresAt: ttl ? unixNow() + ttl : undefined,
         // Omitted when empty: a link grants no private channels unless asked.
         channels: granted.length ? granted : undefined,
       });
@@ -596,14 +599,15 @@ function InviteCard({
 }
 
 /** `now` is captured once by the modal rather than read here: reading the clock
- *  during render is impure, and the countdown has no reason to move mid-modal. */
+ *  during render is impure, and the countdown has no reason to move mid-modal.
+ *  Both `expiresAt` and `now` are unix seconds (CORD-05). */
 function ExpiryBadge({ expiresAt, now }: { expiresAt?: number; now: number }) {
   if (!expiresAt) return <span className="badge badge-ghost">Never expires</span>;
   const left = expiresAt - now;
   if (left <= 0) return <span className="badge badge-error">Expired</span>;
   // Round, never ceil: a link minted seconds ago with a 7-day lifetime has a hair
   // over 7 days left, which ceil would advertise as 8.
-  const hours = Math.round(left / 3_600_000);
+  const hours = Math.round(left / 3_600);
   const label =
     hours < 24 ? plural(Math.max(1, hours), "hour") : plural(Math.round(hours / 24), "day");
   return <span className="badge badge-ghost">Expires in {label}</span>;
