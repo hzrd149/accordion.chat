@@ -300,10 +300,12 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   async function create() {
     if (!community) return;
     setBusy(true);
+    setError("");
     try {
       const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
       const channelId = await community.admin.createChannel(slug, { private: priv });
@@ -320,7 +322,11 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
         await community.admin.grantRoles(pubkey, [...mine]);
       }
       onClose();
-    } catch {
+    } catch (e) {
+      // createChannel now asserts a 64-byte cap on the name before minting the
+      // channel key, so an over-long name is a real, reportable refusal rather
+      // than a silent no-op.
+      setError((e as Error).message);
       setBusy(false);
     }
   }
@@ -337,6 +343,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
         <span className="text-sm">Private channel (its own key, only role-holders can read)</span>
       </label>
       <p className="text-xs opacity-60 px-2 pt-1">Every channel supports end-to-end-encrypted calls — start one from the channel header.</p>
+      {error && <div className="alert alert-error text-sm mt-3">{error}</div>}
       <div className="modal-action">
         <button className="btn btn-ghost" onClick={onClose}>
           Cancel

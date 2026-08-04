@@ -132,6 +132,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const [blossom, setBlossom] = useState(() => (metadata?.blossom_servers ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   // Leaving is available to every member (no permission needed) — tombstone the
@@ -148,13 +149,22 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   async function save() {
     setBusy(true);
     setSaved(false);
+    setError("");
     const blossom_servers = blossom
       .split(/[\n,]/)
       .map((s) => s.trim())
       .filter(Boolean);
-    await community?.admin.editMetadata({ name: name.trim(), description: description.trim(), blossom_servers });
-    setBusy(false);
-    setSaved(true);
+    try {
+      await community?.admin.editMetadata({ name: name.trim(), description: description.trim(), blossom_servers });
+      setSaved(true);
+    } catch (e) {
+      // editMetadata asserts the 64-byte name / 10000-byte description caps on
+      // the *merged* result. The caps are on UTF-8 bytes, so a name well inside
+      // the input's 64-character limit can still be refused.
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -190,6 +200,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
           />
         </div>
       )}
+      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
@@ -290,7 +301,15 @@ function ImageField({
             className="btn btn-ghost btn-sm btn-square"
             title={`Remove ${which}`}
             disabled={disabled}
-            onClick={() => community?.admin.removeCommunityImage(which)}
+            onClick={() => {
+              setError(null);
+              // Routes through editMetadata, which asserts the name/description
+              // byte caps on the merged result — so it can be refused over a
+              // pre-existing over-cap field this action never touched.
+              void Promise.resolve(community?.admin.removeCommunityImage(which)).catch((e: unknown) =>
+                setError(e instanceof Error ? e.message : "Remove failed"),
+              );
+            }}
           >
             <Trash2 size={16} />
           </button>
@@ -601,6 +620,15 @@ function MemberRow({
   const canBan = use$(() => community?.canModerate$(member, PERM.BAN), [community, member]) ?? false;
   const isOwner = member === community?.material.owner;
   const held = new Set(grants.get(member) ?? []);
+  // kick/ban now refuse locally, before publishing, when the caller doesn't
+  // strictly outrank the target — so these have to report rather than reject
+  // into nothing. canModerate$ should already have hidden the button, but the
+  // fold can move between render and click.
+  const [error, setError] = useState("");
+  const guard = (action: () => Promise<unknown> | undefined) => () => {
+    setError("");
+    void Promise.resolve(action()).catch((e: unknown) => setError((e as Error).message));
+  };
 
   return (
     <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 flex-wrap max-sm:items-start">
@@ -613,13 +641,13 @@ function MemberRow({
       </div>
       <div className="ml-auto flex gap-1.5 max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:flex-wrap max-sm:justify-end">
         {canKick && (
-          <button className="btn btn-ghost btn-sm" onClick={() => community?.admin.kick(member)}>
+          <button className="btn btn-ghost btn-sm" onClick={guard(() => community?.admin.kick(member))}>
             Kick
           </button>
         )}
         {canBan &&
           (banned ? (
-            <button className="btn btn-ghost btn-sm" onClick={() => community?.admin.unban(member)}>
+            <button className="btn btn-ghost btn-sm" onClick={guard(() => community?.admin.unban(member))}>
               Unban
             </button>
           ) : (
@@ -628,6 +656,7 @@ function MemberRow({
             </button>
           ))}
       </div>
+      {error && <div className="w-full pl-[42px] text-error text-sm max-sm:pl-0">{error}</div>}
       {!isOwner && canManageRoles && serverRoles.length > 0 && (
         <div className="w-full flex gap-1.5 flex-wrap pl-[42px] max-sm:pl-0">
           {serverRoles.map((r) => {
@@ -665,15 +694,30 @@ function MembersPage({ cid }: { cid: string }) {
   const canManageRoles = (use$(() => community?.can$(PERM.MANAGE_ROLES), [community]) ?? false) && !dissolved;
   const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const [banTarget, setBanTarget] = useState<string | null>(null);
+  const [unbanError, setUnbanError] = useState("");
 
   const doBan = async (member: string) => {
-    // 1. Soft ban: banlist + strip roles (CORD-04).
+    // 1. Soft ban: banlist + strip roles (CORD-04). Refuses locally if we don't
+    //    strictly outrank the target, before anything is published.
     await community?.admin.ban(member);
     // 2. Hard enforcement: Refound to sever the banned member's keys from
     //    the control plane and every channel (CORD-06 §3). keep = everyone
     //    still in the community except the banned member.
     const keep = [...members].filter((m) => m !== member);
-    await community?.admin.refound({ keep, exclude: [member] });
+    try {
+      await community?.admin.refound({ keep, exclude: [member] });
+    } catch (e) {
+      // The refounding is all-or-nothing and needs a strict majority of the
+      // configured protocol relays to ack — a silent relay counts against it. The
+      // soft ban above has already landed, so say what did and didn't happen
+      // rather than letting the raw quorum error read as "nothing happened".
+      throw new Error(
+        `${member.slice(0, 8)}… is banned and their roles are stripped, but severing their keys ` +
+          `failed: ${(e as Error).message}. They keep access to current keys until a refounding ` +
+          `succeeds — retry from Advanced → Rotate epoch once your relays are reachable.`,
+        { cause: e },
+      );
+    }
   };
 
   return (
@@ -700,6 +744,7 @@ function MembersPage({ cid }: { cid: string }) {
             mint a fresh invite from the sidebar (the link carries current keys, so they rejoin
             without access to history from before the refounding).
           </p>
+          {unbanError && <div className="alert alert-error text-sm mb-3">{unbanError}</div>}
           {[...banlist].sort().map((m) => (
             <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 max-sm:flex-wrap">
               <UserAvatar pubkey={m} />
@@ -713,7 +758,15 @@ function MembersPage({ cid }: { cid: string }) {
               </div>
               <div className="ml-auto max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:text-right">
                 {canBanAny && (
-                  <button className="btn btn-ghost btn-sm" onClick={() => community?.admin.unban(m)}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setUnbanError("");
+                      void Promise.resolve(community?.admin.unban(m)).catch((e: unknown) =>
+                        setUnbanError((e as Error).message),
+                      );
+                    }}
+                  >
                     Unban
                   </button>
                 )}
