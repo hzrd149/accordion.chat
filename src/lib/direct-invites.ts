@@ -2,6 +2,7 @@ import { castUser } from "applesauce-common/casts";
 import { DirectInviteFactory } from "@applesauce/concord/factories";
 import { buildInviteBundle } from "@applesauce/concord/helpers";
 import type { ConcordCommunity } from "@applesauce/concord";
+import { accountPublishOptions, requireAccepted } from "./publish";
 import { eventStore, pool } from "../nostr";
 
 export interface SendDirectInviteOptions {
@@ -35,6 +36,6 @@ export async function sendDirectInvite(
   const inboxes = await recipientInboxRelays(recipient);
   const relays = [...new Set([...inboxes, ...community.material.relays])];
   if (relays.length === 0) throw new Error("No relays available to deliver the invite");
-  await pool.publish(relays, wrap);
-  return relays;
+  const outcomes = requireAccepted(await pool.publish(relays, wrap, accountPublishOptions(community.signer, community.pubkey)));
+  return outcomes.filter((outcome) => outcome.ok).map((outcome) => outcome.from);
 }

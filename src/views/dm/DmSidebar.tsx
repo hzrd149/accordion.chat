@@ -11,6 +11,9 @@ export function DmSidebar({
   pubkey,
   relays,
   syncs,
+  syncing,
+  syncError,
+  onRetrySync,
   lockedCount,
   unlocking,
   conversations,
@@ -23,6 +26,9 @@ export function DmSidebar({
   pubkey: string;
   relays: string[] | undefined;
   syncs: number;
+  syncing: boolean;
+  syncError: string | null;
+  onRetrySync: () => void;
   lockedCount: number;
   unlocking: boolean;
   conversations: ConversationPreview[];
@@ -45,7 +51,13 @@ export function DmSidebar({
       </div>
       <div className="p-3 border-b border-base-300 text-xs opacity-70 flex flex-col gap-2 shrink-0">
         <div>{relays?.length ? `${relays.length} DM relay${relays.length === 1 ? "" : "s"}` : "No DM relays configured"}</div>
-        <div>{syncs} syncs • {lockedCount} locked</div>
+        <div>{syncing ? "Syncing…" : `${syncs} received`} • {lockedCount} locked</div>
+        {syncError && <div role="alert" className="text-error">{syncError}</div>}
+        {!!relays?.length && (
+          <button className="btn btn-ghost btn-xs" onClick={onRetrySync} disabled={syncing}>
+            {syncError ? "Retry sync" : "Refresh inbox"}
+          </button>
+        )}
         {lockedCount > 0 && (
           <button className="btn btn-primary btn-xs gap-1" onClick={onUnlockAll} disabled={unlocking}>
             <Lock size={13} /> {unlocking ? "Unlocking..." : `Unlock all (${lockedCount})`}

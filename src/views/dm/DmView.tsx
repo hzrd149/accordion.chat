@@ -26,7 +26,7 @@ export function DmView({
   const relays = use$(() => user.directMessageRelays$, [user]);
   const { peerPubkey } = useParams();
   const peer = peerPubkey && isHexPubkey(peerPubkey) ? peerPubkey.toLowerCase() : null;
-  const { messages, locked, syncs, unlocking, unlockAll, startTransition } = useDmInbox(account, pubkey, relays);
+  const { messages, locked, syncs, syncing, syncError, retrySync, unlocking, unlockAll, startTransition } = useDmInbox(account, pubkey, relays);
   const conversations = useConversations(pubkey, messages);
 
   useEffect(() => {
@@ -52,6 +52,9 @@ export function DmView({
         pubkey={pubkey}
         relays={relays}
         syncs={syncs}
+        syncing={syncing}
+        syncError={syncError}
+        onRetrySync={retrySync}
         lockedCount={locked.length}
         unlocking={unlocking}
         conversations={conversations}

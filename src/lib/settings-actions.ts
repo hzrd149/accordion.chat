@@ -15,6 +15,8 @@ import { getOutboxes } from "applesauce-core/helpers";
 import { eventStore, pool, LOOKUP_RELAYS } from "../nostr";
 import type { ISigner } from "applesauce-signers";
 
+import { accountPublishOptions, requireAccepted } from "./publish";
+
 const RELAY_LIST_KIND = 10002;
 
 // Broadly-reachable relays we always include when publishing account lists, so a
@@ -30,11 +32,11 @@ export function publishTargets(pubkey: string, extra?: string[]): string[] {
 
 /** An ActionRunner bound to `signer`/`pubkey` that publishes to `publishTargets`. */
 export function createSettingsRunner(signer: ISigner, pubkey: string): ActionRunner {
-  return new ActionRunner(eventStore, signer, (event, relays) => {
-    // Fire-and-forget: the ActionRunner already saved the event to the store
-    // (optimistic UI), so don't block `run()` on relay round-trips.
+  return new ActionRunner(eventStore, signer, async (event, relays) => {
+    // The runner keeps its optimistic local echo, while callers await a real
+    // acknowledgement so their existing error UI can offer retry.
     const targets = publishTargets(pubkey, relays);
-    void Promise.resolve(pool.publish(targets, event)).catch((err) => console.warn("settings publish failed", err));
+    requireAccepted(await pool.publish(targets, event, accountPublishOptions(signer, pubkey)));
   });
 }
 
@@ -61,5 +63,5 @@ export async function saveRelayList(
   });
   eventStore.add(signed);
   const targets = publishTargets(pubkey);
-  void Promise.resolve(pool.publish(targets, signed)).catch((err) => console.warn("relay list publish failed", err));
+  requireAccepted(await pool.publish(targets, signed, accountPublishOptions(signer, pubkey)));
 }

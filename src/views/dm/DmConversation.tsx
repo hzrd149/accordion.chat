@@ -5,6 +5,7 @@ import { WrappedMessagesGroup } from "applesauce-common/models";
 import { unixNow } from "applesauce-core/helpers";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { eventStore, pool } from "../../nostr";
+import { accountPublishOptions, requireAccepted } from "../../lib/publish";
 import { userFor } from "../../lib/settings-actions";
 import type { PublishStatus } from "./types";
 import { DmComposer } from "./DmComposer";
@@ -40,7 +41,7 @@ export function DmConversation({ self, peer, mobileListButton }: { self: string;
             const targets = relays?.length ? relays : peerRelays;
             if (!targets.length) throw new Error("No NIP-17 inbox relays found for this user");
             setLastPublish(targets.map((relay) => ({ relay, ok: false, message: "Publishing..." })));
-            const responses = await pool.publish(targets, event);
+            const responses = await pool.publish(targets, event, accountPublishOptions(account, self));
             setLastPublish(
               responses.map((response) => ({
                 relay: response.from,
@@ -48,9 +49,10 @@ export function DmConversation({ self, peer, mobileListButton }: { self: string;
                 message: response.message,
               })),
             );
+            requireAccepted(responses);
           })
         : null,
-    [account, peerRelays],
+    [account, peerRelays, self],
   );
 
   async function send(e: FormEvent) {
