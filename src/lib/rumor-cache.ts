@@ -1,192 +1,193 @@
-// Persist decoded Concord rumors to IndexedDB (via nostr-idb) so a community's
-// chat / control / guestbook history survives a reload independent of relay
-// behaviour — the same write-through cache pattern src/nostr.ts uses for public
-// events, but applied to the package's per-plane RumorStores.
-//
-// Why a RumorStore + write-through and not an AsyncRumorStore: the storeFactory
-// seam accepts either (`ConcordRumorStore = RumorStore | AsyncRumorStore`), but
-// an AsyncRumorStore needs an `IAsyncEventDatabase` — a 12-method interface
-// (replaceable lookups, history, filter matching) that only the applesauce-sqlite
-// drivers implement; nostr-idb is not one, so it would mean hand-writing that
-// adapter. It would also buy little: an async store's reads all return promises,
-// while the in-memory RumorStore keeps the working set synchronous for the fold
-// models, and reload-survival — the reason to reach for an async store — is what
-// the write-through below already delivers. Revisit if a plane's history outgrows
-// memory, which is what an async store would actually solve.
-//
-// Rumors are *unsigned* (verified by re-hashing their id via `verifyRumor`, not a
-// signature) and are decrypted plaintext, so they must never share the public
-// event cache DB. nostr-idb ≥5.1 stores these first-class via its `RumorEvent`
-// type (its `validateEvent` requires only NIP-01 fields, not `sig`), so they go
-// in and out without the sig-shim casts the old signed-only API forced.
-// We give each (community, plane) its own IndexedDB database —
-// a rumor carries nothing that identifies its plane, and we can't tag it without
-// changing its id, so per-plane databases are the only clean namespacing.
-
+// Decoded, unsigned plaintext must remain separate from the public event cache.
+// Keep the existing names: upgrading must not discard already held history/keys.
 import { RumorStore } from "applesauce-core";
-import { isEphemeralKind, isFromCache, markFromCache, type Rumor } from "applesauce-core/helpers";
-import {
-  addEvents,
-  deleteDB,
-  deleteEventsByIds,
-  getEventsForFilters,
-  openDB,
-  type NostrIDBDatabase,
-} from "nostr-idb";
+import { EventStoreSymbol, isEphemeralKind, markFromCache, type Rumor } from "applesauce-core/helpers";
+import { addEvents, deleteDB, deleteEventsByIds, getEventsForFilters, openDB } from "nostr-idb";
 import type { NostrEvent } from "nostr-tools";
 
-// nostr-idb ≥5.1 is generic over `StoredEvent = NostrEvent | RumorEvent`; a
-// `Rumor` (applesauce's unsigned-with-id shape) satisfies `RumorEvent`, so we
-// parameterise the store helpers with it and let the rows type as rumors end
-// to end — no signed-event casts.
-import { bufferTime, filter, type Subscription } from "rxjs";
-
-// Cap cached rumors per plane so a busy channel can't grow the DB without bound.
-// Generous — control/guestbook planes are small and never approach it; a channel
-// keeps its most-recent slice and refetches older history from relays on demand.
-const MAX_RUMORS_PER_PLANE = 2000;
-// Batch writes so a burst of incoming rumors is one transaction, not one each.
-// Kept short so a message sent and then reloaded within a second still persists —
-// the cache is meant to be relay-independent, so we can't lean on a refetch.
+const DB_PREFIX = "concord-rumors:";
 const WRITE_BATCH_MS = 1_000;
 
-const DB_PREFIX = "concord-rumors:";
-
-/** IndexedDB name for a plane's rumor cache. Namespaced so it never collides
- *  with the public-event cache ("nostr-idb") or another plane/community. */
-function dbName(communityId: string, planeKey: string): string {
-  return `${DB_PREFIX}${communityId}:${planeKey}`;
-}
-
-/** A plane's cache, tracked so leaving a community can tear it down. The open
- *  handle and the write-through subscriptions both have to go before the delete
- *  — see {@link deleteCommunityRumorCache}. */
 interface PlaneCache {
   name: string;
-  ready: Promise<NostrIDBDatabase | null>;
-  subs: Subscription[];
+  dispose(): Promise<void>;
+}
+const openedPlanes = new Map<string, Set<PlaneCache>>();
+// A new account/client may open the same plane before the previous asynchronous
+// shutdown finishes. Gate its open behind every earlier close/delete operation.
+const closingDatabases = new Map<string, Promise<void>>();
+const purgingCommunities = new Map<string, Promise<void>>();
+
+export interface RumorStoreFactory {
+  (communityId: string, planeKey: string): RumorStore;
+  /** Flush pending writes and release all stores/DB handles owned by this client. */
+  dispose(): Promise<void>;
 }
 
-// Every plane we've opened, grouped by community.
-const openedPlanes = new Map<string, PlaneCache[]>();
-
-/**
- * A `ConcordStoreFactory` that returns an in-memory {@link RumorStore} hydrated
- * from — and written through to — a per-plane nostr-idb database. Pass to
- * `new ConcordClient({ storeFactory })`.
+/** Restore a retained channel delete without feeding the upstream destructive
+ * delete manager. Concord uses the same public database/memory/insert$ seam for
+ * authenticated live deletes. Hash verification still applies to cached rows.
  */
-export function createRumorStoreFactory(): (communityId: string, planeKey: string) => RumorStore {
-  return (communityId, planeKey) => {
-    const store = new RumorStore();
-    const name = dbName(communityId, planeKey);
-
-    // storeFactory is synchronous, so open the DB in the background and let the
-    // store fill in as rows load — exactly like src/nostr.ts's nostr-idb start.
-    const dbReady: Promise<NostrIDBDatabase | null> = openDB(name).catch((err) => {
-      console.warn(`[concord] rumor cache: openDB(${name}) failed; plane stays in-memory`, err);
-      return null;
-    });
-
-    const plane: PlaneCache = { name, ready: dbReady, subs: [] };
-    const planes = openedPlanes.get(communityId);
-    if (planes) planes.push(plane);
-    else openedPlanes.set(communityId, [plane]);
-
-    // Hydrate: load every cached rumor (an empty filter throws in nostr-idb, so
-    // `{ since: 0 }` matches all) and add it, marked from-cache so the persist
-    // subscription below doesn't immediately write it straight back.
-    void dbReady.then(async (db) => {
-      if (!db) return;
-      try {
-        const cached = await getEventsForFilters<Rumor>(db, [{ since: 0 }]);
-        for (const event of cached) {
-          markFromCache(event as unknown as NostrEvent);
-          store.add(event);
-        }
-      } catch (err) {
-        console.warn(`[concord] rumor cache: hydrate(${name}) failed`, err);
-      }
-    });
-
-    // Persist newly-arrived rumors (skip the ones we just hydrated). Subscribed
-    // synchronously so nothing added during the open is missed; the handler waits
-    // on dbReady. nostr-idb stores rumors by id without a signature check, so the
-    // sig-less rumors persist as-is.
-    //
-    // Ephemeral rumors are excluded: CORD-07 voice presence (23313) lands in the
-    // channel plane like any other rumor, but it's a heartbeat with a 90s staleness
-    // window — persisting it would burn the per-plane cap on beacons that are dead
-    // on arrival after a reload.
-    plane.subs.push(
-      store.insert$
-        .pipe(
-          filter((rumor) => !isEphemeralKind(rumor.kind)),
-          filter((rumor) => !isFromCache(rumor as unknown as NostrEvent)),
-          bufferTime(WRITE_BATCH_MS),
-          filter((batch) => batch.length > 0),
-        )
-        .subscribe(async (batch) => {
-          const db = await dbReady;
-          if (!db) return;
-          try {
-            await addEvents<Rumor>(db, batch);
-            await enforceCap(db);
-          } catch (err) {
-            console.warn(`[concord] rumor cache: write(${name}) failed`, err);
-          }
-        }),
-    );
-
-    // Mirror removals — a kind-5 delete rumor drops its target from the store, so
-    // drop it from the cache too (otherwise a reload would resurrect it).
-    plane.subs.push(
-      store.remove$.subscribe(async (rumor) => {
-        const db = await dbReady;
-        if (!db) return;
-        await deleteEventsByIds(db, [rumor.id]).catch(() => {});
-      }),
-    );
-
-    return store;
-  };
-}
-
-/** Evict the oldest rumors beyond {@link MAX_RUMORS_PER_PLANE}. Results come back
- *  newest-first, so everything past the cap is the oldest slice. */
-async function enforceCap(db: NostrIDBDatabase): Promise<void> {
-  const all = await getEventsForFilters(db, [{ since: 0 }]);
-  if (all.length <= MAX_RUMORS_PER_PLANE) return;
-  const overflow = all.slice(MAX_RUMORS_PER_PLANE).map((e) => e.id);
-  await deleteEventsByIds(db, overflow);
-}
-
-/**
- * Delete every plaintext rumor cache for a community — call this when the user
- * leaves it, so decrypted history doesn't linger on disk after they're removed.
- *
- * Two things make this less obvious than it looks:
- *
- * IndexedDB will not delete a database while a connection to it is open — the
- * request fires `blocked` and simply waits — so the write-through subscriptions
- * have to be stopped and our handles closed *first*, or the delete hangs and the
- * plaintext stays on disk.
- *
- * The planes we opened are also not the whole story: a `channel:<id>` plane only
- * gets a store when that channel is first read, so a reload followed by a leave
- * would strand the decrypted history of every channel this session never opened.
- * Enumerate the real databases by prefix to catch those, keeping our own names as
- * the fallback for browsers without `indexedDB.databases()`.
- */
-export async function deleteCommunityRumorCache(communityId: string): Promise<void> {
-  const planes = openedPlanes.get(communityId) ?? [];
-  openedPlanes.delete(communityId);
-  const names = new Set(planes.map((plane) => plane.name));
-
-  for (const plane of planes) {
-    for (const sub of plane.subs) sub.unsubscribe();
-    (await plane.ready)?.close();
+function restoreRumor(store: RumorStore, rumor: Rumor): void {
+  if (rumor.kind !== 5) {
+    store.add(rumor);
+    return;
   }
+  if (!store.verifyEvent?.(rumor) || store.hasEvent(rumor.id)) return;
+  const inserted = store.database.add(rumor);
+  const canonical = store.memory.add(inserted);
+  Object.defineProperty(canonical, EventStoreSymbol, { value: store, configurable: true, writable: true });
+  store.insert$.next(canonical);
+}
 
+/** Synchronous Concord storeFactory with serialized, asynchronous write-through.
+ *
+ * Retention is deliberately conservative: control, rekey, guestbook and dissolved
+ * planes are protocol evidence, and channel originals/deletes/edits/reactions are
+ * inputs to a reversible moderation projection. An age/count cap cannot safely
+ * distinguish dispensable rows. Preserve all non-ephemeral inputs until Concord
+ * supplies a verified compaction boundary; display limits belong in the UI.
+ * Existing caches are read in place. Originals pruned by the old cache cannot be
+ * recovered locally; normal verified relay synchronization can refill them.
+ */
+export function createRumorStoreFactory(): RumorStoreFactory {
+  const owned = new Set<PlaneCache>();
+  let factoryDisposed = false;
+  const factory: RumorStoreFactory = Object.assign((communityId: string, planeKey: string) => {
+    if (factoryDisposed) throw new Error("Rumor cache factory is disposed");
+    const store = new RumorStore({ keepOldVersions: true });
+    const name = `${DB_PREFIX}${communityId}:${planeKey}`;
+    let stopped = false;
+    const hydrating = new WeakSet<Rumor>();
+    let hydrationComplete = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed: Promise<void> | undefined;
+    const removedDuringHydration = new Set<string>();
+    type Operation = { add: Rumor } | { remove: string };
+    let pending: Operation[] = [];
+    const ready = Promise.all([closingDatabases.get(name), purgingCommunities.get(communityId)])
+      .then(() => openDB(name))
+      .catch((err) => {
+        console.warn(`[concord] rumor cache: open(${name}) failed; using memory`, err);
+        return null;
+      });
+
+    // Hydration is the first serialized operation. Live inserts/removals are
+    // subscribed immediately and queued behind it; stopping cancels hydration.
+    let queue: Promise<void> = ready.then(async (db) => {
+      if (!db || stopped) return;
+      const cached = await getEventsForFilters<Rumor>(db, [{ since: 0 }]);
+      if (stopped) return;
+      try {
+        for (const rumor of cached) {
+          if (removedDuringHydration.has(rumor.id) || isEphemeralKind(rumor.kind)) continue;
+          markFromCache(rumor as unknown as NostrEvent);
+          hydrating.add(rumor);
+          try { restoreRumor(store, rumor); }
+          finally { hydrating.delete(rumor); }
+        }
+      } finally {
+        removedDuringHydration.clear();
+      }
+    }).catch((err) => console.warn(`[concord] rumor cache: hydrate(${name}) failed`, err)).finally(() => {
+      hydrationComplete = true;
+      removedDuringHydration.clear();
+    });
+
+    function flush(): void {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      if (!pending.length) return;
+      const batch = pending;
+      pending = [];
+      queue = queue.then(async () => {
+        const db = await ready;
+        if (!db) return;
+        // Batch adjacent inserts but keep removes in order: otherwise an insert
+        // delayed by openDB can resurrect an event removed in the meantime.
+        let inserts: Rumor[] = [];
+        const writeInserts = async () => {
+          if (inserts.length) await addEvents<Rumor>(db, inserts);
+          inserts = [];
+        };
+        for (const operation of batch) {
+          if ("add" in operation) inserts.push(operation.add);
+          else {
+            await writeInserts();
+            await deleteEventsByIds(db, [operation.remove]);
+          }
+        }
+        await writeInserts();
+      }).catch((err) => console.warn(`[concord] rumor cache: write(${name}) failed`, err));
+    }
+
+    const subs = [
+      store.insert$.subscribe((rumor) => {
+        if (stopped || hydrating.delete(rumor) || isEphemeralKind(rumor.kind)) return;
+        removedDuringHydration.delete(rumor.id);
+        pending.push({ add: rumor });
+        timer ??= setTimeout(flush, WRITE_BATCH_MS);
+      }),
+      store.remove$.subscribe((rumor) => {
+        if (stopped) return;
+        if (!hydrationComplete) removedDuringHydration.add(rumor.id);
+        pending.push({ remove: rumor.id });
+        flush();
+      }),
+    ];
+    const originalDispose = store.dispose.bind(store);
+    const plane: PlaneCache = {
+      name,
+      dispose() {
+        if (disposed) return disposed;
+        stopped = true;
+        for (const sub of subs) sub.unsubscribe();
+        flush();
+        originalDispose();
+        disposed = queue.then(async () => { (await ready)?.close(); });
+        closingDatabases.set(name, disposed);
+        void disposed.finally(() => {
+          if (closingDatabases.get(name) === disposed) closingDatabases.delete(name);
+          openedPlanes.get(communityId)?.delete(plane);
+          if (!openedPlanes.get(communityId)?.size) openedPlanes.delete(communityId);
+          owned.delete(plane);
+        });
+        return disposed;
+      },
+    };
+    store.dispose = () => { void plane.dispose(); };
+    const planes = openedPlanes.get(communityId) ?? new Set<PlaneCache>();
+    planes.add(plane);
+    openedPlanes.set(communityId, planes);
+    owned.add(plane);
+    return store;
+  }, {
+    async dispose() {
+      factoryDisposed = true;
+      await Promise.all([...owned].map((plane) => plane.dispose()));
+    },
+  });
+  return factory;
+}
+
+/** Purge every plaintext plane, including channels unopened in this session.
+ * Stop and flush writers, close handles, then delete — IndexedDB otherwise
+ * silently blocks deletes. A subsequent open waits for the deletion to finish.
+ */
+export function deleteCommunityRumorCache(communityId: string): Promise<void> {
+  const existing = purgingCommunities.get(communityId);
+  if (existing) return existing;
+  const deletion = purgeCommunity(communityId).finally(() => {
+    if (purgingCommunities.get(communityId) === deletion) purgingCommunities.delete(communityId);
+  });
+  purgingCommunities.set(communityId, deletion);
+  return deletion;
+}
+
+async function purgeCommunity(communityId: string): Promise<void> {
+  const planes = [...(openedPlanes.get(communityId) ?? [])];
+  const names = new Set(planes.map((plane) => plane.name));
+  await Promise.all(planes.map((plane) => plane.dispose()));
   const prefix = `${DB_PREFIX}${communityId}:`;
   try {
     for (const db of (await indexedDB.databases?.()) ?? [])
@@ -194,6 +195,11 @@ export async function deleteCommunityRumorCache(communityId: string): Promise<vo
   } catch (err) {
     console.warn("[concord] rumor cache: could not enumerate databases", err);
   }
-
-  await Promise.allSettled([...names].map((name) => deleteDB(name)));
+  await Promise.all([...names].map((name) => {
+    const deletion = (closingDatabases.get(name) ?? Promise.resolve()).then(() => deleteDB(name));
+    closingDatabases.set(name, deletion);
+    return deletion.finally(() => {
+      if (closingDatabases.get(name) === deletion) closingDatabases.delete(name);
+    });
+  }));
 }
