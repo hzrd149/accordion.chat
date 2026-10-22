@@ -6,21 +6,16 @@
 // channel you have never opened still accumulates rumors, and they hydrate from
 // the IndexedDB rumor cache on reload. We just count what is already there.
 //
-// Note this reads the stores directly rather than reusing `useMessages`: that
-// hook runs the full `foldMessages` (reactions, edits, deletes, thread counts,
-// imeta parsing) for one channel, which is far more work than a count needs, and
-// it only covers the mounted channel anyway.
+// Shares the authority-aware projection with chat, threads and mentions.
 
 import { useEffect, useMemo, useState } from "react";
 import { auditTime, combineLatest, map } from "rxjs";
 import { use$ } from "applesauce-react/hooks";
-import { kinds } from "nostr-tools";
 import type { ConcordCommunity } from "@applesauce/concord";
-import { rumorMs } from "@applesauce/concord/helpers";
-import type { Rumor } from "applesauce-core/helpers";
 import { ensureBaseline, getLastRead, getReadState, markRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "./fold";
 import { mentions } from "./mentions";
+import { channelProjection } from "./projection";
 
 /** Unread summary for one channel. */
 export interface ChannelUnread {
@@ -33,21 +28,21 @@ export interface ChannelUnread {
 export type UnreadMap = Record<string, ChannelUnread>;
 
 const EMPTY: UnreadMap = {};
-const NO_ENTRIES: (readonly [string, Rumor[]])[] = [];
+const NO_ENTRIES: (readonly [string, ChatMessage[]])[] = [];
 
 // Coalesce store churn: a burst of arriving rumors (or a cache hydrate, which
 // adds every cached rumor one by one) would otherwise re-count on every add.
 const SETTLE_MS = 250;
 
-function summarize(rumors: Rumor[], lastRead: number, pubkey: string): ChannelUnread {
+export function summarize(rumors: ChatMessage[], lastRead: number, pubkey: string): ChannelUnread {
   let count = 0;
   let mention = false;
   for (const r of rumors) {
     // Never unread from yourself.
-    if (r.pubkey === pubkey) continue;
-    if (rumorMs(r) <= lastRead) continue;
+    if (r.deleted || r.author === pubkey) continue;
+    if (r.ms <= lastRead) continue;
     count++;
-    if (!mention) mention = mentions(r.content, pubkey);
+    if (!mention) mention = mentions(r.edited ?? r.content, pubkey);
   }
   return { count, mention };
 }
@@ -55,8 +50,7 @@ function summarize(rumors: Rumor[], lastRead: number, pubkey: string): ChannelUn
 /**
  * Unread counts for every channel in a community, keyed by channel id.
  *
- * `channelIds` should already exclude deleted channels. Voice channels carry no
- * chat, so they simply count zero rather than being special-cased.
+ * `channelIds` should already exclude deleted or inaccessible channels.
  */
 export function useUnreadCounts(
   community: ConcordCommunity | undefined,
@@ -83,10 +77,7 @@ export function useUnreadCounts(
     const ids = idsKey.split(",");
     return combineLatest(
       ids.map((id) =>
-        community
-          .channelStore(id)
-          .timeline([{ kinds: [kinds.ChatMessage] }])
-          .pipe(map((rumors) => [id, rumors] as const)),
+        channelProjection(community, id).pipe(map((view) => [id, view.messages] as const)),
       ),
     ).pipe(auditTime(SETTLE_MS));
   }, [community, cid, idsKey]);
@@ -182,7 +173,7 @@ export function useNewMessagesDivider(
     // A never-read channel has no divider: flagging the entire history of a
     // channel you just opened for the first time is noise, not signal.
     if (!lastRead) return undefined;
-    return messages.find((m) => m.ms > lastRead && m.ms < openedAt && m.author !== pubkey)?.id;
+    return messages.find((m) => !m.deleted && m.ms > lastRead && m.ms < openedAt && m.author !== pubkey)?.id;
   }, [messages, lastRead, openedAt, pubkey]);
 }
 

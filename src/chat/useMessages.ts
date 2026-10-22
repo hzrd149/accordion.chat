@@ -1,17 +1,12 @@
-// React hooks that fold a community channel's RumorStore into the message/thread
-// lists the UI renders. `RumorStore.timeline()` re-emits on every add — so the
-// optimistic local echo in ConcordCommunity's publish path drives live updates —
-// and `map(fold*)` runs the pure fold per emission.
+// Shared ban- and authority-aware channel projections for chat and NIP-22 threads.
 
 import { useMemo } from "react";
 import { map } from "rxjs";
 import { use$ } from "applesauce-react/hooks";
 import type { ConcordCommunity } from "@applesauce/concord";
-import { EDIT_KIND } from "@applesauce/concord/helpers";
-import { kinds } from "nostr-tools";
-import { foldMessages, foldThread, type ChatMessage, type ThreadComment } from "./fold";
+import type { ChatMessage, ThreadComment } from "./fold";
+import { channelProjection } from "./projection";
 
-const MESSAGE_KINDS = [kinds.ChatMessage, kinds.Reaction, kinds.EventDeletion, EDIT_KIND, 1111];
 const NO_MESSAGES: ChatMessage[] = [];
 const NO_COMMENTS: ThreadComment[] = [];
 
@@ -20,7 +15,7 @@ export function useMessages(community: ConcordCommunity | undefined, channelId: 
   const messages$ = useMemo(
     () =>
       community
-        ? community.channelStore(channelId).timeline([{ kinds: MESSAGE_KINDS }]).pipe(map(foldMessages))
+        ? channelProjection(community, channelId).pipe(map((view) => view.messages))
         : undefined,
     [community, channelId],
   );
@@ -36,10 +31,7 @@ export function useThread(
   const thread$ = useMemo(
     () =>
       community
-        ? community
-            .channelStore(channelId)
-            .timeline([{ kinds: [1111] }])
-            .pipe(map((rumors) => foldThread(rumors, rootId)))
+        ? channelProjection(community, channelId).pipe(map((view) => view.threads.get(rootId) ?? NO_COMMENTS))
         : undefined,
     [community, channelId, rootId],
   );

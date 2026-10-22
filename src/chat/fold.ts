@@ -1,14 +1,4 @@
-// Chat/thread folds over a channel's RumorStore.
-//
-// applesauce-concord exposes each channel as a raw `RumorStore` (via
-// `community.channelStore(id)`) and leaves chat rendering to the app. This is the
-// app's fold: it turns the channel's decrypted rumors — messages (kind 9),
-// reactions (7), edits (3302), deletions (5), and NIP-22 comments (1111) — into
-// the flat `ChatMessage[]` / `ThreadComment[]` the UI renders, aggregating
-// reactions, applying author-scoped edits/deletes, counting thread replies, and
-// parsing NIP-92 encrypted attachments. Ported verbatim from the old monolithic
-// client's `recomputeMessages`/`recomputeThread`, reading `Rumor` (not the
-// package-internal `DecodedEvent`): `author = rumor.pubkey`, `ms = rumorMs(rumor)`.
+// App-owned chat and NIP-22 effects over retained, ban-filtered channel inputs.
 
 import { kinds, type NostrEvent } from "nostr-tools";
 import type { Rumor } from "applesauce-core/helpers";
@@ -61,117 +51,98 @@ function eventPointer(pointer: CommentPointer | null): { id: string; author: str
   return { id: pointer.id, author: pointer.pubkey ?? "", kind: pointer.kind };
 }
 
-/** Fold a channel's rumors into the ordered message list the UI renders. */
-export function foldMessages(rumors: Rumor[]): ChatMessage[] {
-  const byId = new Map<string, ChatMessage>();
-  // target -> reaction content -> { url?, authors }. A custom emoji reaction's
-  // content is `:shortcode:` and carries the image URL from its own emoji tag.
-  const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
-  const threadCounts = new Map<string, number>();
-  const edits: Rumor[] = [];
-  const deletes: Rumor[] = [];
+export type CanDelete = (deleter: string, author: string) => boolean;
+const authorDelete: CanDelete = (deleter, author) => deleter === author;
 
-  const sorted = [...rumors].sort((a, b) => rumorMs(a) - rumorMs(b));
-  for (const r of sorted) {
-    if (r.kind === MESSAGE) {
-      const q = r.tags.find((t) => t[0] === "q");
-      byId.set(r.id, {
-        id: r.id,
-        author: r.pubkey,
-        content: r.content,
-        ms: rumorMs(r),
-        deleted: false,
-        replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
-        threadReplyCount: 0,
-        reactions: [],
-        attachments: [...parseImeta(r.tags).values()],
-        emojiTags: r.tags.filter((t) => t[0] === "emoji"),
-        raw: r,
-      });
-    } else if (r.kind === COMMENT) {
-      const root = eventPointer(getCommentRootPointer(r as unknown as NostrEvent));
-      if (root?.kind === MESSAGE) threadCounts.set(root.id, (threadCounts.get(root.id) ?? 0) + 1);
-    } else if (r.kind === EDIT_KIND) {
-      edits.push(r);
-    } else if (r.kind === DELETE) {
-      deletes.push(r);
-    } else if (r.kind === REACTION) {
-      const target = r.tags.find((t) => t[0] === "e")?.[1];
-      if (!target) continue;
-      let emap = reactions.get(target);
-      if (!emap) {
-        emap = new Map();
-        reactions.set(target, emap);
-      }
-      let entry = emap.get(r.content);
-      if (!entry) {
-        // NIP-30: resolve a custom `:shortcode:` reaction to its image URL via
-        // applesauce (plain unicode reactions resolve to undefined).
-        const custom = getReactionEmoji(r as unknown as NostrEvent);
-        entry = { url: custom?.url, authors: new Set() };
-        emap.set(r.content, entry);
-      }
-      entry.authors.add(r.pubkey);
-    }
-  }
-
-  // Apply edits/deletes only from the message's own author.
-  for (const r of edits) {
-    const targetId = r.tags.find((t) => t[0] === "e")?.[1];
-    const msg = targetId ? byId.get(targetId) : undefined;
-    if (msg && msg.author === r.pubkey) {
-      msg.edited = r.content;
-      // Replace emoji tags with the edit's so :shortcode: renders against the
-      // edit's NIP-30 tags, not the original message's (which may differ).
-      msg.emojiTags = r.tags.filter((t) => t[0] === "emoji");
-    }
-  }
-  for (const r of deletes) {
-    for (const t of r.tags) {
-      if (t[0] !== "e") continue;
-      const msg = byId.get(t[1]);
-      if (msg && msg.author === r.pubkey) msg.deleted = true;
-    }
-  }
-  for (const [target, emap] of reactions) {
-    const msg = byId.get(target);
-    if (!msg) continue;
-    msg.reactions = [...emap.entries()].map(([emoji, { url, authors }]) => ({
-      emoji,
-      url,
-      count: authors.size,
-      authors: [...authors],
-    }));
-  }
-  for (const [target, count] of threadCounts) {
-    const msg = byId.get(target);
-    if (msg) msg.threadReplyCount = count;
-  }
-
-  return [...byId.values()].sort((a, b) => a.ms - b.ms);
+export interface ChannelProjection {
+  messages: ChatMessage[];
+  threads: Map<string, ThreadComment[]>;
 }
 
-/** Fold a channel's NIP-22 comments into the thread rooted at `rootId`. */
-export function foldThread(rumors: Rumor[], rootId: string): ThreadComment[] {
-  const comments: ThreadComment[] = [];
-  const sorted = [...rumors].sort((a, b) => rumorMs(a) - rumorMs(b));
-  for (const r of sorted) {
-    if (r.kind !== COMMENT) continue;
-    const event = r as unknown as NostrEvent;
-    const root = eventPointer(getCommentRootPointer(event));
-    const parent = eventPointer(getCommentReplyPointer(event));
-    if (!root || !parent || root.id !== rootId || root.kind !== MESSAGE) continue;
-    comments.push({
-      id: r.id,
-      author: r.pubkey,
-      content: r.content,
-      ms: rumorMs(r),
-      deleted: false,
-      root,
-      parent,
-      emojiTags: r.tags.filter((t) => t[0] === "emoji"),
-      raw: r,
-    });
+/** One coherent view of messages and effects, rebuilt against current authority.
+ * Inputs must come from channelTimeline so banned authors cannot contribute effects.
+ * Deletions are requests, never irreversible tombstones: revoking authority restores history.
+ */
+export function foldChannel(rumors: Rumor[], canDelete: CanDelete = authorDelete): ChannelProjection {
+  const byId = new Map(rumors.map((r) => [r.id, r]));
+  const deleted = new Set<string>();
+  for (const r of rumors) {
+    if (r.kind !== DELETE) continue;
+    for (const tag of r.tags) {
+      if (tag[0] !== "e") continue;
+      const target = byId.get(tag[1]);
+      if (target && target.kind !== DELETE && canDelete(r.pubkey, target.pubkey)) deleted.add(target.id);
+    }
   }
-  return comments;
+  const messages = new Map<string, ChatMessage>();
+  const threads = new Map<string, ThreadComment[]>();
+  const edits = new Map<string, Rumor>();
+  const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
+
+  for (const r of rumors) {
+    if (r.kind === MESSAGE) {
+      const q = r.tags.find((t) => t[0] === "q");
+      messages.set(r.id, {
+        id: r.id, author: r.pubkey, content: r.content, ms: rumorMs(r),
+        deleted: deleted.has(r.id),
+        replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
+        threadReplyCount: 0, reactions: [], attachments: [...parseImeta(r.tags).values()],
+        emojiTags: r.tags.filter((t) => t[0] === "emoji"), raw: r,
+      });
+    } else if (r.kind === COMMENT && !deleted.has(r.id)) {
+      const event = r as unknown as NostrEvent;
+      const root = eventPointer(getCommentRootPointer(event));
+      const parent = eventPointer(getCommentReplyPointer(event));
+      if (!root || !parent || root.kind !== MESSAGE || deleted.has(root.id)) continue;
+      const comments = threads.get(root.id) ?? [];
+      comments.push({ id: r.id, author: r.pubkey, content: r.content, ms: rumorMs(r),
+        deleted: false, root, parent, emojiTags: r.tags.filter((t) => t[0] === "emoji"), raw: r });
+      threads.set(root.id, comments);
+    } else if (r.kind === EDIT_KIND && !deleted.has(r.id)) {
+      const target = r.tags.find((t) => t[0] === "e")?.[1];
+      if (!target || byId.get(target)?.pubkey !== r.pubkey) continue;
+      const previous = edits.get(target);
+      if (!previous || compareRumors(previous, r) < 0) edits.set(target, r);
+    } else if (r.kind === REACTION && !deleted.has(r.id)) {
+      const target = r.tags.find((t) => t[0] === "e")?.[1];
+      if (!target) continue;
+      const emojis = reactions.get(target) ?? new Map();
+      const entry = emojis.get(r.content) ?? {
+        url: getReactionEmoji(r as unknown as NostrEvent)?.url, authors: new Set<string>(),
+      };
+      entry.authors.add(r.pubkey);
+      emojis.set(r.content, entry);
+      reactions.set(target, emojis);
+    }
+  }
+  for (const msg of messages.values()) {
+    if (msg.deleted) continue;
+    const edit = edits.get(msg.id);
+    if (edit) {
+      msg.edited = edit.content;
+      msg.emojiTags = edit.tags.filter((t) => t[0] === "emoji");
+    }
+    msg.reactions = [...(reactions.get(msg.id) ?? [])].map(([emoji, { url, authors }]) => ({
+      emoji, url, count: authors.size, authors: [...authors],
+    }));
+    msg.threadReplyCount = threads.get(msg.id)?.length ?? 0;
+  }
+  for (const comments of threads.values()) comments.sort(compareRows);
+  return { messages: [...messages.values()].sort(compareRows), threads };
+}
+
+function compareRows(a: { ms: number; id: string }, b: { ms: number; id: string }): number {
+  return a.ms - b.ms || a.id.localeCompare(b.id);
+}
+function compareRumors(a: Rumor, b: Rumor): number {
+  return rumorMs(a) - rumorMs(b) || a.id.localeCompare(b.id);
+}
+
+/** Standalone fold for adapters/tests; live consumers share channelProjection. */
+export function foldMessages(rumors: Rumor[], canDelete?: CanDelete): ChatMessage[] {
+  return foldChannel(rumors, canDelete).messages;
+}
+
+export function foldThread(rumors: Rumor[], rootId: string, canDelete?: CanDelete): ThreadComment[] {
+  return foldChannel(rumors, canDelete).threads.get(rootId) ?? [];
 }
