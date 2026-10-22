@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { distinctUntilChanged, map } from "rxjs";
 import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
@@ -13,7 +14,7 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
 import { PERM } from "@applesauce/concord";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
-import { hasPerm, parsePermissions } from "@applesauce/concord/helpers";
+import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
 
@@ -98,12 +99,35 @@ export function CommunitySettingsView({
       </nav>
       <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
         <div className="max-w-[640px]">
+          <ControlKeyNotice cid={cid} />
           {page === "overview" && <OverviewPage cid={cid} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} />}
           {page === "members" && <MembersPage cid={cid} />}
           {page === "channels" && <ChannelsPage cid={cid} />}
           {page === "advanced" && <AdvancedPage cid={cid} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Key possession and current authority are separate in split-control communities. */
+function ControlKeyNotice({ cid }: { cid: string }) {
+  const community = useCommunity(cid);
+  const account = useActiveAccount();
+  const missingSigningKey = use$(() => community?.state$.pipe(
+    map((state) => Boolean(account && state.material.control_pk && !state.material.control_root &&
+      isCurrentStaff(state, account.pubkey))),
+    distinctUntilChanged(),
+  ), [community, account?.pubkey]) ?? false;
+  if (!missingSigningKey) return null;
+  return (
+    <div className="alert alert-warning text-sm mb-5" role="status">
+      <div>
+        <p className="font-semibold">Staff signing key missing on this device</p>
+        <p>You can read this community, but changes to its settings need your staff signing key.
+          Restore community keys from another device that holds them, or retry sync from the connection status.
+          Ask the owner to grant your staff roles again if the key still does not arrive.</p>
       </div>
     </div>
   );
@@ -307,7 +331,7 @@ function ImageField({
               // Routes through editMetadata, which asserts the name/description
               // byte caps on the merged result — so it can be refused over a
               // pre-existing over-cap field this action never touched.
-              void Promise.resolve(community?.admin.removeCommunityImage(which)).catch((e: unknown) =>
+              void Promise.resolve().then(() => community?.admin.removeCommunityImage(which)).catch((e: unknown) =>
                 setError(e instanceof Error ? e.message : "Remove failed"),
               );
             }}
@@ -378,6 +402,7 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   function toggle(p: PermName) {
     const next = new Set(perms);
@@ -388,13 +413,18 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
 
   async function create() {
     setBusy(true);
-    let bits = 0n;
-    for (const p of perms) bits |= PERM[p];
-    const position = roleCount + 1;
-    await community?.admin.createRole(name.trim(), position, bits);
-    setName("");
-    setPerms(new Set());
-    setBusy(false);
+    setError("");
+    try {
+      let bits = 0n;
+      for (const p of perms) bits |= PERM[p];
+      await community?.admin.createRole(name.trim(), roleCount + 1, bits);
+      setName("");
+      setPerms(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Create role failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -416,6 +446,7 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
           </div>
         ))}
       </div>
+      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={create} disabled={!canCreate || !name.trim() || busy}>
           Create role
@@ -437,6 +468,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
   const [perms, setPerms] = useState<Set<PermName>>(() => rolePermSet(role));
   const [memberQuery, setMemberQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -464,32 +496,46 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
     setSaved(false);
   }
 
-  async function save() {
+  async function run(action: () => Promise<unknown> | undefined) {
     setBusy(true);
+    setError("");
+    try {
+      await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Role update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
     setSaved(false);
-    let bits = 0n;
-    for (const p of perms) bits |= PERM[p];
-    const parsedColor = Number.parseInt(color.replace(/^#/, ""), 16);
-    await community?.admin.editRole(role.role_id, {
-      name: name.trim(),
-      position: Math.max(1, Number.parseInt(position, 10) || role.position),
-      permissions: bits.toString(),
-      color: Number.isFinite(parsedColor) ? parsedColor : 0,
+    await run(async () => {
+      let bits = 0n;
+      for (const p of perms) bits |= PERM[p];
+      const parsedColor = Number.parseInt(color.replace(/^#/, ""), 16);
+      await community?.admin.editRole(role.role_id, {
+        name: name.trim(),
+        position: Math.max(1, Number.parseInt(position, 10) || role.position),
+        permissions: bits.toString(),
+        color: Number.isFinite(parsedColor) ? parsedColor : 0,
+      });
+      setSaved(true);
     });
-    setBusy(false);
-    setSaved(true);
   }
 
   async function removeMember(member: string) {
-    const next = (grants.get(member) ?? []).filter((rid) => rid !== role.role_id);
-    await community?.admin.grantRoles(member, next);
+    await run(() => community?.admin.grantRoles(member,
+      (grants.get(member) ?? []).filter((rid) => rid !== role.role_id)));
   }
 
   async function addMember(member: string) {
-    const next = new Set(grants.get(member) ?? []);
-    next.add(role.role_id);
-    await community?.admin.grantRoles(member, [...next]);
-    setMemberQuery("");
+    await run(async () => {
+      const next = new Set(grants.get(member) ?? []);
+      next.add(role.role_id);
+      await community?.admin.grantRoles(member, [...next]);
+      setMemberQuery("");
+    });
   }
 
   return (
@@ -521,6 +567,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
           </div>
         ))}
       </div>
+      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5 mb-7">
         <button className="btn btn-primary" onClick={save} disabled={!canManage || !name.trim() || busy}>
           {busy ? "Saving…" : "Save changes"}
@@ -559,7 +606,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
         <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
           <UserAvatar pubkey={m} />
           <div className="font-medium min-w-0 truncate"><UserName pubkey={m} /></div>
-          <button className="btn btn-ghost btn-sm ml-auto" onClick={() => removeMember(m)} disabled={!canManage}>
+          <button className="btn btn-ghost btn-sm ml-auto" onClick={() => removeMember(m)} disabled={!canManage || busy}>
             Remove
           </button>
         </div>
@@ -573,7 +620,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
             <div className="p-3 text-sm opacity-70">No matching members.</div>
           ) : (
             results.map((c) => (
-              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left min-w-0" onClick={() => addMember(c.pubkey)}>
+              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left min-w-0" onClick={() => addMember(c.pubkey)} disabled={busy}>
                 <UserAvatar pubkey={c.pubkey} />
                 <span className="font-medium truncate">{c.name}</span>
                 <span className="text-xs opacity-60 ml-auto truncate max-sm:hidden">{c.npub}</span>
@@ -619,6 +666,7 @@ function MemberRow({
   const grants = use$(community?.grants$) ?? NO_GRANTS;
   const canKick = use$(() => community?.canModerate$(member, PERM.KICK), [community, member]) ?? false;
   const canBan = use$(() => community?.canModerate$(member, PERM.BAN), [community, member]) ?? false;
+  const canGrantRoles = use$(() => community?.canModerate$(member, PERM.MANAGE_ROLES), [community, member]) ?? false;
   const isOwner = member === community?.material.owner;
   const held = new Set(grants.get(member) ?? []);
   // kick/ban now refuse locally, before publishing, when the caller doesn't
@@ -628,7 +676,7 @@ function MemberRow({
   const [error, setError] = useState("");
   const guard = (action: () => Promise<unknown> | undefined) => () => {
     setError("");
-    void Promise.resolve(action()).catch((e: unknown) => setError((e as Error).message));
+    void Promise.resolve().then(action).catch((e: unknown) => setError((e as Error).message));
   };
 
   return (
@@ -658,7 +706,7 @@ function MemberRow({
           ))}
       </div>
       {error && <div className="w-full pl-[42px] text-error text-sm max-sm:pl-0">{error}</div>}
-      {!isOwner && canManageRoles && serverRoles.length > 0 && (
+      {!isOwner && canManageRoles && canGrantRoles && serverRoles.length > 0 && (
         <div className="w-full flex gap-1.5 flex-wrap pl-[42px] max-sm:pl-0">
           {serverRoles.map((r) => {
             const on = held.has(r.role_id);
@@ -666,12 +714,12 @@ function MemberRow({
               <button
                 key={r.role_id}
                 className={`badge badge-sm cursor-pointer ${on ? "badge-primary" : "badge-ghost"}`}
-                onClick={() => {
+                onClick={guard(async () => {
                   const next = new Set(held);
                   if (on) next.delete(r.role_id);
                   else next.add(r.role_id);
-                  community?.admin.grantRoles(member, [...next]);
-                }}
+                  await community?.admin.grantRoles(member, [...next]);
+                })}
               >
                 {r.name}
               </button>

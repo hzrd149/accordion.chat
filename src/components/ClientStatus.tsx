@@ -5,6 +5,7 @@
 //   • CommunityStatusDot — a per-community sync/connection dot, overlaid on a
 //     rail icon.
 import { use$ } from "applesauce-react/hooks";
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { ConcordClientStatus, ConcordCommunityStatus } from "@applesauce/concord";
 import { useConcord } from "../lib/concord-context";
@@ -75,18 +76,28 @@ export function ClientStatusRailIndicator() {
 /** A per-community dot for the rail icon overlay. `undefined` renders nothing. */
 export function CommunityStatusDot({ cid }: { cid: string }) {
   const community = useCommunity(cid);
+  const [retrying, setRetrying] = useState(false);
   const status = use$(() => community?.status$, [community]);
   if (!status) return null;
   const d = deriveCommunity(status);
-  // A live + authenticated community is the steady state — no dot, to keep the
+  // A live community is the steady state — no dot, to keep the
   // rail quiet; only surface the states worth noticing.
   if (d.tone === "success") return null;
   return (
-    <span
+    <button
+      type="button"
+      disabled={!status.error || retrying}
+      aria-label={status.error ? "Retry community sync" : d.label}
+      onClick={() => {
+        if (!community) return;
+        setRetrying(true);
+        void community.start().catch((error: unknown) => console.warn("Community retry failed", error))
+          .finally(() => setRetrying(false));
+      }}
       className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-base-300 ring-2 ring-base-300"
-      title={`${d.label} — ${d.detail}`}
+      title={`${d.label} — ${d.detail}${status.error ? " · Click to retry" : ""}`}
     >
-      <StatusDot tone={d.tone} spin={d.spin} className="w-2 h-2" />
-    </span>
+      <StatusDot tone={d.tone} spin={d.spin || retrying} className="w-2 h-2" />
+    </button>
   );
 }

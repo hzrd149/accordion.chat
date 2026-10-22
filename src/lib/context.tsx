@@ -1,74 +1,113 @@
 import { ConcordClient, logger } from "@applesauce/concord";
-import { useActiveAccount } from "applesauce-react/hooks";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
 import type { ReactNode } from "react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { debounceTime } from "rxjs";
 import { eventStore, pool } from "../nostr";
 import { attachVoiceGc } from "../voice/registry";
 import { ClientContext } from "./concord-context";
 import { createConcordUploader } from "./concord-uploader";
 import { createRumorStoreFactory } from "./rumor-cache";
+import { createConcordStorage } from "./concord-storage";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();
-  // Derive the client from the active account (the constructor is side-effect
-  // free); the effect owns its start/stop lifecycle. Deriving instead of setting
-  // state in the effect avoids a cascading render on every login.
-  const client = useMemo(() => {
+  const session = useMemo(() => {
     if (!account) return null;
-    // The uploader resolves a community's own Blossom servers lazily at upload
-    // time (well after the client exists), so a mutable holder is safe here.
-    let ref: ConcordClient | null = null;
     const uploader = createConcordUploader(account, account.pubkey, (cid) =>
-      ref?.getCommunity(cid)?.state$.value.metadata?.blossom_servers,
+      client?.getCommunity(cid)?.state$.value.metadata?.blossom_servers,
     );
-    ref = new ConcordClient({
+    const stores = createRumorStoreFactory();
+    const storage = createConcordStorage(account.pubkey);
+    const client = new ConcordClient({
       signer: account,
       pool,
       eventStore,
       uploader,
-      // Back each per-plane RumorStore with a nostr-idb cache so a community's
-      // decoded chat/control/guestbook history survives reload without refetching
-      // (or depending on) relays. See src/app/rumor-cache.ts.
-      storeFactory: createRumorStoreFactory(),
-      // The client's automatic signer behaviours are all opt-in gates (default
-      // off). Turn every one on for the smoothest first-class client experience:
-      //  - autoUnlock: decrypt the self-encrypted Community/Invite lists + incoming
-      //    Direct Invites as they arrive (no per-item prompt).
-      //  - autoAuthenticate: NIP-42-authenticate as the user on the Direct Invite
-      //    inbox relays when they challenge, so invites flow in without a manual step.
-      //  - autoSaveCommunityList: republish kind 13302 after a sync catches an epoch
-      //    up (dirty-flag driven; explicit join/leave/create always publish anyway).
-      // (watchDirectInvites already defaults true.)
+      storeFactory: stores,
+      storage,
       autoUnlock: true,
-      autoSaveCommunityList: false,
-      // The package threads named sub-loggers (`:sync`, `:decode`, `:publish`,
-      // `:invite`, `:auth`) off whatever we hand it, and is careful with secrets —
-      // it never logs a community name or an invite token. Off unless asked for:
-      // enable with `localStorage.debug = 'applesauce:concord*'`.
+      // Local material is committed durably before adoption. This separately
+      // publishes the encrypted complete key history for the user's other devices.
+      autoSaveCommunityList: true,
       logger: logger.extend("accordion"),
     });
-    return ref;
+    return { client, stores, storage };
   }, [account]);
+  const [failure, setFailure] = useState<{ client: ConcordClient; message: string } | null>(null);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    if (!client) return;
-
-    // Delay start by 100ms so that nos2x-fox has time to inject the
+    if (!session) return;
+    const { client } = session;
+    let cancelled = false;
+    // Give extension signers time to inject before the first request.
     const timer = setTimeout(() => {
-      void client.start();
+      void client.start().then(() => {
+        if (!cancelled) setFailure(null);
+      }).catch((error: unknown) => {
+        if (!cancelled) {
+          client.stop();
+          setFailure({ client, message: error instanceof Error ? error.message : String(error) });
+        }
+      }).finally(() => {
+        // A signer/storage await may finish after account teardown.
+        if (cancelled) client.dispose();
+      });
     }, 100);
-    const detachVoice = attachVoiceGc(client);
     return () => {
+      cancelled = true;
       clearTimeout(timer);
-      detachVoice();
-      // dispose(), not stop(): stop() is a restartable pause that deliberately
-      // keeps the invite manager and any extraRelays subscription alive. This
-      // client is derived from the account and never reused after it changes, so
-      // the terminal release is what we want.
-      client.dispose();
     };
-  }, [client]);
+  }, [session, retry]);
 
-  if (!client) return null;
-  return <ClientContext.Provider value={client}>{children(client)}</ClientContext.Provider>;
+  useEffect(() => {
+    if (!session) return;
+    const detachVoice = attachVoiceGc(session.client);
+    return () => {
+      detachVoice();
+      session.client.dispose();
+      void session.stores.dispose().catch((error: unknown) => console.warn("Could not close community cache", error));
+      void session.storage.close().catch((error: unknown) => console.warn("Could not close community storage", error));
+    };
+  }, [session]);
+
+  if (!session) return null;
+  const error = failure?.client === session.client ? failure.message : null;
+  return (
+    <ClientContext.Provider value={session.client}>
+      {error && (
+        <div role="alert" className="alert alert-error fixed top-3 left-1/2 -translate-x-1/2 z-50 max-w-lg">
+          <span>Could not start your communities: {error}</span>
+          <button className="btn btn-sm" onClick={() => setRetry((value) => value + 1)}>Retry</button>
+        </div>
+      )}
+      <CommunityKeySync key={account?.id} client={session.client} />
+      {children(session.client)}
+    </ClientContext.Provider>
+  );
+}
+
+/** A durable local commit does not guarantee the encrypted relay copy reached
+ * another device. Keep unsuccessful/deferred autosaves visible and retryable. */
+function CommunityKeySync({ client }: { client: ConcordClient }) {
+  const dirty = use$(() => client.communityListDirty$.pipe(debounceTime(1500)), [client]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!dirty) return null;
+  return (
+    <div role="status" className="alert alert-warning fixed bottom-4 right-4 z-50 max-w-sm">
+      <div>
+        <p>Community keys have changes waiting to sync to your other devices.</p>
+        {error && <p className="text-error">{error}</p>}
+      </div>
+      <button className="btn btn-sm" disabled={busy} onClick={() => {
+        setBusy(true);
+        setError("");
+        void client.saveCommunityList().catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }).finally(() => setBusy(false));
+      }}>{busy ? "Syncing…" : "Retry"}</button>
+    </div>
+  );
 }
