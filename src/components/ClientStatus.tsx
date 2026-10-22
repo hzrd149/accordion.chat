@@ -6,7 +6,7 @@
 //     rail icon.
 import { use$ } from "applesauce-react/hooks";
 import { Loader2 } from "lucide-react";
-import type { ConcordClientStatus, ConcordCommunityStatus } from "applesauce-concord";
+import type { ConcordClientStatus, ConcordCommunityStatus } from "@applesauce/concord";
 import { useConcord } from "../lib/concord-context";
 import { useCommunity } from "../hooks/use-community";
 
@@ -36,9 +36,7 @@ function deriveClient(s: ConcordClientStatus): Derived {
   const counts = `${s.live}/${s.communities} live${s.syncing ? ` · ${s.syncing} syncing` : ""}`;
   if (!s.connected) return { tone: "ghost", label: "Offline", spin: false, detail: `Offline · ${counts}` };
   if (s.syncing > 0) return { tone: "info", label: "Syncing…", spin: true, detail: counts };
-  if (!s.authenticated)
-    return { tone: "warning", label: "Auth pending", spin: false, detail: `${counts} · stream keys pending` };
-  return { tone: "success", label: "Connected", spin: false, detail: `${counts} · stream keys authed` };
+  return { tone: "success", label: "Connected", spin: false, detail: counts };
 }
 
 /** Fold a single community's status snapshot into a single visual state. */
@@ -48,8 +46,6 @@ function deriveCommunity(s: ConcordCommunityStatus): Derived {
   if (s.phase === "removed") return { tone: "ghost", label: "Removed", spin: false, detail: "No longer a member" };
   if (!s.connected) return { tone: "ghost", label: "Offline", spin: false, detail: "No relay connected" };
   if (s.phase !== "live") return { tone: "info", label: "Syncing…", spin: true, detail: "Catching up with relays…" };
-  if (!s.authenticated)
-    return { tone: "warning", label: "Auth pending", spin: false, detail: "Authenticating stream keys…" };
   return { tone: "success", label: "Live", spin: false, detail: `Live · epoch ${s.epoch}` };
 }
 

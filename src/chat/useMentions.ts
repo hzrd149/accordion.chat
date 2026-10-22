@@ -14,8 +14,8 @@ import { useMemo } from "react";
 import { auditTime, combineLatest, map } from "rxjs";
 import { use$ } from "applesauce-react/hooks";
 import { kinds } from "nostr-tools";
-import type { ConcordCommunity } from "applesauce-concord";
-import { parseImeta, rumorMs, type MediaAttachment } from "applesauce-concord/helpers";
+import type { ConcordCommunity } from "@applesauce/concord";
+import { parseImeta, rumorMs, type MediaAttachment } from "@applesauce/concord/helpers";
 import type { Rumor } from "applesauce-core/helpers";
 import { mentions } from "./mentions";
 

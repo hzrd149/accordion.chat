@@ -1,7 +1,7 @@
 import { castUser } from "applesauce-common/casts";
-import { DirectInviteFactory } from "applesauce-concord/factories";
-import { buildInviteBundle } from "applesauce-concord/helpers";
-import type { ConcordCommunity } from "applesauce-concord";
+import { DirectInviteFactory } from "@applesauce/concord/factories";
+import { buildInviteBundle } from "@applesauce/concord/helpers";
+import type { ConcordCommunity } from "@applesauce/concord";
 import { eventStore, pool } from "../nostr";
 
 export interface SendDirectInviteOptions {

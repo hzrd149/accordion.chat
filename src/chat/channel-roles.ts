@@ -7,7 +7,7 @@
 // key on grant via `grantChannelAccess`, rekey on removal via `rotateChannel`).
 // These helpers derive that roster from folded Role + Grant editions.
 
-import type { Role } from "applesauce-concord";
+import type { Role } from "@applesauce/concord";
 
 /** The role_id of a private channel's membership role, or undefined if none has
  *  been minted yet (a channel created before this convention, or a public one). */

@@ -15,7 +15,7 @@ import { use$, useEventStore, useRenderedContent, type ComponentMap } from "appl
 import { kinds, type NostrEvent } from "nostr-tools";
 import Lightbox from "yet-another-react-lightbox";
 import { decryptToObjectURL } from "../lib/image";
-import type { MediaAttachment } from "applesauce-concord/helpers";
+import type { MediaAttachment } from "@applesauce/concord/helpers";
 import { shortNpub } from "../lib/util";
 import { UserAvatar, UserName } from "./User";
 

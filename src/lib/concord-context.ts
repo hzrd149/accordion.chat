@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { ConcordClient } from "applesauce-concord";
+import type { ConcordClient } from "@applesauce/concord";
 
 // The context + hook live in their own (component-free) module so `context.tsx`
 // can export only the `<ConcordProvider>` component — keeping React Fast Refresh

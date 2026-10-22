@@ -1,7 +1,7 @@
 import { use$ } from "applesauce-react/hooks";
 import { getGiftWrapRumor } from "applesauce-common/helpers/gift-wrap";
-import type { InviteWatcher } from "applesauce-concord";
-import type { ConcordDirectInvite } from "applesauce-concord/casts";
+import type { InviteWatcher } from "@applesauce/concord";
+import type { ConcordDirectInvite } from "@applesauce/concord/casts";
 import { useConcord } from "../lib/concord-context";
 
 // Stable empty fallback so `invites` keeps a constant identity while the stream
@@ -30,7 +30,6 @@ export function useInvites() {
   const client = useConcord();
   const watcher = use$(client.directInviteWatcher$);
   const invites = use$(() => watcher?.invites$, [watcher]) ?? NO_INVITES;
-  const needsAuth = use$(() => watcher?.needsAuth$, [watcher]) ?? false;
   const status = use$(() => watcher?.status$, [watcher]) ?? "";
-  return { watcher, invites, count: invites.length, needsAuth, status };
+  return { watcher, invites, count: invites.length, status };
 }

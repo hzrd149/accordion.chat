@@ -14,9 +14,9 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Landmark, RefreshCw } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { VSK, PERM } from "applesauce-concord";
-import type { CommunityState, ConcordCommunity, PermName, Rumor } from "applesauce-concord";
-import { CONTROL_KIND, parsePermissions, hasPerm } from "applesauce-concord/helpers";
+import { VSK, PERM } from "@applesauce/concord";
+import type { CommunityState, ConcordCommunity, PermName, Rumor } from "@applesauce/concord";
+import { CONTROL_KIND, parsePermissions, hasPerm } from "@applesauce/concord/helpers";
 import { useConcord } from "../../lib/concord-context";
 import { useCommunity } from "../../hooks/use-community";
 import { ConfirmModal } from "../modals";

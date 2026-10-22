@@ -8,8 +8,8 @@
 // the NIP-92 imeta media-encryption tags / a community `BlobPointer`.
 
 import type { ISigner } from "applesauce-signers";
-import type { Storage } from "applesauce-concord";
-import type { MediaAttachment } from "applesauce-concord/helpers";
+import type { Storage } from "@applesauce/concord";
+import type { MediaAttachment } from "@applesauce/concord/helpers";
 import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "./image";
 import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "./blossom";

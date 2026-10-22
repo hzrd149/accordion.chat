@@ -12,10 +12,10 @@
 // `includeEmojis` onto EditFactory app-side and publish via `sendEvent`).
 
 import { CommentFactory } from "applesauce-common/factories";
-import { EditFactory } from "applesauce-concord/factories";
+import { EditFactory } from "@applesauce/concord/factories";
 import { includeEmojis } from "applesauce-core/operations";
 import type { Emoji } from "applesauce-common/helpers";
-import type { ConcordCommunity } from "applesauce-concord";
+import type { ConcordCommunity } from "@applesauce/concord";
 
 export async function sendThreadReply(
   community: ConcordCommunity,

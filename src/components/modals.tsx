@@ -8,9 +8,9 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { UserAvatar, UserName } from "./User";
 import { unixNow } from "applesauce-core/helpers";
-import { rumorMs } from "applesauce-concord/helpers";
-import { PERM } from "applesauce-concord";
-import type { ChannelView, ConcordInviteLink } from "applesauce-concord";
+import { rumorMs } from "@applesauce/concord/helpers";
+import { PERM } from "@applesauce/concord";
+import type { ChannelView, ConcordInviteLink } from "@applesauce/concord";
 import type { ChatMessage } from "../chat/fold";
 
 const NO_INVITES: ConcordInviteLink[] = [];

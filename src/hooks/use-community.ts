@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConcordCommunity } from "applesauce-concord";
+import type { ConcordCommunity } from "@applesauce/concord";
 import { useConcord } from "../lib/concord-context";
 
 /**

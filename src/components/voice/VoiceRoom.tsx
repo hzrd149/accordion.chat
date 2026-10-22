@@ -33,7 +33,7 @@ import {
 } from "../../voice/presence";
 import { useVoiceEngine } from "../../voice/registry";
 import { useCall } from "./call-context";
-import { voiceSenderKey } from "applesauce-concord/helpers";
+import { voiceSenderKey } from "@applesauce/concord/helpers";
 import { randomBytes } from "../../lib/bytes";
 import { CallStage } from "./CallStage";
 import { CallBar } from "./CallBar";

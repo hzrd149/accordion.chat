@@ -12,9 +12,9 @@
 // presence into the fold directly, which is our only source for our own roster tile.
 
 import { BehaviorSubject, Subscription } from "rxjs";
-import type { ConcordCommunity } from "applesauce-concord";
-import type { ChannelMetadata } from "applesauce-concord";
-import { voiceKeysFor, VOICE_PRESENCE_KIND, type VoiceKeys } from "applesauce-concord/helpers";
+import type { ConcordCommunity } from "@applesauce/concord";
+import type { ChannelMetadata } from "@applesauce/concord";
+import { voiceKeysFor, VOICE_PRESENCE_KIND, type VoiceKeys } from "@applesauce/concord/helpers";
 import {
   foldVoicePresence,
   parsePresence,

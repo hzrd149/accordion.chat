@@ -70,9 +70,9 @@ import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
 import { getMentionsLastRead, markMentionsRead, useReadState } from "../lib/read-state";
 import type { ChatMessage } from "../chat/fold";
-import type { ChannelMetadata, Role, ConcordCommunity, Storage } from "applesauce-concord";
-import { MissingChannelKeyError, PERM } from "applesauce-concord";
-import { hasChannelKey } from "applesauce-concord/helpers";
+import type { ChannelMetadata, Role, ConcordCommunity, Storage } from "@applesauce/concord";
+import { MissingChannelKeyError, PERM } from "@applesauce/concord";
+import { hasChannelKey } from "@applesauce/concord/helpers";
 import { kinds } from "nostr-tools";
 import { distinctUntilChanged, map } from "rxjs";
 

@@ -3,7 +3,7 @@
 // Side-effect: registers NIP-44 hidden-content decryption for the self-encrypted
 // Community/Invite lists (13302/13303) and the User.concord* casts. Must run
 // before any list decrypt, so import it here where the app first loads nostr I/O.
-import "applesauce-concord";
+import "@applesauce/concord";
 import { EventStore } from "applesauce-core";
 import { persistEventsToCache } from "applesauce-core/helpers";
 import { castUser } from "applesauce-common/casts";
@@ -18,7 +18,7 @@ import {
 	PLAINTEXT_SEAL_KIND,
 	COMMUNITY_LIST_KIND,
 	INVITE_LIST_KIND,
-} from "applesauce-concord/helpers";
+} from "@applesauce/concord/helpers";
 import { NostrIDB } from "nostr-idb";
 import type { Filter, NostrEvent } from "nostr-tools";
 import { enableWasmVerification } from "./crypto-wasm";

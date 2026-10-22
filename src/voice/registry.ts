@@ -3,7 +3,7 @@
 // so every consumer of a community's voice must see the same instance — hence a
 // registry keyed by the ConcordCommunity object.
 
-import type { ConcordClient, ConcordCommunity } from "applesauce-concord";
+import type { ConcordClient, ConcordCommunity } from "@applesauce/concord";
 import { useCommunity } from "../hooks/use-community";
 import { VoiceEngine } from "./engine";
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { Inbox, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
-import type { ConcordDirectInvite } from "applesauce-concord/casts";
+import type { ConcordDirectInvite } from "@applesauce/concord/casts";
 import { useConcord } from "../lib/concord-context";
 import { useInvites, wrapForInvite } from "../hooks/use-invites";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
@@ -17,15 +17,18 @@ import { UserAvatar, UserName } from "../components/User";
  * forces a fresh fetch.
  */
 export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
-  const { watcher, invites, needsAuth, status } = useInvites();
+  const { watcher, invites, status } = useInvites();
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string>();
 
   async function sync() {
     if (!watcher || syncing) return;
     setSyncing(true);
+    setSyncError(undefined);
     try {
-      if (needsAuth) await watcher.authenticateUser();
       await watcher.refresh();
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
     } finally {
       setSyncing(false);
     }
@@ -55,12 +58,7 @@ export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
             </span>
           </p>
 
-          {needsAuth && (
-            <div className="alert alert-warning text-sm mb-4">
-              Your invite inbox relay needs authentication. Press <strong>Sync</strong> to authenticate
-              and check for invites.
-            </div>
-          )}
+          {syncError && <div className="alert alert-error text-sm mb-4">{syncError}</div>}
           {status && !syncing && <div className="text-xs opacity-60 mb-3">{status}</div>}
 
           {invites.length === 0 ? (

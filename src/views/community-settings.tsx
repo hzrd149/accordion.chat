@@ -11,9 +11,9 @@ import { clearCommunityReadState } from "../lib/read-state";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
-import { PERM } from "applesauce-concord";
-import type { BlobPointer, ChannelMetadata, PermName, Role } from "applesauce-concord";
-import { hasPerm, parsePermissions } from "applesauce-concord/helpers";
+import { PERM } from "@applesauce/concord";
+import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
+import { hasPerm, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
 
@@ -37,6 +37,7 @@ const PERM_LABELS: Record<PermName, string> = {
   CREATE_INVITE: "Create Invites",
   VIEW_AUDIT_LOG: "View Audit Log",
   MENTION_EVERYONE: "Mention Everyone",
+  PIN_MESSAGES: "Pin Messages (coming soon)",
 };
 
 // Each page below subscribes only the slices it renders, never the aggregate

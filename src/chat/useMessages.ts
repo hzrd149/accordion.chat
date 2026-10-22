@@ -6,8 +6,8 @@
 import { useMemo } from "react";
 import { map } from "rxjs";
 import { use$ } from "applesauce-react/hooks";
-import type { ConcordCommunity } from "applesauce-concord";
-import { EDIT_KIND } from "applesauce-concord/helpers";
+import type { ConcordCommunity } from "@applesauce/concord";
+import { EDIT_KIND } from "@applesauce/concord/helpers";
 import { kinds } from "nostr-tools";
 import { foldMessages, foldThread, type ChatMessage, type ThreadComment } from "./fold";
 

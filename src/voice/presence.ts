@@ -25,8 +25,8 @@ import { finalizeEvent } from "nostr-tools";
 
 import { fromHex, toHex, utf8 } from "../lib/bytes";
 import type { Rumor } from "applesauce-core/helpers";
-import type { GroupKey } from "applesauce-concord/helpers";
-import { rumorMs, VOICE_PRESENCE_KIND } from "applesauce-concord/helpers";
+import type { GroupKey } from "@applesauce/concord/helpers";
+import { rumorMs, VOICE_PRESENCE_KIND } from "@applesauce/concord/helpers";
 
 /** NIP-98 HTTP-auth kind — the blind-broker token grant (§2). */
 const HTTP_AUTH_KIND = 27235;

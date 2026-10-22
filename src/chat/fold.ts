@@ -12,7 +12,7 @@
 
 import { kinds, type NostrEvent } from "nostr-tools";
 import type { Rumor } from "applesauce-core/helpers";
-import { EDIT_KIND, parseImeta, rumorMs, type MediaAttachment } from "applesauce-concord/helpers";
+import { EDIT_KIND, parseImeta, rumorMs, type MediaAttachment } from "@applesauce/concord/helpers";
 import {
   getReactionEmoji,
   getCommentRootPointer,

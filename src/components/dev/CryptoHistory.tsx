@@ -8,7 +8,7 @@
  * of a standalone RelayPool + LoginView.
  */
 import type { NostrEvent } from "applesauce-core/helpers/event";
-import { ConcordRelayAuth, type CommunityState, type DecodedEvent, type InviteBundle, type JoinMaterial, type Role } from "applesauce-concord";
+import { StreamSigners, type CommunityState, type DecodedEvent, type InviteBundle, type JoinMaterial, type Role } from "@applesauce/concord";
 import {
   decodeWrap,
   decryptBundle,
@@ -25,20 +25,14 @@ import {
   STOCK_RELAYS,
   verifyOwner,
   type ConcordKeys,
-} from "applesauce-concord/helpers";
+} from "@applesauce/concord/helpers";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import type { ISigner } from "applesauce-signers";
 import { useEffect, useRef, useState } from "react";
-import { firstValueFrom, Subscription, takeUntil, timer, toArray } from "rxjs";
+import { firstValueFrom, timeout, toArray } from "rxjs";
 import { pool } from "../../nostr";
 import { useConcord } from "../../lib/concord-context";
 import { UserLabel } from "../User";
-
-// Ride the app's shared pool (the ConcordClient already keeps its sockets warm +
-// NIP-42-authed); a dedicated ConcordRelayAuth just registers/authenticates the
-// per-epoch stream keys we derive below. No ConcordClient — a manual, functional
-// walk over the exported crypto core.
-const relayAuth = new ConcordRelayAuth(pool);
 
 // ---- model -----------------------------------------------------------------
 
@@ -99,14 +93,14 @@ function relaysFor(material: JoinMaterial): string[] {
   return material.relays.length ? material.relays : STOCK_RELAYS;
 }
 
-/** One-shot fetch of every gift wrap at `authors`, completing gracefully at 10s. */
-async function fetchWraps(relays: string[], authors: string[]): Promise<NostrEvent[]> {
+/** One-shot fetch of every gift wrap at `authors`, failing explicitly if the request has not completed within 10s. */
+async function fetchWraps(relays: string[], authors: string[], signers: StreamSigners): Promise<NostrEvent[]> {
   if (authors.length === 0) return [];
   return firstValueFrom(
     pool
-      .request(relays, [{ kinds: [GIFT_WRAP_KIND, EPHEMERAL_GIFT_WRAP_KIND], authors }], { waitForAuth: authors })
-      .pipe(takeUntil(timer(10_000)), toArray()),
-  ).catch(() => [] as NostrEvent[]);
+      .request(relays, [{ kinds: [GIFT_WRAP_KIND, EPHEMERAL_GIFT_WRAP_KIND], authors }], { waitForAuth: authors, onAuthRequired: signers.onAuthRequired })
+      .pipe(toArray(), timeout(10_000)),
+  );
 }
 
 /**
@@ -122,13 +116,12 @@ async function loadEpoch(
   self: string,
   signer: ISigner,
   relays: string[],
-  ensureAuth: (relays: string[]) => void,
   chainHasNext: boolean,
 ): Promise<LoadResult> {
   // 1. Derive with no channels yet; register the core planes and authenticate.
   let keys = deriveConcordKeys(epochMaterial, [], prior);
-  relayAuth.registerStreamKeys([keys.control, keys.guestbook, keys.dissolved, keys.nextBaseRekey.key]);
-  ensureAuth(relays);
+  const signers = new StreamSigners();
+  signers.register([...(keys.control.signing ? [keys.control.signing] : []), keys.guestbook, keys.dissolved, keys.nextBaseRekey.key]);
 
   // 2. Fetch control / guestbook / dissolved / next-rekey wraps and bucket by plane.
   const authorsA = [keys.control.pk, keys.guestbook.pk, keys.dissolved.pk, keys.nextBaseRekey.key.pk];
@@ -136,7 +129,7 @@ async function loadEpoch(
   const guestbook: DecodedEvent[] = [];
   const dissolved: DecodedEvent[] = [];
   const rekey: DecodedEvent[] = [];
-  for (const ev of await fetchWraps(relays, authorsA)) {
+  for (const ev of await fetchWraps(relays, authorsA, signers)) {
     const info = keys.planes.get(ev.pubkey);
     if (!info) continue;
     const d = decodeWrap(ev, info.convKey);
@@ -151,11 +144,12 @@ async function loadEpoch(
   //    channel addresses (public roll every epoch; private reuse material.channels).
   const state0 = foldControl(control, epochMaterial);
   keys = deriveConcordKeys(epochMaterial, state0.channels, prior);
-  relayAuth.registerStreamKeys([...keys.channels.values()]);
+  signers.register([...keys.channels.values()]);
   const channelDecoded: DecodedEvent[] = [];
   for (const ev of await fetchWraps(
     relays,
     [...keys.channels.values()].map((k) => k.pk),
+    signers,
   )) {
     const info = keys.planes.get(ev.pubkey);
     if (!info || info.type !== "channel") continue;
@@ -240,8 +234,8 @@ async function resolveInvite(url: string): Promise<JoinMaterial> {
   const events = await firstValueFrom(
     pool
       .request(relays, [{ kinds: [INVITE_BUNDLE_KIND], authors: [parsed.linkSigner] }])
-      .pipe(takeUntil(timer(10_000)), toArray()),
-  ).catch(() => [] as NostrEvent[]);
+      .pipe(toArray(), timeout(10_000)),
+  );
   const live = events
     .filter((e) => (e.tags.find((t) => t[0] === "vsk")?.[1] ?? "6") === "6")
     .sort((a, b) => b.created_at - a.created_at)[0];
@@ -407,18 +401,8 @@ function Walker({
   const [error, setError] = useState<string | null>(null);
 
   const relays = relaysFor(material);
-  const driversSub = useRef<Subscription>(new Subscription());
-  const seenRelays = useRef(new Set<string>());
   const aliveRef = useRef(true);
   const startedRef = useRef(false);
-
-  const ensureAuth = (rs: string[]) => {
-    for (const url of rs) {
-      if (seenRelays.current.has(url)) continue;
-      seenRelays.current.add(url);
-      driversSub.current.add(relayAuth.authenticateStreamKeys(pool.relay(url)));
-    }
-  };
 
   // Advance one epoch: load chain[snaps.length], append it, extend/stop the walk.
   async function advance() {
@@ -427,7 +411,7 @@ function Walker({
     setBusy(true);
     setError(null);
     try {
-      const res = await loadEpoch(chain[i], snaps[i - 1]?.keys, self, signer, relays, ensureAuth, i + 1 < chain.length);
+      const res = await loadEpoch(chain[i], snaps[i - 1]?.keys, self, signer, relays, i + 1 < chain.length);
       if (!aliveRef.current) return;
       setSnaps((prev) => [...prev, res.snapshot]);
       if (res.adoptedMaterial) setChain((prev) => [...prev, res.adoptedMaterial!]);
@@ -439,19 +423,15 @@ function Walker({
     }
   }
 
-  // Load genesis once on mount; tear the auth drivers down on unmount. The ref
-  // holds a single Subscription created at mount (never reassigned), so capturing
-  // it for the cleanup is safe.
+  // Load genesis once on mount; requests own their scoped authentication.
   useEffect(() => {
     aliveRef.current = true;
-    const sub = driversSub.current;
     if (!startedRef.current) {
       startedRef.current = true;
       void advance();
     }
     return () => {
       aliveRef.current = false;
-      sub.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

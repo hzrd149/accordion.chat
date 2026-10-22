@@ -19,8 +19,8 @@ import {
   isValidInviteBundle,
   parseInviteLink,
   validateInviteBundle,
-} from "applesauce-concord/helpers";
-import type { InviteBundle } from "applesauce-concord";
+} from "@applesauce/concord/helpers";
+import type { InviteBundle } from "@applesauce/concord";
 import { pool } from "../nostr";
 
 export type InvitePreview =

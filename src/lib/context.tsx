@@ -1,4 +1,4 @@
-import { ConcordClient, logger } from "applesauce-concord";
+import { ConcordClient, logger } from "@applesauce/concord";
 import { useActiveAccount } from "applesauce-react/hooks";
 import type { ReactNode } from "react";
 import { useEffect, useMemo } from "react";
@@ -40,7 +40,6 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       //    up (dirty-flag driven; explicit join/leave/create always publish anyway).
       // (watchDirectInvites already defaults true.)
       autoUnlock: true,
-      autoAuthenticate: true,
       autoSaveCommunityList: false,
       // The package threads named sub-loggers (`:sync`, `:decode`, `:publish`,
       // `:invite`, `:auth`) off whatever we hand it, and is careful with secrets —
