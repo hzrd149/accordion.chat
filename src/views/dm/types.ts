@@ -1,4 +1,4 @@
-import type { Rumor } from "applesauce-common/helpers";
+import type { WrappedConversationSummary } from "applesauce-extra/messages";
 
 export interface UserSearchResult {
   pubkey: string;
@@ -6,10 +6,4 @@ export interface UserSearchResult {
   existing: boolean;
 }
 
-export interface PublishStatus {
-  relay: string;
-  ok: boolean;
-  message?: string;
-}
-
-export type ConversationPreview = [peer: string, last: Rumor];
+export type ConversationPreview = WrappedConversationSummary & { peer: string };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PublishRejectedError, requireAccepted } from "../src/lib/publish";
-import { dmSyncStatus } from "../src/views/dm/sync-state";
+import { syncErrors } from "../src/messages/status";
 
 describe("managed publish acknowledgements", () => {
   it("accepts partial delivery while retaining per-relay outcomes", () => {
@@ -24,18 +24,16 @@ describe("managed publish acknowledgements", () => {
 
 describe("DM sync status", () => {
   it("keeps partial failures visible after a sync completes", () => {
-    expect(dmSyncStatus({ loaded: 5, done: true, relays: {
+    expect(syncErrors({ loaded: 5, done: true, mailboxes: [{ loaded: 5, done: true, relays: {
       "wss://one.example": { relay: "wss://one.example", state: "error", count: 0, error: new Error("offline") },
       "wss://two.example": { relay: "wss://two.example", state: "complete", count: 5 },
-    } })).toEqual({ received: 5, syncing: false, error: "wss://one.example: offline" });
+    } }] })).toBe("wss://one.example: offline");
   });
 
   it("does not confuse skipped or all-failed relays with empty successful history", () => {
-    const state = dmSyncStatus({ loaded: 0, done: true, relays: {
+    const error = syncErrors({ loaded: 0, done: true, mailboxes: [{ loaded: 0, done: true, relays: {
       "wss://one.example": { relay: "wss://one.example", state: "skipped", count: 0 },
-    } });
-    expect(state.received).toBe(0);
-    expect(state.syncing).toBe(false);
-    expect(state.error).toContain("relay unavailable");
+    } }] });
+    expect(error).toContain("relay unavailable");
   });
 });

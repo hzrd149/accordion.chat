@@ -20,6 +20,8 @@ export function DmSidebar({
   selectedPeer,
   onClose,
   onUnlockAll,
+  failed,
+  onRetryDecryption,
 }: {
   open: boolean;
   mobileNav: ReactNode;
@@ -35,6 +37,8 @@ export function DmSidebar({
   selectedPeer: string | null;
   onClose: () => void;
   onUnlockAll: () => void;
+  failed: readonly string[];
+  onRetryDecryption: (id: string) => void;
 }) {
   const navigate = useNavigate();
 
@@ -63,6 +67,15 @@ export function DmSidebar({
             <Lock size={13} /> {unlocking ? "Unlocking..." : `Unlock all (${lockedCount})`}
           </button>
         )}
+        {failed.length > 0 && <details>
+          <summary>{failed.length} messages could not be decrypted</summary>
+          <div className="max-h-32 overflow-y-auto">
+            {failed.map((id) => <div key={id} className="flex items-center justify-between gap-2">
+              <span className="font-mono truncate">{id.slice(0, 12)}…</span>
+              <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => onRetryDecryption(id)}>Retry</button>
+            </div>)}
+          </div>
+        </details>}
         {!relays?.length && (
           <button className="btn btn-ghost btn-xs" onClick={() => navigate("/settings/dm")}>
             Configure DM relays
@@ -71,7 +84,7 @@ export function DmSidebar({
       </div>
       <DmUserSearch
         self={pubkey}
-        existingPeers={conversations.map(([conversationPeer]) => conversationPeer)}
+        existingPeers={conversations.map(({ peer }) => peer)}
         onPick={onClose}
       />
       <DmConversationList

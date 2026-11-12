@@ -53,7 +53,7 @@ void nostrIDB.start();
 
 // Reads from the cache, used by the loaders below on an EventStore miss before
 // they fall back to relays. query() resolves to [] until the DB opens.
-function cacheRequest(filters: Filter[]) {
+export function cacheRequest(filters: Filter[]) {
 	return nostrIDB.query(filters);
 }
 

@@ -1,103 +1,94 @@
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { ActionRunner } from "applesauce-actions";
-import { SendWrappedMessage } from "applesauce-actions/actions";
-import { WrappedMessagesGroup } from "applesauce-common/models";
+import { use$ } from "applesauce-react/hooks";
 import { unixNow } from "applesauce-core/helpers";
-import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { eventStore, pool } from "../../nostr";
-import { accountPublishOptions, requireAccepted } from "../../lib/publish";
-import { userFor } from "../../lib/settings-actions";
-import type { PublishStatus } from "./types";
+import type { WrappedMessagesClient, WrappedMessagePublicationResult } from "applesauce-extra/messages";
+import { catchError, defer, of } from "rxjs";
+import { pendingPublication, publishConversationDraft } from "../../messages/publication";
+import { syncErrors } from "../../messages/status";
 import { DmComposer } from "./DmComposer";
 import { DmHeader } from "./DmHeader";
 import { DmMessageList } from "./DmMessageList";
 import { DmSettingsDrawer } from "./DmSettingsDrawer";
-import { expirationKey, EXPIRATIONS, inferExpiration, NO_MESSAGES, NO_RELAYS, oneToOnePeer, readStoredExpiration, type ExpirationValue, writeStoredExpiration } from "./utils";
+import { EXPIRATIONS, DEFAULT_EXPIRATION, readStoredExpiration, type ExpirationValue, writeStoredExpiration } from "./utils";
 
-export function DmConversation({ self, peer, mobileListButton }: { self: string; peer: string; mobileListButton: ReactNode }) {
-  const account = useActiveAccount();
-  const selfUser = useMemo(() => userFor(self), [self]);
-  const peerUser = useMemo(() => userFor(peer), [peer]);
-  const selfRelays = use$(() => selfUser.directMessageRelays$, [selfUser]) ?? NO_RELAYS;
-  const peerRelays = use$(() => peerUser.directMessageRelays$, [peerUser]) ?? NO_RELAYS;
-  const allMessages = use$(() => eventStore.model(WrappedMessagesGroup, self, peer), [self, peer]) ?? NO_MESSAGES;
-  const messages = useMemo(
-    () => allMessages.filter((message) => oneToOnePeer(self, message) === peer).sort((a, b) => a.created_at - b.created_at),
-    [allMessages, self, peer],
-  );
-  const [text, setText] = useState("");
+export function DmConversation({ client, peer, mobileListButton }: { client: WrappedMessagesClient; peer: string; mobileListButton: ReactNode }) {
+  const conversation = useMemo(() => client.conversation(peer), [client, peer]);
+  const [since, setSince] = useState(() => unixNow() - 30 * 86400);
+  const messageState = use$(() => conversation.timeline$({ since }).pipe(
+    catchError((reason: unknown) => of(reason instanceof Error ? reason : new Error(String(reason)))),
+  ), [conversation, since]);
+  const messages = useMemo(() => Array.isArray(messageState) ? [...messageState].sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id)) : [], [messageState]);
+  const draft = use$(() => conversation.draft$.pipe(catchError((reason: unknown) => of(reason instanceof Error ? reason : new Error(String(reason))))), [conversation]);
+  const [editedText, setEditedText] = useState<string>();
+  const text = editedText ?? (draft instanceof Error ? "" : draft?.content) ?? "";
   const [sending, setSending] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [lastPublish, setLastPublish] = useState<PublishStatus[]>([]);
-  const inferredExpiration = useMemo(() => inferExpiration(messages), [messages]);
-  const [expirationOverrides, setExpirationOverrides] = useState<Record<string, ExpirationValue>>({});
-  const expiration = expirationOverrides[expirationKey(self, peer)] ?? readStoredExpiration(self, peer) ?? inferredExpiration;
+  const [lastPublish, setLastPublish] = useState<readonly WrappedMessagePublicationResult[]>([]);
+  const [expiration, setExpiration] = useState<ExpirationValue>(() => readStoredExpiration(client.pubkey, peer) ?? DEFAULT_EXPIRATION);
+  const publications = use$(client.publications$);
+  const busy = use$(client.busy$);
+  const prepared = pendingPublication(conversation);
+  const publicationState = prepared ? publications?.[prepared.message.id] : undefined;
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
+  const availability = use$(() => defer(() => client.discover({ recipients: conversation.participants, content: "" })).pipe(
+    catchError((reason: unknown) => of(reason instanceof Error ? reason : new Error(String(reason)))),
+  ), [client, conversation, discoveryAttempt]);
+  const discoveryError = availability instanceof Error ? availability.message : availability && !availability.canSend
+    ? "Every participant, including you, must advertise message inbox relays before sending." : "";
 
-  const runner = useMemo(
-    () =>
-      account
-        ? new ActionRunner(eventStore, account, async (event, relays) => {
-            const targets = relays?.length ? relays : peerRelays;
-            if (!targets.length) throw new Error("This person hasn't set up direct messages yet, so your message can't be delivered.");
-            setLastPublish(targets.map((relay) => ({ relay, ok: false, message: "Publishing..." })));
-            const responses = await pool.publish(targets, event, accountPublishOptions(account, self));
-            setLastPublish(
-              responses.map((response) => ({
-                relay: response.from,
-                ok: response.ok,
-                message: response.message,
-              })),
-            );
-            requireAccepted(responses);
-          })
-        : null,
-    [account, peerRelays, self],
-  );
+  function changeText(content: string) {
+    setEditedText(content);
+    void conversation.setDraft({ content }).catch((reason: unknown) => setError(`Could not save draft: ${String(reason)}`));
+  }
 
-  async function send(e: FormEvent) {
-    e.preventDefault();
-    const content = text.trim();
-    if (!content || !runner || sending) return;
-    const selected = EXPIRATIONS.find((item) => item.value === expiration);
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    if (sending || busy || (!prepared && (!text.trim() || availability instanceof Error || !availability?.canSend))) return;
+    const seconds = EXPIRATIONS.find((item) => item.value === expiration)?.seconds;
+    const expiresAt = seconds ? unixNow() + seconds : undefined;
     setSending(true);
     setError("");
     try {
-      await runner.run(SendWrappedMessage, peer, content, {
-        expiration: selected?.seconds ? unixNow() + selected.seconds : undefined,
-      });
-      setText("");
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSending(false);
-    }
+      const result = await publishConversationDraft(conversation, { content: text, expiration: expiresAt, envelopeExpiration: expiresAt });
+      setLastPublish([...result.publications]);
+      setEditedText("");
+    } catch (reason) {
+      setLastPublish([...(pendingPublication(conversation)?.publications ?? [])]);
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally { setSending(false); }
   }
 
-  function updateExpiration(value: ExpirationValue) {
-    setExpirationOverrides((prev) => ({ ...prev, [expirationKey(self, peer)]: value }));
-    writeStoredExpiration(self, peer, value);
+  async function loadOlder() {
+    const next = Math.max(0, since - 30 * 86400);
+    setLoadingHistory(true);
+    setError("");
+    try {
+      const status = await client.loadHistory({ since: next, until: since });
+      setSince(next);
+      if (syncErrors(status)) setError(syncErrors(status)!);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setLoadingHistory(false); }
   }
 
   return (
     <div className="flex-1 flex min-w-0 min-h-0 relative">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <DmHeader peer={peer} mobileListButton={mobileListButton} onToggleSettings={() => setSettingsOpen((open) => !open)} />
-        <DmMessageList messages={messages} self={self} peer={peer} />
-        <DmComposer peer={peer} text={text} sending={sending} error={error} onTextChange={setText} onSubmit={send} />
+        <button className="btn btn-ghost btn-xs shrink-0" disabled={loadingHistory || since === 0} onClick={() => void loadOlder()}>{loadingHistory ? "Loading…" : "Load older messages"}</button>
+        {messageState instanceof Error && <div role="alert" className="p-2 text-error">{messageState.message}</div>}
+        <DmMessageList messages={messages} self={client.pubkey} peer={peer} />
+        {discoveryError && <div role="alert" className="px-3 text-warning text-xs">{discoveryError} <button className="btn btn-ghost btn-xs" onClick={() => setDiscoveryAttempt((value) => value + 1)}>Check again</button></div>}
+        <DmComposer peer={peer} text={text} sending={sending || !!busy || publicationState === "publishing"}
+          retry={!!prepared} unavailable={!prepared && (!(availability && !(availability instanceof Error) && availability.canSend))}
+          error={error || (draft instanceof Error ? draft.message : "")} onTextChange={changeText} onSubmit={send} />
       </div>
-      {settingsOpen && (
-        <DmSettingsDrawer
-          self={self}
-          peer={peer}
-          selfRelays={selfRelays}
-          peerRelays={peerRelays}
-          expiration={expiration}
-          onExpirationChange={updateExpiration}
-          lastPublish={lastPublish}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
+      {settingsOpen && <DmSettingsDrawer self={client.pubkey} peer={peer}
+        selfRelays={availability && !(availability instanceof Error) ? [...(availability.recipients.find((item) => item.recipient === client.pubkey)?.relays ?? [])] : []}
+        peerRelays={availability && !(availability instanceof Error) ? [...(availability.recipients.find((item) => item.recipient === peer)?.relays ?? [])] : []}
+        expiration={expiration} onExpirationChange={(value) => { setExpiration(value); writeStoredExpiration(client.pubkey, peer, value); }}
+        lastPublish={prepared?.publications ?? lastPublish} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

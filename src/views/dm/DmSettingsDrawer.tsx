@@ -4,7 +4,7 @@ import { CheckCircle2, Info, Loader2, X } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
 import { pool } from "../../nostr";
 import { shortNpub } from "../../lib/util";
-import type { PublishStatus } from "./types";
+import type { WrappedMessagePublicationResult } from "applesauce-extra/messages";
 import { EXPIRATIONS, type ExpirationValue } from "./utils";
 
 export function DmSettingsDrawer({
@@ -23,7 +23,7 @@ export function DmSettingsDrawer({
   peerRelays: string[];
   expiration: ExpirationValue;
   onExpirationChange: (value: ExpirationValue) => void;
-  lastPublish: PublishStatus[];
+  lastPublish: readonly WrappedMessagePublicationResult[];
   onClose: () => void;
 }) {
   return (
@@ -55,7 +55,7 @@ export function DmSettingsDrawer({
             <select className="select select-bordered w-full" value={expiration} onChange={(e) => onExpirationChange(e.target.value as ExpirationValue)}>
               {EXPIRATIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
-            <p className="text-xs opacity-60 mt-2">Stored for this 1:1 conversation. If unset, Accordion guesses from the latest expiring DM.</p>
+            <p className="text-xs opacity-60 mt-2">Stored for this conversation. Applies to both message and encrypted envelopes; recipients may retain copies.</p>
           </section>
 
           <RelayStatusList title="Your DM relays" owner={self} relays={selfRelays} empty="You have no DM inbox relays configured." />
@@ -67,7 +67,7 @@ export function DmSettingsDrawer({
               <p className="text-xs opacity-60">No send attempt recorded in this view yet.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {lastPublish.map((status) => <PublishStatusRow key={status.relay} status={status} />)}
+                {lastPublish.map((status) => <PublishStatusRow key={status.recipient} status={status} />)}
               </div>
             )}
           </section>
@@ -117,16 +117,16 @@ function RelayStatusRow({ relay }: { relay: string }) {
   );
 }
 
-function PublishStatusRow({ status }: { status: PublishStatus }) {
-  const pending = status.message === "Publishing...";
+function PublishStatusRow({ status }: { status: WrappedMessagePublicationResult }) {
+  const pending = !status.accepted && !status.error;
   return (
     <div className="rounded-box bg-base-100 border border-base-300 p-3 min-w-0">
       <div className="flex items-center gap-2">
-        {pending ? <Loader2 size={15} className="animate-spin opacity-60" /> : status.ok ? <CheckCircle2 size={15} className="text-success" /> : <X size={15} className="text-error" />}
-        <div className="font-mono text-xs truncate flex-1">{status.relay.replace(/^wss?:\/\//, "")}</div>
-        <span className={`badge badge-xs ${pending ? "badge-ghost" : status.ok ? "badge-success" : "badge-error"}`}>{pending ? "Pending" : status.ok ? "Sent" : "Failed"}</span>
+        {pending ? <Loader2 size={15} className="animate-spin opacity-60" /> : status.accepted ? <CheckCircle2 size={15} className="text-success" /> : <X size={15} className="text-error" />}
+        <div className="text-xs truncate flex-1"><UserName pubkey={status.recipient} /></div>
+        <span className={`badge badge-xs ${pending ? "badge-ghost" : status.accepted ? "badge-success" : "badge-error"}`}>{pending ? "Pending" : status.accepted ? "Relay accepted" : "Failed"}</span>
       </div>
-      {status.message && !pending && <div className="text-[11px] opacity-60 mt-1 truncate">{status.message}</div>}
+      {!!status.error && <div className="text-[11px] opacity-60 mt-1">{String(status.error)}</div>}
     </div>
   );
 }
