@@ -64,6 +64,7 @@ export function DirectInviteModal({
   const [selected, setSelected] = useState<UserResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Pubkey of the last successful invite recipient, for the confirmation banner.
   const [sent, setSent] = useState("");
 
   const memberSet = use$(community.members$) ?? EMPTY_MEMBERS;
@@ -141,7 +142,7 @@ export function DirectInviteModal({
       await sendDirectInvite(community, selected.pubkey, {
         channels: privateChannel && channel ? [channel.channel_id] : undefined,
       });
-      setSent(`Invite sent to ${shortNpub(selected.pubkey)}`);
+      setSent(selected.pubkey);
       setSelected(null);
       setQuery("");
       setGlobalResults([]);
@@ -172,7 +173,7 @@ export function DirectInviteModal({
         <div className="alert alert-error text-sm mb-4">You do not hold this private channel key, so you cannot grant it.</div>
       )}
       {error && <div className="alert alert-error text-sm mb-4">{error}</div>}
-      {sent && <div className="alert alert-success text-sm mb-4">{sent}</div>}
+      {sent && <div className="alert alert-success text-sm mb-4"><span>Invite sent to <UserName pubkey={sent} /></span></div>}
 
       {privateChannel && (
         <div className="join mb-3">

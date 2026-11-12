@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { Settings } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
-import { shortNpub } from "../../lib/util";
 
 export function DmHeader({
   peer,
@@ -17,7 +16,6 @@ export function DmHeader({
       {mobileListButton}
       <UserAvatar pubkey={peer} className="w-8 h-8" />
       <div className="font-semibold truncate"><UserName pubkey={peer} /></div>
-      <div className="text-xs opacity-50 font-mono max-sm:hidden">{shortNpub(peer)}</div>
       <div className="flex-1" />
       <button className="btn btn-ghost btn-sm btn-circle" title="DM settings" onClick={onToggleSettings}>
         <Settings size={18} />
