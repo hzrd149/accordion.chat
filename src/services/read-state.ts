@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 /**
  * Per-channel read markers — the "last read" cursor behind the unread badges and
  * the new-messages divider. Mirrors the theme.ts / dev-mode.ts pattern: state
@@ -20,7 +18,7 @@ import { useEffect, useState } from "react";
  * comparisons against a timeline can't race within a second.
  */
 
-const EVENT = "accordion:readstatechange";
+export const READ_STATE_CHANGE_EVENT = "accordion:readstatechange";
 
 function keyFor(pubkey: string): string {
   return `accordion:read-state:${pubkey}`;
@@ -68,7 +66,7 @@ function write(pubkey: string, state: ReadState) {
   } catch {
     /* ignore persistence failures */
   }
-  window.dispatchEvent(new Event(EVENT));
+  window.dispatchEvent(new Event(READ_STATE_CHANGE_EVENT));
 }
 
 /**
@@ -147,20 +145,4 @@ export function clearCommunityReadState(pubkey: string, cid: string) {
   const next = { ...state };
   delete next[cid];
   write(pubkey, next);
-}
-
-/** Read/subscribe to an account's read state; re-renders when it changes. */
-export function useReadState(pubkey: string): ReadState {
-  const [state, setState] = useState<ReadState>(() => getReadState(pubkey));
-
-  useEffect(() => {
-    const onChange = () => setState(getReadState(pubkey));
-    // Re-read on pubkey change too: the effect body runs on mount and whenever
-    // the account switches, so the state follows the active account.
-    onChange();
-    window.addEventListener(EVENT, onChange);
-    return () => window.removeEventListener(EVENT, onChange);
-  }, [pubkey]);
-
-  return state;
 }

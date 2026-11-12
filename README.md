@@ -46,7 +46,7 @@ The app is split into a UI-agnostic protocol core and a React UI.
   - `client.ts` — `ConcordClient`, the reactive engine (rehydrate → fold → subscribe → publish optimistically) over RxJS `BehaviorSubject`s. One instance per logged-in account.
 - `src/nostr.ts` — the single `EventStore`, `RelayPool`, and `AccountManager` (persisted to localStorage).
 - `src/app/` — the Discord-style React UI (`App.tsx`, `modals.tsx`, `Login.tsx`, `context.tsx`, `theme.css`). Icons are from [lucide-react](https://lucide.dev).
-- `src/lib/bytes.ts` — hex/byte/base64url helpers.
+- `src/helpers/bytes.ts` — hex/byte/base64url helpers.
 - `scripts/` — a protocol round-trip self-test (`selftest.ts`) plus puppeteer-based browser drivers for end-to-end testing over real relays.
 
 ### Relay requirements

@@ -22,18 +22,9 @@ import {
 import { eventStore } from "../nostr";
 import type { HiddenContentSigner } from "applesauce-core/helpers";
 
-export type { Emoji };
+import { dedupeEmojis } from "../helpers/emoji";
 
 const FAVORITE_EMOJI_LIST_KIND = 10030;
-
-/** Default unicode reactions offered when the user has no custom favorites. */
-export const DEFAULT_REACTIONS = ["👍", "❤️", "😂", "🔥", "🎉", "😮", "😢", "🙏"];
-
-/** Dedupe emojis by shortcode, keeping the first-seen URL. */
-function dedupe(emojis: Emoji[]): Emoji[] {
-  const seen = new Set<string>();
-  return emojis.filter((e) => (seen.has(e.shortcode) ? false : (seen.add(e.shortcode), true)));
-}
 
 /**
  * The user's NIP-30 favorite custom emojis (kind 10030 + referenced 30030
@@ -76,11 +67,11 @@ export function useFavoriteEmojis(pubkey: string | undefined, signer?: HiddenCon
               ...(getHiddenFavoriteEmojiPackPointers(event) ?? []),
             ];
 
-            if (!pointers.length) return of(dedupe(inline));
+            if (!pointers.length) return of(dedupeEmojis(inline));
 
             return combineLatest(pointers.map((p) => eventStore.addressable(p))).pipe(
               map((packs) =>
-                dedupe([
+                dedupeEmojis([
                   ...inline,
                   ...packs.filter((e): e is NonNullable<typeof e> => !!e).flatMap(getEmojiPackEmojis),
                 ]),

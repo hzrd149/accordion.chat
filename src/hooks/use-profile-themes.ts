@@ -11,7 +11,7 @@ import {
   PROFILE_THEME_KIND,
   profileThemeAddress,
   type ProfileTheme,
-} from "../lib/profile-theme";
+} from "../helpers/profile-theme";
 
 const MAX_THEME_CONTACTS = 200;
 const OUTBOX_TIMEOUT_MS = 2000;

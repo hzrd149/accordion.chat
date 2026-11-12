@@ -31,7 +31,7 @@ import type { ISigner } from "applesauce-signers";
 import { useEffect, useRef, useState } from "react";
 import { firstValueFrom, timeout, toArray } from "rxjs";
 import { pool } from "../../nostr";
-import { useConcord } from "../../lib/concord-context";
+import { useConcord } from "../../hooks/use-concord";
 import { UserLabel } from "../User";
 
 // ---- model -----------------------------------------------------------------

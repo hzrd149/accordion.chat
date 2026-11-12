@@ -2,7 +2,7 @@ import { use$ } from "applesauce-react/hooks";
 import { getGiftWrapRumor } from "applesauce-common/helpers/gift-wrap";
 import type { InviteWatcher } from "@applesauce/concord";
 import type { ConcordDirectInvite } from "@applesauce/concord/casts";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "./use-concord";
 
 // Stable empty fallback so `invites` keeps a constant identity while the stream
 // is still empty — avoids re-triggering effects/memos on every render.

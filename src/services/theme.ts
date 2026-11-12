@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { buildDaisyTheme, isDaisyThemeHex, type DaisyThemeInput, type DaisyThemeVariables } from "./daisy-theme";
+import { buildDaisyTheme, isDaisyThemeHex, type DaisyThemeInput, type DaisyThemeVariables } from "../helpers/daisy-theme";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ThemeSlot = "light" | "dark";
@@ -26,7 +25,7 @@ export type ThemePref = ThemeMode;
 export const APPEARANCE_KEY = "accordion:appearance";
 const OLD_THEME_KEY = "accordion:theme";
 const RUNTIME_THEME = "accordion-runtime";
-const CHANGE_EVENT = "accordion:themechange";
+export const THEME_CHANGE_EVENT = "accordion:themechange";
 
 export const LIGHT_DAISY_THEMES = [
   "light",
@@ -260,7 +259,7 @@ export function setAppearance(config: AppearanceConfig) {
     /* ignore persistence failures */
   }
   applyAppearance(normalized);
-  window.dispatchEvent(new Event(CHANGE_EVENT));
+  window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
 }
 
 export function setTheme(pref: ThemeMode) {
@@ -274,46 +273,4 @@ export function setThemeSlot(slot: ThemeSlot, choice: ThemeChoice) {
 export function toggleResolvedTheme() {
   const config = getStoredAppearance();
   setAppearance({ ...config, mode: resolveThemeSlot(config.mode) === "dark" ? "light" : "dark" });
-}
-
-export function useTheme(): {
-  config: AppearanceConfig;
-  pref: ThemeMode;
-  resolved: ThemeSlot;
-  activeChoice: ThemeChoice;
-  setAppearance: (config: AppearanceConfig) => void;
-  setMode: (mode: ThemeMode) => void;
-  setTheme: (mode: ThemeMode) => void;
-  setSlotTheme: (slot: ThemeSlot, choice: ThemeChoice) => void;
-  toggleResolvedTheme: () => void;
-} {
-  const [config, setConfig] = useState<AppearanceConfig>(getStoredAppearance);
-
-  useEffect(() => {
-    const onChange = () => {
-      const next = getStoredAppearance();
-      applyAppearance(next);
-      setConfig(next);
-    };
-    window.addEventListener(CHANGE_EVENT, onChange);
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    mq.addEventListener("change", onChange);
-    return () => {
-      window.removeEventListener(CHANGE_EVENT, onChange);
-      mq.removeEventListener("change", onChange);
-    };
-  }, []);
-
-  const resolved = resolveThemeSlot(config.mode);
-  return {
-    config,
-    pref: config.mode,
-    resolved,
-    activeChoice: config[resolved],
-    setAppearance,
-    setMode: setTheme,
-    setTheme,
-    setSlotTheme: setThemeSlot,
-    toggleResolvedTheme,
-  };
 }

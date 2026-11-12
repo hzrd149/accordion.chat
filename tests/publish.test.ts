@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PublishRejectedError, requireAccepted } from "../src/lib/publish";
+import { PublishRejectedError, requireAccepted } from "../src/helpers/publish";
 import { syncErrors } from "../src/messages/status";
 
 describe("managed publish acknowledgements", () => {

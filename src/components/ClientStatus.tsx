@@ -8,7 +8,7 @@ import { use$ } from "applesauce-react/hooks";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { ConcordClientStatus, ConcordCommunityStatus } from "@applesauce/concord";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
 
 // A DaisyUI semantic tone → the literal background class for a status dot. Kept

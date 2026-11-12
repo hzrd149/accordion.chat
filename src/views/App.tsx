@@ -31,12 +31,12 @@ import {
 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { accounts } from "../nostr";
-import { ConcordProvider } from "../lib/context";
+import { ConcordProvider } from "../components/ConcordProvider";
 import { CallProvider } from "../components/voice/CallProvider";
 import { useCall } from "../components/voice/call-context";
 import { verifiedAuthorOf, type VoicePresenceFold } from "../voice/presence";
 import { useVoiceEngine } from "../voice/registry";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
 import { useInvites } from "../hooks/use-invites";
 import { useMessages, useThread } from "../chat/useMessages";
@@ -52,12 +52,12 @@ import {
   Modal,
   RawEventModal,
 } from "../components/modals";
-import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
-import { defaultRoute } from "../lib/route-defaults";
+import { clockTime, colorFor, formatTime, groupMessages } from "../helpers/util";
+import { defaultRoute } from "../helpers/route-defaults";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { DevView } from "./dev";
-import { useDevMode } from "../lib/dev-mode";
+import { useDevMode } from "../hooks/use-dev-mode";
 import { InvitesView } from "./invites";
 import { DmView } from "./dm";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -68,8 +68,10 @@ import { MessageContent } from "../components/MessageContent";
 import { DirectInviteModal } from "../components/DirectInviteModal";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
-import { DEFAULT_REACTIONS, useFavoriteEmojis, type Emoji } from "../lib/emoji";
-import { getMentionsLastRead, markMentionsRead, useReadState } from "../lib/read-state";
+import { DEFAULT_REACTIONS, type Emoji } from "../helpers/emoji";
+import { useFavoriteEmojis } from "../hooks/use-favorite-emojis";
+import { getMentionsLastRead, markMentionsRead } from "../services/read-state";
+import { useReadState } from "../hooks/use-read-state";
 import type { ChatMessage } from "../chat/fold";
 import type { ChannelMetadata, Role, ConcordCommunity, Storage } from "@applesauce/concord";
 import { MissingChannelKeyError, PERM } from "@applesauce/concord";

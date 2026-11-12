@@ -8,24 +8,25 @@ import { AddDirectMessageRelay, RemoveDirectMessageRelay } from "applesauce-acti
 import { AddBlossomServer, RemoveBlossomServer, SetDefaultBlossomServer } from "applesauce-actions/actions/blossom";
 import type { ProfileContent } from "applesauce-core/helpers/profile";
 import type { ISigner } from "applesauce-signers";
-import { createSettingsRunner, saveRelayList, userFor } from "../lib/settings-actions";
+import { createSettingsRunner, saveRelayList, userFor } from "../helpers/settings-actions";
 import { UserAvatar } from "../components/User";
 import {
   DARK_DAISY_THEMES,
   LIGHT_DAISY_THEMES,
-  useTheme,
   type ThemeChoice,
   type ThemeMode,
   type ThemeSlot,
-} from "../lib/theme";
-import { useDevMode, setDevMode } from "../lib/dev-mode";
+} from "../services/theme";
+import { useTheme } from "../hooks/use-theme";
+import { useDevMode } from "../hooks/use-dev-mode";
+import { setDevMode } from "../services/dev-mode";
 import { useAvailableProfileThemes } from "../hooks/use-profile-themes";
 import {
   DEFAULT_OPEN_RANKING_PROVIDER,
   OPEN_RANKING_PRESETS,
   fetchOpenRankingCapabilities,
-  useOpenRankingProvider,
-} from "../lib/open-ranking";
+} from "../services/open-ranking";
+import { useOpenRankingProvider } from "../hooks/use-open-ranking-provider";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 

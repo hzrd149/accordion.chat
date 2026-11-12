@@ -1,5 +1,5 @@
 import { Moon, Sun } from "lucide-react";
-import { useTheme } from "../lib/theme";
+import { useTheme } from "../hooks/use-theme";
 
 /**
  * Compact account-bar toggle: flips between the configured light and dark slots.

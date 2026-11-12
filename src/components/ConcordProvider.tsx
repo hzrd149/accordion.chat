@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { debounceTime } from "rxjs";
 import { eventStore, pool } from "../nostr";
 import { attachVoiceGc } from "../voice/registry";
-import { ClientContext } from "./concord-context";
-import { createConcordUploader } from "./concord-uploader";
-import { createRumorStoreFactory } from "./rumor-cache";
-import { createConcordStorage } from "./concord-storage";
+import { ClientContext } from "../hooks/use-concord";
+import { createConcordUploader } from "../helpers/concord-uploader";
+import { createRumorStoreFactory } from "../services/rumor-cache";
+import { createConcordStorage } from "../services/concord-storage";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ConcordCommunity } from "@applesauce/concord";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "./use-concord";
 
 /**
  * Resolve the per-community engine for a community id. The manager

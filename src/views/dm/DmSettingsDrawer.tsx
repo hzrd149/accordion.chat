@@ -3,7 +3,7 @@ import { use$ } from "applesauce-react/hooks";
 import { CheckCircle2, Info, Loader2, X } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
 import { pool } from "../../nostr";
-import { shortNpub } from "../../lib/util";
+import { shortNpub } from "../../helpers/util";
 import type { WrappedMessagePublicationResult } from "applesauce-extra/messages";
 import { EXPIRATIONS, type ExpirationValue } from "./utils";
 

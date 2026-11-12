@@ -17,11 +17,11 @@ import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { VSK, PERM } from "@applesauce/concord";
 import type { CommunityState, ConcordCommunity, PermName, Rumor } from "@applesauce/concord";
 import { CONTROL_KIND, parsePermissions, hasPerm } from "@applesauce/concord/helpers";
-import { useConcord } from "../../lib/concord-context";
+import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
 import { ConfirmModal } from "../modals";
 import { UserLabel } from "../User";
-import { formatTime } from "../../lib/util";
+import { formatTime } from "../../helpers/util";
 
 // ---- small helpers ---------------------------------------------------------
 

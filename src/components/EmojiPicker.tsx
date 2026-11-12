@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { DEFAULT_REACTIONS, type Emoji } from "../lib/emoji";
+import { DEFAULT_REACTIONS, type Emoji } from "../helpers/emoji";
 
 // A small emoji picker popover: a row of default unicode reactions plus the
 // user's NIP-30 favorite custom emojis (rendered as images). Picking calls back

@@ -14,9 +14,9 @@ import {
 import { use$, useEventStore, useRenderedContent, type ComponentMap } from "applesauce-react/hooks";
 import { kinds, type NostrEvent } from "nostr-tools";
 import Lightbox from "yet-another-react-lightbox";
-import { decryptToObjectURL } from "../lib/image";
+import { decryptToObjectURL } from "../helpers/image";
 import type { MediaAttachment } from "@applesauce/concord/helpers";
-import { shortNpub } from "../lib/util";
+import { shortNpub } from "../helpers/util";
 import { UserAvatar, UserName } from "./User";
 
 // Renders a chat message: applesauce-content parses the text into a NAST tree,

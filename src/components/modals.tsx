@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Lock } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";

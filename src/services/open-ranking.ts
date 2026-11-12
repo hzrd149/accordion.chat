@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 export const DEFAULT_OPEN_RANKING_PROVIDER = "https://staging.brainstorm.world";
 
 export const OPEN_RANKING_PRESETS: { url: string; label: string; hint: string }[] = [
@@ -8,7 +6,7 @@ export const OPEN_RANKING_PRESETS: { url: string; label: string; hint: string }[
 ];
 
 const KEY = "accordion:open-ranking-provider";
-const CHANGE_EVENT = "accordion:open-ranking-provider-change";
+export const OPEN_RANKING_CHANGE_EVENT = "accordion:open-ranking-provider-change";
 
 export interface OpenRankingAlgorithm {
   id: string;
@@ -63,7 +61,7 @@ export function setOpenRankingProvider(provider: string): string {
   } catch {
     /* localStorage may be unavailable; still update mounted hooks. */
   }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
+  window.dispatchEvent(new Event(OPEN_RANKING_CHANGE_EVENT));
   return normalized;
 }
 
@@ -73,27 +71,7 @@ export function resetOpenRankingProvider() {
   } catch {
     /* ignore persistence failures */
   }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
-}
-
-export function useOpenRankingProvider(): {
-  provider: string;
-  setProvider: (provider: string) => string;
-  resetProvider: () => void;
-} {
-  const [provider, setProviderState] = useState(getOpenRankingProvider);
-
-  useEffect(() => {
-    const onChange = () => setProviderState(getOpenRankingProvider());
-    window.addEventListener(CHANGE_EVENT, onChange);
-    return () => window.removeEventListener(CHANGE_EVENT, onChange);
-  }, []);
-
-  return {
-    provider,
-    setProvider: setOpenRankingProvider,
-    resetProvider: resetOpenRankingProvider,
-  };
+  window.dispatchEvent(new Event(OPEN_RANKING_CHANGE_EVENT));
 }
 
 export async function fetchOpenRankingCapabilities(provider = getOpenRankingProvider()): Promise<OpenRankingCapabilities> {

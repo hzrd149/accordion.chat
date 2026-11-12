@@ -5,9 +5,9 @@ import { nip19 } from "nostr-tools";
 import type { ChannelMetadata, ConcordCommunity } from "@applesauce/concord";
 import { hasChannelKey } from "@applesauce/concord/helpers";
 import { useMentionCandidates, useMentionSearch, type MentionCandidate } from "../hooks/mentions";
-import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../lib/open-ranking";
-import { sendDirectInvite } from "../lib/direct-invites";
-import { shortNpub } from "../lib/util";
+import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../services/open-ranking";
+import { sendDirectInvite } from "../helpers/direct-invites";
+import { shortNpub } from "../helpers/util";
 import { Modal } from "./modals";
 import { UserAvatar, UserName } from "./User";
 

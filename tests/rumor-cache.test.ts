@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getEventHash, type Rumor } from "applesauce-core/helpers";
 import { addEvents, getEventsForFilters, openDB } from "nostr-idb";
-import { createRumorStoreFactory, deleteCommunityRumorCache } from "../src/lib/rumor-cache";
+import { createRumorStoreFactory, deleteCommunityRumorCache } from "../src/services/rumor-cache";
 
 let sequence = 0;
 const communities: string[] = [];

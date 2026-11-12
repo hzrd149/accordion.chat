@@ -3,7 +3,7 @@ import { use$ } from "applesauce-react/hooks";
 import { castUser, Profile } from "applesauce-common/casts";
 import { castEventStream } from "applesauce-common/observable";
 import { eventStore } from "../nostr";
-import { shortNpub } from "../lib/util";
+import { shortNpub } from "../helpers/util";
 
 /**
  * A user's display name as a plain string, for places that can't render

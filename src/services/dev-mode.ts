@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 /**
  * "Developer mode" — an opt-in local preference that surfaces the /dev tools
  * (rail button + routes). Mirrors the theme.ts pattern: a boolean persisted to
@@ -8,7 +6,7 @@ import { useEffect, useState } from "react";
  * client-side UI preference — nothing here is published to Nostr.
  */
 const KEY = "accordion:devMode";
-const EVENT = "accordion:devmodechange";
+export const DEV_MODE_CHANGE_EVENT = "accordion:devmodechange";
 
 /** The persisted flag, defaulting to false when nothing is stored. */
 export function getDevMode(): boolean {
@@ -28,16 +26,5 @@ export function setDevMode(enabled: boolean) {
   } catch {
     /* ignore persistence failures */
   }
-  window.dispatchEvent(new Event(EVENT));
-}
-
-/** Read/subscribe to the developer-mode flag; re-renders when it changes. */
-export function useDevMode(): boolean {
-  const [enabled, setEnabled] = useState<boolean>(getDevMode);
-  useEffect(() => {
-    const onChange = () => setEnabled(getDevMode());
-    window.addEventListener(EVENT, onChange);
-    return () => window.removeEventListener(EVENT, onChange);
-  }, []);
-  return enabled;
+  window.dispatchEvent(new Event(DEV_MODE_CHANGE_EVENT));
 }

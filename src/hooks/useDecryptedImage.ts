@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { decryptImagePointer } from "../lib/image";
+import { decryptImagePointer } from "../helpers/image";
 import type { BlobPointer } from "@applesauce/concord";
 
 // Resolve an encrypted {@link BlobPointer} (icon / banner) to a displayable

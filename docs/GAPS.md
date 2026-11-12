@@ -122,7 +122,7 @@ Risk: bad round-trip against armada's version.
 Encrypted-blob pointers `{url,key,nonce,hash}` are typed but never fetched/decrypted/uploaded.
 
 - Fetch + NIP-44-decrypt on read; encrypt + upload on write; wire icon/banner in metadata UI.
-- Files: `src/lib/`, `src/concord/community.ts` or `editions.ts`, `src/app/modals.tsx`.
+- Files: `src/helpers/`, `src/services/`, `src/concord/community.ts` or `editions.ts`, `src/app/modals.tsx`.
 
 ---
 

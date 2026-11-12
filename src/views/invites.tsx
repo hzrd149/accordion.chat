@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Inbox, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { ConcordDirectInvite } from "@applesauce/concord/casts";
-import { useConcord } from "../lib/concord-context";
+import { useConcord } from "../hooks/use-concord";
 import { useInvites, wrapForInvite } from "../hooks/use-invites";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { UserAvatar, UserName } from "../components/User";

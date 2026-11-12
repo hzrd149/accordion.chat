@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultRoute } from "../src/lib/route-defaults";
+import { defaultRoute } from "../src/helpers/route-defaults";
 
 describe("route defaults", () => {
   it.each([

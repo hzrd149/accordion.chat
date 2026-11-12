@@ -1,6 +1,6 @@
 import { IDBFactory, IDBDatabase, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createConcordStorage } from "../src/lib/concord-storage";
+import { createConcordStorage } from "../src/services/concord-storage";
 
 const opened: ReturnType<typeof createConcordStorage>[] = [];
 function legacyStorage(initial: Record<string, string> = {}) {

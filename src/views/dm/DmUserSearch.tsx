@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Loader2, Search, X } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
-import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../../lib/open-ranking";
-import { shortNpub } from "../../lib/util";
+import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../../services/open-ranking";
+import { shortNpub } from "../../helpers/util";
 import type { UserSearchResult } from "./types";
 import { dedupeSearchResults, normalizePubkey } from "./utils";
 

@@ -3,7 +3,7 @@ import type { WrappedConversation } from "applesauce-extra/messages";
 import { use$ } from "applesauce-react/hooks";
 import { catchError, of } from "rxjs";
 import { UserAvatar, UserName } from "../../components/User";
-import { formatTime } from "../../lib/util";
+import { formatTime } from "../../helpers/util";
 
 export function DmMessageList({ conversation, since, peer }: { conversation: WrappedConversation; since: number; peer: string }) {
   const timeline = use$(() => conversation.timeline$({ since }).pipe(

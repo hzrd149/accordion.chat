@@ -1,5 +1,5 @@
 import { IndexedDBConversationIndexStore } from "applesauce-extra/messages";
-import { createConcordStorage } from "../lib/concord-storage";
+import { createConcordStorage } from "../services/concord-storage";
 
 /** Reuse the device-encrypted storage adapter with a disjoint account namespace.
  * Neither drafts nor decrypted envelope/seal contents enter the public cache. */

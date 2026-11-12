@@ -12,7 +12,7 @@ import { castEventStream } from "applesauce-common/observable";
 import Fuse from "fuse.js";
 import { nip19 } from "nostr-tools";
 import { eventStore } from "../nostr";
-import { shortNpub } from "../lib/util";
+import { shortNpub } from "../helpers/util";
 
 export interface MentionCandidate {
   pubkey: string;

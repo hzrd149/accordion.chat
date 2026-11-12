@@ -5,7 +5,7 @@ import { ControlPlaneDebugger } from "../components/dev/ControlPlaneDebugger";
 
 /**
  * Developer tools — surfaced only when developer mode is enabled (see
- * `src/lib/dev-mode.ts`). Mirrors the Settings layout: a left sub-nav of tools +
+ * `src/services/dev-mode.ts`). Mirrors the Settings layout: a left sub-nav of tools +
  * a content pane, with page selection delegated back to the Shell via
  * `onSelectPage` → `navigate("/dev/:page")`. Add new tools by extending `PAGES`.
  */

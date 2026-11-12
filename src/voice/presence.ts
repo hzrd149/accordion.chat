@@ -23,7 +23,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { finalizeEvent } from "nostr-tools";
 
-import { fromHex, toHex, utf8 } from "../lib/bytes";
+import { fromHex, toHex, utf8 } from "../helpers/bytes";
 import type { Rumor } from "applesauce-core/helpers";
 import type { GroupKey } from "@applesauce/concord/helpers";
 import { rumorMs, VOICE_PRESENCE_KIND } from "@applesauce/concord/helpers";
