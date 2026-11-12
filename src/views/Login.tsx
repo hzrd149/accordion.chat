@@ -35,7 +35,7 @@ export function Login() {
       }
       activate(PrivateKeyAccount.fromKey(key));
     } catch {
-      setError("Invalid nsec or hex private key");
+      setError("That doesn't look like a valid private key.");
     }
   }
 
@@ -43,7 +43,7 @@ export function Login() {
     setError("");
     setBusy(true);
     try {
-      if (!("nostr" in window)) throw new Error("No NIP-07 extension found");
+      if (!("nostr" in window)) throw new Error("No Nostr browser extension found. Install one, or use another sign-in option.");
       activate(await ExtensionAccount.fromExtension());
     } catch (e) {
       setError((e as Error).message);
@@ -81,17 +81,17 @@ export function Login() {
               Create a new identity
             </button>
             <button className="btn btn-ghost btn-block mb-2.5" onClick={extension} disabled={busy}>
-              Sign in with extension (NIP-07)
+              Sign in with browser extension
             </button>
             <button className="btn btn-ghost btn-block mb-2.5" onClick={() => { setError(""); setRemote(true); }}>
-              Sign in with remote signer (NIP-46)
+              Sign in with a signer app
             </button>
 
             <div className="mb-4 mt-5 text-left">
               <label className="label text-xs font-semibold uppercase opacity-70">Or import a private key</label>
               <input
                 className="input input-bordered w-full"
-                placeholder="nsec1… or hex"
+                placeholder="nsec1…"
                 value={nsec}
                 onChange={(e) => setNsec(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && importKey()}
@@ -195,7 +195,7 @@ function RemoteSignerLogin({
       doneRef.current = true;
       await onSigner(signer);
     } catch (e) {
-      onError((e as Error).message || "Failed to connect to bunker");
+      onError((e as Error).message || "Couldn't connect to your signer");
       setBunkerBusy(false);
     }
   }
@@ -249,7 +249,7 @@ function RemoteSignerLogin({
 
       {/* Bunker URI alternative */}
       <div className="mb-4 mt-5 text-left">
-        <label className="label text-xs font-semibold uppercase opacity-70">Or paste a bunker:// URI</label>
+        <label className="label text-xs font-semibold uppercase opacity-70">Or paste a connection link from your signer</label>
         <input
           className="input input-bordered w-full"
           placeholder="bunker://…"
@@ -259,7 +259,7 @@ function RemoteSignerLogin({
         />
       </div>
       <button className="btn btn-ghost btn-block" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
-        {bunkerBusy ? "Connecting…" : "Connect with bunker URI"}
+        {bunkerBusy ? "Connecting…" : "Connect"}
       </button>
 
       <button className="btn btn-ghost btn-block mt-2" onClick={onBack}>

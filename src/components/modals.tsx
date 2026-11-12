@@ -340,7 +340,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
       </div>
       <label className="flex items-center gap-2.5 p-2 rounded-lg cursor-pointer hover:bg-base-200">
         <input type="checkbox" className="checkbox checkbox-sm" checked={priv} onChange={(e) => setPriv(e.target.checked)} />
-        <span className="text-sm">Private channel (its own key, only role-holders can read)</span>
+        <span className="text-sm">Private channel (only people you add can read it)</span>
       </label>
       <p className="text-xs opacity-60 px-2 pt-1">Every channel supports end-to-end-encrypted calls — start one from the channel header.</p>
       {error && <div className="alert alert-error text-sm mt-3">{error}</div>}
@@ -437,7 +437,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   return (
     <Modal onClose={onClose}>
       <h2 className="text-xl font-bold mb-1">Invite people</h2>
-      <p className="opacity-70 mb-6">Anyone with a link can join. Links carry no keys — those live encrypted on relays.</p>
+      <p className="opacity-70 mb-6">Anyone with a link can join.</p>
       {error && <div className="alert alert-error mb-4">{error}</div>}
 
       {invites.length === 0 ? (
@@ -510,14 +510,13 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
                 ))}
               </select>
               <p className="opacity-70 mt-2">
-                Past its expiry a link still previews the community, but joining refuses. Revoke a link to cut it off
-                immediately.
+                Expired links can't be used to join. Revoke a link to stop it working right away.
               </p>
 
               {grantable.length > 0 && (
                 <>
                   <div className="flex items-center gap-2 mt-5 mb-1 flex-wrap">
-                    <span className="label p-0">Private channels this link grants</span>
+                    <span className="label p-0">Private channels to include</span>
                     <div className="ml-auto flex gap-2">
                       <button
                         type="button"
@@ -532,8 +531,8 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
                     </div>
                   </div>
                   <p className="opacity-70 mb-2">
-                    Anyone who follows the link gets the keys to whatever you tick — including messages sent before they
-                    joined. Grants nothing by default.
+                    Anyone who uses the link can read the channels you tick, including messages sent before they
+                    joined. None are included by default.
                   </p>
                   {grantable.map((c) => (
                     <label
@@ -558,7 +557,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
           )}
         </div>
       ) : (
-        <p className="opacity-70">You need the Create Invites permission to mint a link.</p>
+        <p className="opacity-70">You need the Create Invites permission to create a link.</p>
       )}
     </Modal>
   );
@@ -589,11 +588,11 @@ function InviteCard({
         {invite.channels?.length ? (
           <span className="badge badge-warning gap-1">
             <Lock size={12} />
-            Grants {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
+            Includes {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
           </span>
         ) : null}
       </div>
-      <div className="font-mono break-all opacity-60 leading-relaxed mb-3">{invite.url}</div>
+      <div className="font-mono truncate opacity-60 leading-relaxed mb-3" title={invite.url}>{invite.url}</div>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="opacity-60">Created {new Date(invite.createdAt * 1000).toLocaleDateString()}</span>
         <div className="ml-auto flex gap-2">

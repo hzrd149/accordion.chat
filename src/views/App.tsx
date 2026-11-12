@@ -1369,6 +1369,7 @@ const MessageList = memo(function MessageList({
   // Collapse consecutive messages from the same author (within 2 min) into one
   // avatar group — Discord/Slack style. Replies always start a fresh header.
   const groups = useMemo(() => groupMessages(messages), [messages]);
+  const devMode = useDevMode();
 
   return (
     <div className="flex-1 flex min-h-0">
@@ -1404,6 +1405,7 @@ const MessageList = memo(function MessageList({
                       onReply={onReply}
                       onJumpToMessage={onJumpToMessage}
                       onThread={onThread}
+                      devMode={devMode}
                     />
                   </Fragment>
                 ))}
@@ -1435,6 +1437,7 @@ const Message = memo(function Message({
   onReply,
   onJumpToMessage,
   onThread,
+  devMode,
 }: {
   m: ChatMessage;
   showHeader: boolean;
@@ -1449,6 +1452,8 @@ const Message = memo(function Message({
   onReply: (r: ReplyTarget) => void;
   onJumpToMessage: (id: string) => void;
   onThread: (m: ChatMessage) => void;
+  /** Developer mode: exposes the per-message "View raw" debug dialog. */
+  devMode: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -1637,6 +1642,7 @@ const Message = memo(function Message({
             )}
           </>
         )}
+        {devMode && (
         <span className="relative inline-flex">
           <button className="btn btn-ghost btn-sm btn-circle" title="More" onClick={() => setMenuOpen((v) => !v)}>
             <MoreVertical size={16} />
@@ -1651,6 +1657,7 @@ const Message = memo(function Message({
             />
           )}
         </span>
+        )}
       </div>
       {drawerOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex items-end bg-black/45" onClick={() => setDrawerOpen(false)}>
@@ -1722,11 +1729,13 @@ const Message = memo(function Message({
                 </div>
               </>
             )}
-            <div className="mt-1 flex flex-col gap-1">
-              <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => setRawOpen(true))}>
-                <MoreVertical size={18} /> View raw
-              </button>
-            </div>
+            {devMode && (
+              <div className="mt-1 flex flex-col gap-1">
+                <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => setRawOpen(true))}>
+                  <MoreVertical size={18} /> View raw
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

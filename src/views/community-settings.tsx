@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
 import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
@@ -124,10 +124,10 @@ function ControlKeyNotice({ cid }: { cid: string }) {
   return (
     <div className="alert alert-warning text-sm mb-5" role="status">
       <div>
-        <p className="font-semibold">Staff signing key missing on this device</p>
-        <p>You can read this community, but changes to its settings need your staff signing key.
-          Restore community keys from another device that holds them, or retry sync from the connection status.
-          Ask the owner to grant your staff roles again if the key still does not arrive.</p>
+        <p className="font-semibold">Admin access isn't set up on this device yet</p>
+        <p>You can read this community, but you can't change its settings from here yet.
+          Restore your community keys from another device, or retry sync from the connection status.
+          If that doesn't help, ask the owner to give you your role again.</p>
       </div>
     </div>
   );
@@ -152,6 +152,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const metadata = use$(community?.metadata$);
   const dissolved = use$(community?.dissolved$) ?? false;
   const canManageMetadata = use$(() => community?.can$(PERM.MANAGE_METADATA), [community]) ?? false;
+  const devMode = useDevMode();
   const [name, setName] = useState(() => metadata?.name ?? community?.material.name ?? "");
   const [description, setDescription] = useState(() => metadata?.description ?? "");
   const [blossom, setBlossom] = useState(() => (metadata?.blossom_servers ?? []).join("\n"));
@@ -215,7 +216,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
       </div>
       {canManageMetadata && (
         <div className="mb-4">
-          <label className="label text-xs font-semibold uppercase opacity-70">Blossom media servers</label>
+          <label className="label text-xs font-semibold uppercase opacity-70">Media servers</label>
           <textarea
             className="textarea textarea-bordered w-full"
             value={blossom}
@@ -233,11 +234,13 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
         {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
 
+      {devMode && (
+        <div className="mt-6 mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Community ID</label>
+          <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70">{cid}</div>
+        </div>
+      )}
       <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Danger zone</h3>
-      <div className="mb-4">
-        <label className="label text-xs font-semibold uppercase opacity-70">Community ID</label>
-        <div className="rounded-box bg-base-200 border border-base-300 p-3 font-mono text-xs break-all opacity-70">{cid}</div>
-      </div>
       <div className="flex flex-wrap gap-3">
         <button className="btn btn-error btn-outline gap-2" onClick={() => setLeaveOpen(true)}>
           <DoorOpen size={18} />
@@ -747,8 +750,10 @@ function MembersPage({ cid }: { cid: string }) {
 
   const doBan = async (member: string) => {
     // 1. Soft ban: banlist + strip roles (CORD-04). Refuses locally if we don't
-    //    strictly outrank the target, before anything is published.
-    await community?.admin.ban(member);
+    //    strictly outrank the target, before anything is published. Skipped when
+    //    they're already banned, so pressing Ban again after a failed step 2 just
+    //    retries the refounding.
+    if (!banlist.has(member)) await community?.admin.ban(member);
     // 2. Hard enforcement: Refound to sever the banned member's keys from
     //    the control plane and every channel (CORD-06 §3). keep = everyone
     //    still in the community except the banned member.
@@ -760,10 +765,11 @@ function MembersPage({ cid }: { cid: string }) {
       // configured protocol relays to ack — a silent relay counts against it. The
       // soft ban above has already landed, so say what did and didn't happen
       // rather than letting the raw quorum error read as "nothing happened".
+      console.warn("Refounding after ban failed", e);
       throw new Error(
-        `${member.slice(0, 8)}… is banned and their roles are stripped, but severing their keys ` +
-          `failed: ${(e as Error).message}. They keep access to current keys until a refounding ` +
-          `succeeds — retry from Advanced → Rotate epoch once your relays are reachable.`,
+        "They're banned, but we couldn't finish removing their access because not enough " +
+          "servers responded. Until this succeeds they can still read new messages. " +
+          "Check your connection and press Ban again to retry.",
         { cause: e },
       );
     }
@@ -789,9 +795,8 @@ function MembersPage({ cid }: { cid: string }) {
         <>
           <h2 className="text-2xl font-bold mb-1 mt-6">Banned members</h2>
           <p className="text-sm opacity-70 leading-relaxed mb-5">
-            Banned members can't rejoin. Unban removes them from the banlist; to let them back in,
-            mint a fresh invite from the sidebar (the link carries current keys, so they rejoin
-            without access to history from before the refounding).
+            Banned members can't rejoin. Unbanning doesn't add them back: send them a new invite
+            to let them in again. They won't see messages from before they were banned.
           </p>
           {unbanError && <div className="alert alert-error text-sm mb-3">{unbanError}</div>}
           {[...banlist].sort().map((m) => (
@@ -826,9 +831,9 @@ function MembersPage({ cid }: { cid: string }) {
       )}
       {banTarget && (
         <ConfirmModal
-          title="Ban and refound"
+          title="Ban member"
           danger
-          confirmLabel="Ban & sever keys"
+          confirmLabel="Ban"
           onClose={() => setBanTarget(null)}
           onConfirm={async () => {
             await doBan(banTarget);
@@ -836,13 +841,13 @@ function MembersPage({ cid }: { cid: string }) {
           body={
             <>
               <p>
-                Banning <UserName pubkey={banTarget} /> adds them to the banlist, strips their
-                roles, and <strong>refounds the community</strong> to sever their keys from the
-                control plane and every channel (CORD-06). All remaining members are re-keyed.
+                <UserName pubkey={banTarget} /> will be removed from the community, lose their
+                roles, and be blocked from rejoining. They lose access to every channel and call
+                from now on.
               </p>
               <p className="text-sm opacity-70 leading-relaxed">
-                This rotates every channel key and voice room. Other members will see a brief
-                re-sync. This cannot be quietly undone.
+                Everyone else's access is renewed automatically, so other members may see a brief
+                re-sync.
               </p>
             </>
           }
@@ -862,6 +867,9 @@ function ChannelsPage({ cid }: { cid: string }) {
   const grants = use$(community?.grants$) ?? NO_GRANTS;
   const canManage = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
   const owner = community?.material.owner ?? "";
+  // Display names for the "Add a member…" <select>, whose <option>s can't host <UserName>.
+  const memberCandidates = useMentionCandidates(useMemo(() => [...members].sort(), [members]));
+  const memberNames = useMemo(() => new Map(memberCandidates.map((c) => [c.pubkey, c.name])), [memberCandidates]);
   // `channels$` is already live-only, so a deleted channel never reaches here.
   const privateChannels = channels.filter((c) => c.private);
   const [busy, setBusy] = useState(false);
@@ -908,8 +916,8 @@ function ChannelsPage({ cid }: { cid: string }) {
     <>
       <h2 className="text-2xl font-bold mb-1">Channels</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Private channels and who can read them. Adding a member hands over the channel key; removing
-        one rotates the key so they lose access to everything sent afterward.
+        Private channels and who can read them. Removing someone stops them from reading anything
+        sent afterward.
       </p>
       {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
       {privateChannels.length === 0 && (
@@ -920,7 +928,10 @@ function ChannelsPage({ cid }: { cid: string }) {
       {privateChannels.map((ch) => {
         const roster = channelRoster(ch.channel_id, owner, roles, members, grants);
         const rosterSet = new Set(roster);
-        const outsiders = [...members].filter((m) => !rosterSet.has(m)).sort();
+        const outsiders = [...members]
+          .filter((m) => !rosterSet.has(m))
+          .map((m) => ({ pubkey: m, name: memberNames.get(m) ?? "Loading…" }))
+          .sort((a, b) => a.name.localeCompare(b.name));
         return (
           <div key={ch.channel_id} className="mb-7">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -972,8 +983,8 @@ function ChannelsPage({ cid }: { cid: string }) {
                 >
                   <option value="">Add a member…</option>
                   {outsiders.map((m) => (
-                    <option key={m} value={m}>
-                      {m.slice(0, 12)}…
+                    <option key={m.pubkey} value={m.pubkey}>
+                      {m.name}
                     </option>
                   ))}
                 </select>
@@ -1003,16 +1014,15 @@ function ChannelsPage({ cid }: { cid: string }) {
         <ConfirmModal
           title="Remove from channel"
           danger
-          confirmLabel="Remove & rekey"
+          confirmLabel="Remove"
           onClose={() => setKickTarget(null)}
           onConfirm={async () => {
             await kickMember(kickTarget.channelId, kickTarget.member);
           }}
           body={
             <p>
-              Remove <UserName pubkey={kickTarget.member} /> from <strong>#{kickTarget.name}</strong> and
-              rotate its key. They keep whatever they already synced, but nothing sent afterward will
-              decrypt for them. Remaining members re-sync automatically.
+              Remove <UserName pubkey={kickTarget.member} /> from <strong>#{kickTarget.name}</strong>?
+              They keep the messages they've already seen, but can't read anything sent afterward.
             </p>
           }
         />
