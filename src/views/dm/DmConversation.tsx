@@ -39,7 +39,7 @@ export function DmConversation({ self, peer, mobileListButton }: { self: string;
       account
         ? new ActionRunner(eventStore, account, async (event, relays) => {
             const targets = relays?.length ? relays : peerRelays;
-            if (!targets.length) throw new Error("No NIP-17 inbox relays found for this user");
+            if (!targets.length) throw new Error("This person hasn't set up direct messages yet, so your message can't be delivered.");
             setLastPublish(targets.map((relay) => ({ relay, ok: false, message: "Publishing..." })));
             const responses = await pool.publish(targets, event, accountPublishOptions(account, self));
             setLastPublish(

@@ -58,8 +58,8 @@ export function DmSettingsDrawer({
             <p className="text-xs opacity-60 mt-2">Stored for this 1:1 conversation. If unset, Accordion guesses from the latest expiring DM.</p>
           </section>
 
-          <RelayStatusList title="Your NIP-17 Inbox Relays" owner={self} relays={selfRelays} empty="You have no DM inbox relays configured." />
-          <RelayStatusList title="Their NIP-17 Inbox Relays" owner={peer} relays={peerRelays} empty="No DM inbox relays found for this user." />
+          <RelayStatusList title="Your DM relays" owner={self} relays={selfRelays} empty="You have no DM inbox relays configured." />
+          <RelayStatusList title="Their DM relays" owner={peer} relays={peerRelays} empty="No DM inbox relays found for this user." />
 
           <section>
             <h3 className="text-xs font-bold uppercase tracking-wide opacity-60 mb-2">Last Send</h3>
@@ -106,12 +106,13 @@ function RelayStatusRow({ relay }: { relay: string }) {
       <div className="flex items-center gap-2 min-w-0">
         {icon ? <img className="w-5 h-5 rounded-full shrink-0" src={icon} alt="" /> : <div className="w-5 h-5 rounded-full bg-base-300 shrink-0" />}
         <div className="font-medium text-sm truncate flex-1">{name}</div>
-        <span className={`badge badge-xs ${information ? "badge-success" : "badge-ghost"}`}>{information ? "NIP-11" : "Checking"}</span>
       </div>
       <div className="font-mono text-[11px] opacity-60 truncate mt-1">{relay}</div>
-      <div className="flex gap-1 mt-2">
-        <span className={`badge badge-xs ${nip77 ? "badge-primary" : "badge-outline"}`}>{nip77 ? "NIP-77 sync" : "No NIP-77"}</span>
-      </div>
+      {nip77 && (
+        <div className="flex gap-1 mt-2">
+          <span className="badge badge-xs badge-primary" title="This relay supports faster message syncing">Fast sync</span>
+        </div>
+      )}
     </div>
   );
 }

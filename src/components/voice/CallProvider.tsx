@@ -62,7 +62,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         if (seq !== joinSeq.current) return; // superseded
         setPending(null);
         if (!broker) {
-          setError("No reachable voice broker. Set VITE_CONCORD_AV_SERVERS.");
+          setError("Couldn't reach the voice server. Try again in a moment.");
           return;
         }
         setActive({ ...req, broker });

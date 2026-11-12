@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { FlaskConical, Flower2, Inbox, Mailbox, Monitor, Moon, Radar, Search, Star, Sun, SunMoon, Trash2, User as UserIcon } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
@@ -31,15 +31,17 @@ const LOOKUP_RELAY_LIST_KIND = 10086;
 
 type PageId = "profile" | "appearance" | "dm" | "relays" | "blossom" | "lookup" | "discovery" | "advanced";
 
-const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
+// `group` starts a labelled section in the desktop nav. Network pages are the
+// relay/server plumbing most people never touch, so they sit apart.
+const PAGES: { id: PageId; label: string; icon: ReactNode; group?: string }[] = [
   { id: "profile", label: "Profile", icon: <UserIcon size={18} /> },
   { id: "appearance", label: "Appearance", icon: <SunMoon size={18} /> },
-  { id: "relays", label: "Relays", icon: <Mailbox size={18} /> },
-  { id: "dm", label: "DM Inbox Relays", icon: <Inbox size={18} /> },
-  { id: "blossom", label: "Blossom Servers", icon: <Flower2 size={18} /> },
-  { id: "lookup", label: "Indexer Relays", icon: <Radar size={18} /> },
-  { id: "discovery", label: "Discovery", icon: <Search size={18} /> },
-  { id: "advanced", label: "Advanced", icon: <FlaskConical size={18} /> },
+  { id: "relays", label: "Relays", icon: <Mailbox size={18} />, group: "Network" },
+  { id: "dm", label: "DM Relays", icon: <Inbox size={18} /> },
+  { id: "blossom", label: "Media Servers", icon: <Flower2 size={18} /> },
+  { id: "lookup", label: "Lookup Relays", icon: <Radar size={18} /> },
+  { id: "discovery", label: "User Search", icon: <Search size={18} /> },
+  { id: "advanced", label: "Advanced", icon: <FlaskConical size={18} />, group: "Other" },
 ];
 
 /** Normalize a user-typed URL, prefixing `scheme://` when none is given. */
@@ -80,14 +82,20 @@ export function SettingsView({
           <span className="max-md:hidden">Settings</span>
         </div>
         {PAGES.map((p) => (
+          <Fragment key={p.id}>
+          {p.group && (
+            <div className="px-2 pt-4 pb-1 text-[11px] uppercase font-bold tracking-wide text-base-content/50 max-md:hidden">
+              {p.group}
+            </div>
+          )}
           <button
-            key={p.id}
             className={`btn btn-ghost justify-start gap-2.5 w-full font-medium max-md:w-auto max-md:shrink-0 ${page === p.id ? "btn-active" : ""}`}
             onClick={() => onSelectPage(p.id)}
           >
             {p.icon}
             <span>{p.label}</span>
           </button>
+          </Fragment>
         ))}
       </nav>
       <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
@@ -381,13 +389,13 @@ function DiscoveryPage() {
       if (test) {
         const caps = await fetchOpenRankingCapabilities(next);
         const search = caps["/search/pubkeys"];
-        if (!search?.length) throw new Error("Provider does not advertise /search/pubkeys");
-        setStatus(`Provider ready: ${search[0].name || search[0].id}`);
+        if (!search?.length) throw new Error("This service doesn't support searching for people");
+        setStatus(`Working: ${search[0].name || search[0].id}`);
       } else {
         setStatus("Saved");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save provider");
+      setError(e instanceof Error ? e.message : "Couldn't save the search service");
     } finally {
       setBusy(false);
     }
@@ -396,7 +404,7 @@ function DiscoveryPage() {
   function reset() {
     resetProvider();
     setValue(DEFAULT_OPEN_RANKING_PROVIDER);
-    setStatus("Reset to default provider");
+    setStatus("Reset to the default service");
     setError(null);
   }
 
@@ -404,12 +412,13 @@ function DiscoveryPage() {
     <>
       <h2 className="text-2xl font-bold mb-1">Discovery</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Direct invite global search uses an Open Ranking provider. This stays local to this browser.
+        The service used to find people by name when you invite or message someone. This setting only applies to
+        this browser.
       </p>
       {error && <div className="alert alert-error text-sm mb-4">{error}</div>}
       {status && <div className="alert alert-success text-sm mb-4">{status}</div>}
       <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="open-ranking-provider">
-        Open Ranking provider
+        Search service
       </label>
       <div className="flex gap-2 flex-wrap mb-2">
         {OPEN_RANKING_PRESETS.map((preset) => {
@@ -443,15 +452,14 @@ function DiscoveryPage() {
         placeholder={DEFAULT_OPEN_RANKING_PROVIDER}
       />
       <p className="text-xs opacity-60 mt-2 max-w-[520px]">
-        Default is Brainstorm staging. Pick a preset above or enter any provider that supports{" "}
-        <code>/search/pubkeys</code>.
+        Pick a preset above or enter the address of another compatible search service.
       </p>
       <div className="flex gap-2 mt-4 flex-wrap">
         <button className="btn btn-primary" disabled={busy} onClick={() => void save(false)}>
           {busy ? "Saving…" : "Save"}
         </button>
         <button className="btn" disabled={busy} onClick={() => void save(true)}>
-          Test provider
+          Test
         </button>
         <button className="btn btn-ghost" disabled={busy} onClick={reset}>
           Reset default
@@ -474,8 +482,8 @@ function AdvancedPage() {
 
       <h3 className="text-lg font-bold mb-1">Developer mode</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-4 max-w-[440px]">
-        Adds a <strong>Developer tools</strong> button to the sidebar with low-level protocol utilities, like walking a
-        community's cryptographic history epoch by epoch.
+        Adds a <strong>Developer tools</strong> button to the sidebar, plus raw message and community details for
+        troubleshooting.
       </p>
       <label className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer max-w-[440px]">
         <input
@@ -486,7 +494,7 @@ function AdvancedPage() {
         />
         <span className="flex flex-col gap-px">
           <span className="font-semibold">Enable developer mode</span>
-          <span className="text-xs opacity-60">Show the /dev tools in the sidebar</span>
+          <span className="text-xs opacity-60">Show developer tools in the sidebar</span>
         </span>
       </label>
     </>
@@ -501,7 +509,7 @@ const PROFILE_FIELDS: { key: keyof ProfileContent; label: string; placeholder: s
   { key: "picture", label: "Avatar URL", placeholder: "https://…/avatar.png", type: "url" },
   { key: "banner", label: "Banner URL", placeholder: "https://…/banner.png", type: "url" },
   { key: "website", label: "Website", placeholder: "https://example.com", type: "url" },
-  { key: "nip05", label: "NIP-05 identifier", placeholder: "name@domain.com" },
+  { key: "nip05", label: "Verified address", placeholder: "name@domain.com" },
   { key: "lud16", label: "Lightning address", placeholder: "name@wallet.com" },
 ];
 
@@ -557,7 +565,7 @@ function ProfilePage({ signer, pubkey }: PageProps) {
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Profile</h2>
-      <p className="text-sm opacity-70 leading-relaxed mb-5">Your public Nostr profile (kind 0). Anyone can see this.</p>
+      <p className="text-sm opacity-70 leading-relaxed mb-5">Your public profile. Anyone can see this.</p>
       {form.banner ? (
         <div className="h-30 rounded-lg bg-base-200 bg-cover bg-center" style={{ backgroundImage: `url(${form.banner})` }} />
       ) : (
@@ -682,8 +690,8 @@ function MailboxesPage({ signer, pubkey }: PageProps) {
     <>
       <h2 className="text-2xl font-bold mb-1">Relays</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Your NIP-65 relay list (kind 10002). <strong>Outbox</strong> relays are where you publish; other people read your
-        notes there. <strong>Inbox</strong> relays are where others send you replies and mentions.
+        Relays are the servers that carry your posts. <strong>Outbox</strong> relays are where you publish; other
+        people read your posts there. <strong>Inbox</strong> relays are where others send you replies and mentions.
       </p>
       <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Outbox (write)</h3>
       <RelayListEditor
@@ -712,10 +720,10 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">DM Inbox Relays</h2>
+      <h2 className="text-2xl font-bold mb-1">DM Relays</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Where you receive NIP-17 encrypted direct messages (kind 10050). Senders publish gift-wraps to these relays, so
-        list a couple you check reliably.
+        Where people send your encrypted direct messages. List a couple of reliable relays so messages always reach
+        you.
       </p>
       <RelayListEditor
         items={relays}
@@ -736,9 +744,9 @@ function BlossomPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">Blossom Servers</h2>
+      <h2 className="text-2xl font-bold mb-1">Media Servers</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Media servers used to host your uploads (kind 10063). The first server is your default — uploads go there first.
+        Servers that host your images and files. The first server is your default — uploads go there first.
       </p>
       <RelayListEditor
         items={servers}
@@ -773,10 +781,10 @@ function LookupPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">Indexer Relays</h2>
+      <h2 className="text-2xl font-bold mb-1">Lookup Relays</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Lookup / indexer relays (kind 10086) that aggregate profiles and relay lists network-wide. Clients use these to
-        discover events for people you have no relay hint for.
+        Relays that keep a directory of profiles across the network. They're used to find people when Accordion doesn't
+        yet know where they post.
       </p>
       <RelayListEditor
         items={relays}
