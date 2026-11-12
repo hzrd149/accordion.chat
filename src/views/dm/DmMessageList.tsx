@@ -1,8 +1,16 @@
 import type { Rumor } from "applesauce-common/helpers";
+import type { WrappedConversation } from "applesauce-extra/messages";
+import { use$ } from "applesauce-react/hooks";
+import { catchError, of } from "rxjs";
 import { UserAvatar, UserName } from "../../components/User";
 import { formatTime } from "../../lib/util";
 
-export function DmMessageList({ messages, self, peer }: { messages: Rumor[]; self: string; peer: string }) {
+export function DmMessageList({ conversation, since, peer }: { conversation: WrappedConversation; since: number; peer: string }) {
+  const timeline = use$(() => conversation.timeline$({ since }).pipe(
+    catchError((error: unknown) => of(error instanceof Error ? error : new Error(String(error)))),
+  ), [conversation, since]);
+  if (timeline instanceof Error) return <div role="alert" className="p-2 text-error">{timeline.message}</div>;
+  const messages = [...(timeline ?? [])].reverse();
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
       {messages.length === 0 ? (
@@ -10,7 +18,7 @@ export function DmMessageList({ messages, self, peer }: { messages: Rumor[]; sel
           No messages with <UserName pubkey={peer} /> yet.
         </div>
       ) : (
-        messages.map((message) => <DmMessageBubble key={message.id} message={message} own={message.pubkey === self} />)
+        messages.map((message) => <DmMessageBubble key={message.id} message={message} own={message.pubkey === conversation.client.pubkey} />)
       )}
     </div>
   );

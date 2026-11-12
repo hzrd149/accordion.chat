@@ -5,7 +5,7 @@ import { getEventHash, unixNow, type Rumor } from "applesauce-core/helpers";
 import { RelayPool } from "applesauce-relay";
 import { WrappedMessagesClient, type PreparedWrappedMessage, type WrappedConversationSummary } from "applesauce-extra/messages";
 import { Subject } from "rxjs";
-import { conversationSummaries, type ConversationSource } from "../src/messages/conversations";
+import { conversationEntries, type ConversationSource } from "../src/messages/conversations";
 import { pendingPublication, publishConversationDraft } from "../src/messages/publication";
 import { openMessageStorage } from "../src/messages/storage";
 
@@ -85,40 +85,40 @@ describe("DM publication integration", () => {
 
 describe("DM conversation list integration", () => {
   it("keeps a live arrival when an older enumeration page finishes later", async () => {
-    const owner = client();
     const updates = new Subject<WrappedConversationSummary>();
     const inserts = new Subject<WrappedConversationSummary>();
     const page = Promise.withResolvers<void>();
     let enumerated = false;
     const old = { id: `${self}:${peer}`, participants: [self, peer], lastActivity: 1, lastMessage: rumor("old", 1) };
     const source: ConversationSource = {
-      pubkey: self, rumorStore: owner.rumorStore, conversation: owner.conversation.bind(owner),
       conversationInserts$: inserts, conversationUpdates$: updates,
       async *conversations() { await page.promise; yield old; enumerated = true; },
     };
     let latest: WrappedConversationSummary[] = [];
-    const subscription = conversationSummaries(source).subscribe((summaries) => { latest = summaries; });
+    const subscription = conversationEntries(source).subscribe((summaries) => { latest = summaries; });
     cleanups.push(() => subscription.unsubscribe());
     inserts.next({ ...old, lastActivity: 2, lastMessage: rumor("new", 2) });
-    updates.next({ ...old, id: "group", participants: [self, peer, "c".repeat(64)] });
     page.resolve();
     await vi.waitFor(() => expect(enumerated).toBe(true));
-    expect(latest[0]?.lastMessage?.content).toBe("new");
+    expect(latest[0]?.lastActivity).toBe(2);
     expect(latest).toHaveLength(1);
   });
 
-  it("refreshes a removed newest preview through the SDK conversation", async () => {
+  it("reorders existing entries on SDK updates without retaining preview content", async () => {
     const owner = client();
     const old = rumor("retained", unixNow() - 2);
     const newest = rumor("removed", unixNow() - 1);
     await owner.rumorStore.add(old);
     await owner.rumorStore.add(newest);
     let latest: WrappedConversationSummary[] = [];
-    const subscription = conversationSummaries(owner).subscribe((summaries) => { latest = summaries; });
+    const subscription = conversationEntries(owner).subscribe((summaries) => { latest = summaries; });
     cleanups.push(() => subscription.unsubscribe());
-    await vi.waitFor(() => expect(latest[0]?.lastMessage?.id).toBe(newest.id));
-    await owner.rumorStore.remove(newest);
-    await vi.waitFor(() => expect(latest[0]?.lastMessage?.id).toBe(old.id));
+    await vi.waitFor(() => expect(latest[0]?.lastActivity).toBe(newest.created_at));
+    const next = rumor("new activity", unixNow());
+    await owner.rumorStore.add(next);
+    await vi.waitFor(() => expect(latest[0]?.lastActivity).toBe(next.created_at));
+    expect(latest).toHaveLength(1);
+    expect(latest[0]?.lastMessage).toBeUndefined();
   });
 });
 

@@ -1,46 +1,42 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { use$ } from "applesauce-react/hooks";
+import type { WrappedMessagesClient } from "applesauce-extra/messages";
 import { useNavigate } from "react-router";
 import { Lock, MessageSquare } from "lucide-react";
-import type { ConversationPreview } from "./types";
+import { syncErrors } from "../../messages/status";
 import { DmConversationList } from "./DmConversationList";
-import { DmUserSearch } from "./DmUserSearch";
 
 export function DmSidebar({
   open,
   mobileNav,
-  pubkey,
-  relays,
-  syncs,
-  syncing,
-  syncError,
-  onRetrySync,
-  lockedCount,
-  unlocking,
-  conversations,
+  client,
   selectedPeer,
   onClose,
-  onUnlockAll,
-  failed,
-  onRetryDecryption,
 }: {
   open: boolean;
   mobileNav: ReactNode;
-  pubkey: string;
-  relays: string[] | undefined;
-  syncs: number;
-  syncing: boolean;
-  syncError: string | null;
-  onRetrySync: () => void;
-  lockedCount: number;
-  unlocking: boolean;
-  conversations: ConversationPreview[];
+  client: WrappedMessagesClient;
   selectedPeer: string | null;
   onClose: () => void;
-  onUnlockAll: () => void;
-  failed: readonly string[];
-  onRetryDecryption: (id: string) => void;
 }) {
   const navigate = useNavigate();
+  const relays = use$(client.relays$);
+  const status = use$(client.status$);
+  const sync = use$(client.syncStatus$);
+  const decryption = use$(client.decryptionState$);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const syncing = status === "loading";
+  const unlocking = busy || !!decryption?.pending;
+  const lockedCount = decryption?.locked ?? 0;
+  const failed = decryption?.failed ?? [];
+  const syncError = error || syncErrors(sync);
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try { await action(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  }
 
   return (
     <aside
@@ -55,15 +51,15 @@ export function DmSidebar({
       </div>
       <div className="p-3 border-b border-base-300 text-xs opacity-70 flex flex-col gap-2 shrink-0">
         <div>{relays?.length ? `${relays.length} DM relay${relays.length === 1 ? "" : "s"}` : "No DM relays configured"}</div>
-        <div>{syncing ? "Syncing…" : `${syncs} received`} • {lockedCount} locked</div>
+        <div>{syncing ? "Syncing…" : `${sync?.loaded ?? 0} received`} • {lockedCount} locked</div>
         {syncError && <div role="alert" className="text-error">{syncError}</div>}
         {!!relays?.length && (
-          <button className="btn btn-ghost btn-xs" onClick={onRetrySync} disabled={syncing}>
+          <button className="btn btn-ghost btn-xs" onClick={() => void run(() => client.loadHistory())} disabled={syncing || busy}>
             {syncError ? "Retry sync" : "Refresh inbox"}
           </button>
         )}
         {lockedCount > 0 && (
-          <button className="btn btn-primary btn-xs gap-1" onClick={onUnlockAll} disabled={unlocking}>
+          <button className="btn btn-primary btn-xs gap-1" onClick={() => void run(() => client.unlock())} disabled={unlocking}>
             <Lock size={13} /> {unlocking ? "Unlocking..." : `Unlock all (${lockedCount})`}
           </button>
         )}
@@ -72,7 +68,11 @@ export function DmSidebar({
           <div className="max-h-32 overflow-y-auto">
             {failed.map((id) => <div key={id} className="flex items-center justify-between gap-2">
               <span className="font-mono truncate">{id.slice(0, 12)}…</span>
-              <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => onRetryDecryption(id)}>Retry</button>
+              <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => void run(async () => {
+                const envelope = client.eventStore.getEvent(id);
+                if (!envelope) throw new Error("Message envelope is no longer cached. Refresh the inbox first.");
+                await client.retryDecryption(envelope);
+              })}>Retry</button>
             </div>)}
           </div>
         </details>}
@@ -82,13 +82,9 @@ export function DmSidebar({
           </button>
         )}
       </div>
-      <DmUserSearch
-        self={pubkey}
-        existingPeers={conversations.map(({ peer }) => peer)}
-        onPick={onClose}
-      />
       <DmConversationList
-        conversations={conversations}
+        client={client}
+        onClose={onClose}
         selectedPeer={selectedPeer}
         onSelect={(conversationPeer) => {
           navigate(`/dm/${conversationPeer}`);
