@@ -3,11 +3,13 @@ import { BrowserRouter } from "react-router";
 import { EventStoreProvider, AccountsProvider } from "applesauce-react/providers";
 import { eventStore, accounts, loadAccounts } from "./nostr";
 import { App } from "./views/App";
-import { MessagesProvider } from "./messages/provider";
+import { startMessages } from "./services/messages";
+import { MessagesNotice } from "./components/MessagesNotice";
 import "./index.css";
 import "yet-another-react-lightbox/styles.css";
 
 loadAccounts();
+startMessages();
 
 // NOTE: intentionally NOT wrapped in <StrictMode>. StrictMode's dev-only
 // mount → unmount → remount double-invoke tears down and rebuilds the LiveKit
@@ -24,7 +26,8 @@ createRoot(document.getElementById("root")!).render(
   <EventStoreProvider eventStore={eventStore}>
     <AccountsProvider manager={accounts}>
       <BrowserRouter>
-        <MessagesProvider><App /></MessagesProvider>
+        <App />
+        <MessagesNotice />
       </BrowserRouter>
     </AccountsProvider>
   </EventStoreProvider>,

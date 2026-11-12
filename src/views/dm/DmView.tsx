@@ -4,7 +4,7 @@ import { use$ } from "applesauce-react/hooks";
 import type { WrappedMessagesClient } from "applesauce-extra/messages";
 import { catchError, of } from "rxjs";
 import { Menu } from "lucide-react";
-import { useMessagesClient } from "../../messages/context";
+import { messagesClient$ } from "../../services/messages";
 import { conversationSummaries } from "../../messages/conversations";
 import { syncErrors } from "../../messages/status";
 import { DmConversation } from "./DmConversation";
@@ -20,7 +20,7 @@ interface DmViewProps {
 }
 
 export function DmView(props: DmViewProps) {
-  const client = useMessagesClient();
+  const client = use$(messagesClient$);
   if (!client) return <div className="p-4" role="status">Starting messages…</div>;
   return <DmInbox key={client.pubkey} {...props} client={client} />;
 }
