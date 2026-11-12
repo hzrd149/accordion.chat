@@ -53,6 +53,7 @@ import {
   RawEventModal,
 } from "../components/modals";
 import { clockTime, colorFor, formatTime, groupMessages } from "../lib/util";
+import { defaultRoute } from "../lib/route-defaults";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { DevView } from "./dev";
@@ -145,14 +146,15 @@ function Shell() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // All navigation state lives in the URL: community/channel in the path,
-  // transient overlays (modals + settings) in the query string.
+  // transient modal overlays in the query string.
   const selectedCid = cidParam ?? null;
   const selectedChannel = channelParam ?? null;
   const modal = searchParams.get("modal") as ModalName | null;
   // Settings, community settings, and Direct Invites (CORD-05 §6) are their own
   // routes rendered in the main area (the community rail stays put), not
   // full-screen overlays.
-  const onInvites = useLocation().pathname === "/invites";
+  const { pathname } = useLocation();
+  const onInvites = pathname === "/invites";
   const dmRootMatch = useMatch("/dm");
   const dmPeerMatch = useMatch("/dm/:peerPubkey");
   const onDm = Boolean(dmRootMatch || dmPeerMatch);
@@ -236,20 +238,15 @@ function Shell() {
   // because the current fold has not surfaced them yet.
   const activeCommunity = useCommunity(selectedCid ?? undefined);
   const activeChannels = use$(activeCommunity?.channels$) ?? NO_CHANNELS;
+  const defaultDestination = defaultRoute(
+    pathname,
+    communityIds[0],
+    activeCommunity?.material.community_id,
+    activeChannels[0]?.channel_id,
+  );
   useEffect(() => {
-    // Don't auto-jump into a community from the invites/settings routes — only
-    // from root.
-    if (communityIds.length > 0 && !selectedCid && !onDm && !onInvites && !onSettings && !onDev) {
-      navigate(`/c/${communityIds[0]}`, { replace: true });
-    }
-  }, [communityIds, selectedCid, onDm, onInvites, onSettings, onDev, navigate]);
-
-  useEffect(() => {
-    if (!activeCommunity || onCommunitySettings || onMentions) return;
-    if (activeChannels.length && !selectedChannel) {
-      navigate(`/c/${activeCommunity.material.community_id}/${activeChannels[0].channel_id}`, { replace: true });
-    }
-  }, [activeCommunity, activeChannels, selectedChannel, onCommunitySettings, onMentions, navigate]);
+    if (defaultDestination) navigate(defaultDestination, { replace: true });
+  }, [defaultDestination, navigate]);
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
