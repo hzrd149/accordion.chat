@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const revision = '1ceccb879d85';
+const revision = '00ceaa38355d';
 const source = resolve(process.argv[2] ?? '../applesauce-concord');
 const actual = execFileSync('git', ['-C', source, 'rev-parse', revision], { encoding: 'utf8' }).trim();
 if (!actual.startsWith(revision)) throw new Error(`Expected ${revision}, got ${actual}`);
 const temporary = await mkdtemp(join(tmpdir(), 'accordion-vendor-'));
 try {
   const directory = join(temporary, 'package');
-  const archive = execFileSync('git', ['-C', source, 'archive', actual, 'src', 'LICENSE', 'deno.json', 'deno.lock', 'CHANGELOG.md'], { maxBuffer: 16 * 1024 * 1024 });
+  const archive = execFileSync('git', ['-C', source, 'archive', actual, 'src', 'e2e', 'LICENSE', 'deno.json', 'deno.lock', 'CHANGELOG.md'], { maxBuffer: 16 * 1024 * 1024 });
   await writeFile(join(temporary, 'source.tar'), archive);
   await mkdir(directory);
   execFileSync('tar', ['-xf', join(temporary, 'source.tar'), '-C', directory]);
@@ -22,8 +22,8 @@ try {
       import: value.replace('./src/', './dist/').replace('.ts', '.js'),
     }])),
     peerDependencies: {
-      'applesauce-core': '^7.0.3', 'applesauce-common': '^7.0.0', 'applesauce-relay': '^7.0.0',
-      'applesauce-signers': '^7.0.1', 'applesauce-loaders': '^7.0.2', rxjs: '^7.8.2',
+      'applesauce-core': '^7.1.3', 'applesauce-common': '^7.1.1', 'applesauce-relay': '^7.1.1',
+      'applesauce-signers': '^7.1.0', 'applesauce-loaders': '^7.2.0', rxjs: '^7.8.2',
       '@noble/curves': '^2.2.0', '@noble/hashes': '^2.2.0',
     },
     dependencies: { '@scure/base': '^2.2.0' },

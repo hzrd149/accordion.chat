@@ -1,8 +1,18 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - applesauce-core@7.0.3
+  - applesauce-*
 
-# Shared cast/model registrations must resolve to one core instance.
+# Keep one validated SDK graph. Concord 00ceaa38355d explicitly disables
+# timeline batching for its synchronous authority folds.
+# Pin transitives too: direct pins alone still allow ^7 dependencies to drift.
 overrides:
-  applesauce-core: 7.0.3
+  applesauce-core: 7.1.3
+  applesauce-accounts: 7.1.0
+  applesauce-actions: 7.1.1
+  applesauce-common: 7.1.1
+  applesauce-content: 7.1.0
+  applesauce-loaders: 7.2.0
+  applesauce-react: 7.1.0
+  applesauce-relay: 7.1.1
+  applesauce-signers: 7.1.0

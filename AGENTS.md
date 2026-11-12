@@ -12,22 +12,21 @@ Package manager is **pnpm** (see `pnpm-lock.yaml`).
 - `pnpm preview` — serve the production build locally
 
 The protocol core lives in **`@applesauce/concord`**, consumed from the immutable
-`vendor/applesauce-concord-1ceccb879d85.tgz` artifact. SDK dependencies use stable
-Applesauce v7; core is overridden to one 7.0.3 instance for shared registrations.
-Run `pnpm test:concord` after protocol-related changes. It runs the exact bundled
-upstream source tests with Deno against the installed SDK versions; no sibling
-checkout is needed. `pnpm test` runs app adapter/projection tests with Vitest.
+`vendor/applesauce-concord-00ceaa38355d.tgz` artifact. SDK dependencies use stable
+Applesauce v7; core is overridden to one 7.1.3 instance for shared registrations.
+This Concord revision opts out of timeline batching for synchronous authority folds.
+Protocol tests belong upstream. `pnpm test` runs app adapter/projection tests with Vitest.
 
 **Updating Concord.** See `vendor/README.md` and `scripts/vendor-concord.mjs`.
 Change the pinned revision deliberately, rebuild from an immutable git archive,
 and update the artifact dependency/lockfile together. Preserve provenance/license
-and run the upstream suite, app tests, build and lint. Do not publish a snapshot as
+and run app tests, build and lint. Do not publish a snapshot as
 part of an app change. Stable SDK patch versions are independent; preserve one
 compatible core/relay/common/RxJS graph.
 
 ## Git workflow
 
-**Commit after every feature or self-contained change.** Once a feature works (built/linted, and — if it touches protocol behavior — `pnpm test:concord` passes), make a focused git commit before moving on. Keep commits small and scoped to one feature so history stays reviewable; don't batch unrelated changes into one commit. Do not push unless asked.
+**Commit after every feature or self-contained change.** Once a feature works (app tests, build and lint pass), make a focused git commit before moving on. Keep commits small and scoped to one feature so history stays reviewable; don't batch unrelated changes into one commit. Do not push unless asked.
 
 ## Architecture
 
@@ -49,7 +48,7 @@ This is a **React 19 + TypeScript + Vite** single-page app implementing a **Conc
 - `src/crypto-wasm.ts` — swaps pure-JS Schnorr verification for **nostr-wasm** (WASM libsecp256k1, ~4× faster) at startup: sets `eventStore.verifyEvent` and `setVerifyWrappedEventMethod(...)`. The wrapped-event method is the hot path — the Concord gift-wrap decoder (`getWrapSeal`) verifies a seal signature on *every* wrap decode across every plane, so it must go through applesauce-core's swappable `verifyWrappedEvent` hook (a small patch to `@applesauce/concord`'s `gift-wrap.ts` routes it there). Init is non-blocking; the first few ms fall back to JS. Event-id hashing stays on `@noble` sync sha256 (WebCrypto's async `subtle.digest` is slower for event-sized inputs and unusable in the sync hash path).
 - `src/views/` + `src/components/` — React UI (Discord-style shell in `views/App.tsx`, `components/modals.tsx`, `views/Login.tsx`, `lib/context.tsx`). Styling is **Tailwind v4 + daisyUI v5** (the `@tailwindcss/vite` plugin; entry stylesheet `src/index.css` with `@plugin "daisyui" { themes: light --default, dark --prefersdark }`). There is **no custom CSS** — components use daisyUI components + Tailwind utilities inline with daisyUI semantic color tokens (`base-100/200/300`, `base-content`, `primary`, `error`, `success`), so both themes come for free. Theme selection lives in `src/lib/theme.ts` (`system|light|dark` persisted to the `accordion:theme` localStorage key → `data-theme` on `<html>`; a no-FOUC inline script in `index.html` applies it before first paint), surfaced by the account-bar `ThemeToggle` and the Appearance settings page.
   - `src/components/voice/` — the CORD-07 call UI (LiveKit). `CallProvider` holds the one active call and lazy-loads `VoiceRoom` (keeps the ~0.5MB `livekit-client` chunk out of boot); `VoiceRoom` builds the E2EE `Room` — LiveKit's built-in `e2ee-worker` + a custom `SenderKeyProvider extends BaseKeyProvider` (`sharedKey:false, keySize:256`, ratchet disabled) fed the externally-derived per-identity `voiceSenderKey` material (verified identities keyed, unverified given a random key so their frames never decode, §3/§7). Presence heartbeat is driven via the app-side `VoiceEngine.joinVoice`/`leaveVoice` (see `src/voice/`). `CallStage`/`CallBar` are the grid + controls; `brokers.ts` defaults `VITE_CONCORD_AV_SERVERS` to `https://armada.buzz` (the public Armada broker+SFU) so calls work out of the box. Mirrors armada's `PersistentVoiceRoom.tsx`. **The app is NOT wrapped in `<StrictMode>` (see `main.tsx`) — that is load-bearing for voice:** StrictMode's dev double-mount tears down + rebuilds the `Room`/`e2ee-worker` mid-handshake, leaving media E2EE half-initialized so every remote frame is silently dropped (mute/garbled audio). LiveKit's connecting-Room lifecycle can't survive a synchronous remount. **E2EE is enabled BEFORE connecting** (`setE2EEEnabled(true)` awaited, then the `LiveKitRoom` render is gated on `e2eeReady`): LiveKit turns the local frame cryptor on once, at `SignalConnected`, keyed off whether `encryptionType` is already GCM — enabling it after connect (racing the token fetch) loses that window and the cryptor never activates. `livekit-client` is pinned to `2.19.2` (armada's exact locked version; `keySize` in `KeyProviderOptions`, hence AES-256, only exists from 2.19.x). Audio publish config matches armada (`AudioPresets.musicHighQuality`, `red:true`, `dtx:true`); RED is auto-disabled by LiveKit whenever E2EE is on, so it never touches the frame crypto.
-- **Testing.** Protocol round-trip/interop coverage lives in the bundled `@applesauce/concord` package's Deno suite (`pnpm test:concord`) — that is the safety net, and the app is expected to trust it rather than re-test protocol behavior through the UI. Focused app adapter/projection tests run with `pnpm test`; there is no browser driver suite: the `scripts/` puppeteer drivers were removed once they had been broken by the daisyUI migration for long enough to be worthless. To check a change by hand, `pnpm dev` and drive it in a browser; the app is a normal SPA with routes (`/c/:cid/:channelId`, `/c/:cid/settings/:page`, `/invite/:naddr`). Note if you script that: daisyUI labels are CSS-uppercased, so `innerText` matching must be case-insensitive.
+- **Testing.** Protocol round-trip/interop coverage belongs upstream in `@applesauce/concord`; do not run upstream dependency suites as an app check. Focused app adapter/projection tests run with `pnpm test`; there is no browser driver suite. To check a change by hand, `pnpm dev` and drive it in a browser; the app is a normal SPA with routes (`/c/:cid/:channelId`, `/c/:cid/settings/:page`, `/invite/:naddr`). Note if you script that: daisyUI labels are CSS-uppercased, so `innerText` matching must be case-insensitive.
 
 ### Nostr references
 
