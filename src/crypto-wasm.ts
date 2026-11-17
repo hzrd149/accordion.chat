@@ -17,28 +17,51 @@ import { initNostrWasm } from "nostr-wasm";
 import { setNostrWasm, verifyEvent as wasmVerifyEvent } from "nostr-tools/wasm";
 import { setVerifyWrappedEventMethod, type VerifyEventMethod } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
+import { OptimisticEventVerifier } from "applesauce-core/event-store";
+import { verifyEvent as jsVerifyEvent } from "nostr-tools/pure";
+import { signatureVerificationMode$ } from "./services/signature-verification";
 
 /**
- * Instantiate nostr-wasm and route all signature verification through it:
+ * Apply the persisted verification mode and initialize its WASM backend:
  *   - `eventStore.verifyEvent` — every event added to the shared store.
  *   - `setVerifyWrappedEventMethod` — the wrapped-event verifier applesauce-core's
  *     gift-wrap/zap helpers and the Concord seal path (`verifyWrappedEvent`) use.
  *
  * Non-blocking by design: until the WASM instantiates (a few ms), verification
- * falls back to the pure-JS defaults — correct, just slower. Resolves when live.
+ * uses a pure-JS backend in verifying modes. Resolves when initialization finishes.
  * RumorStores are untouched (they verify by re-hashing the id, not a signature).
  */
 export async function enableWasmVerification(eventStore: EventStore): Promise<void> {
+  let verify: NonNullable<EventStore["verifyEvent"]> = jsVerifyEvent;
+  const optimistic = new OptimisticEventVerifier({
+    verifyEvent: (event) => verify(event),
+    storage: {
+      getItem: (key) => {
+        try { return localStorage.getItem(key); } catch { return null; }
+      },
+      setItem: (key, value) => {
+        try { localStorage.setItem(key, value); } catch { /* Optional trust persistence. */ }
+      },
+    },
+  });
+  const apply = () => {
+    const mode = signatureVerificationMode$.value;
+    const selected = mode === "none" ? () => true
+      : mode === "optimistic" ? optimistic.verifyEvent : verify;
+    eventStore.verifyEvent = selected;
+    setVerifyWrappedEventMethod(selected as VerifyEventMethod);
+  };
+  // One subscription for the lifetime of the application's shared EventStore.
+  signatureVerificationMode$.subscribe(apply);
   try {
     const wasm = await initNostrWasm();
     setNostrWasm(wasm);
-    // nostr-wasm's verifier is structurally identical but nominally typed against
-    // nostr-tools/wasm's own event types, so cast to applesauce's predicate shape.
-    eventStore.verifyEvent = wasmVerifyEvent;
-    setVerifyWrappedEventMethod(wasmVerifyEvent as unknown as VerifyEventMethod);
-    console.info("[concord] nostr-wasm signature verification enabled");
+    verify = wasmVerifyEvent;
+    // Read the latest preference: it may have changed during initialization.
+    apply();
+    console.info("[concord] nostr-wasm signature verifier ready");
   } catch (err) {
-    // Leave the pure-JS verifiers in place — correct, just slower.
+    // Verifying modes retain the pure-JS backend; disabled mode stays disabled.
     console.warn("[concord] nostr-wasm init failed; using JS verification", err);
   }
 }

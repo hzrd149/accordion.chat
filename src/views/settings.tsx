@@ -20,6 +20,7 @@ import {
 import { useTheme } from "../hooks/use-theme";
 import { useDevMode } from "../hooks/use-dev-mode";
 import { setDevMode } from "../services/dev-mode";
+import { signatureVerificationMode$, setSignatureVerificationMode } from "../services/signature-verification";
 import { useAvailableProfileThemes } from "../hooks/use-profile-themes";
 import {
   DEFAULT_OPEN_RANKING_PROVIDER,
@@ -474,6 +475,7 @@ function DiscoveryPage() {
 
 function AdvancedPage() {
   const devMode = useDevMode();
+  const verificationMode = use$(signatureVerificationMode$);
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Advanced</h2>
@@ -498,6 +500,34 @@ function AdvancedPage() {
           <span className="text-xs opacity-60">Show developer tools in the sidebar</span>
         </span>
       </label>
+      <fieldset className="mt-7 max-w-[520px]">
+        <legend className="text-lg font-bold mb-1">Signature verification</legend>
+        <p className="text-sm opacity-70 leading-relaxed mb-4">
+          Applies immediately to incoming events and is saved in this browser.
+          Previously loaded events are not rechecked.
+        </p>
+        <div className="flex flex-col gap-2">
+          {([
+            { value: "full", label: "Full verification (WASM)", hint: "Verify every signature. This is the default." },
+            { value: "optimistic", label: "Optimistic verification (WASM)", hint: "Use Applesauce's relay trust to sample signatures, while always checking event hashes. Events without relay evidence are fully verified." },
+            { value: "none", label: "No signature verification", hint: "Skip signature checks for public events and wrapped events." },
+          ] as const).map((option) => (
+            <label key={option.value} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
+              <input
+                type="radio"
+                name="signature-verification"
+                className="radio radio-primary radio-sm"
+                checked={verificationMode === option.value}
+                onChange={() => setSignatureVerificationMode(option.value)}
+              />
+              <span className="flex flex-col gap-px">
+                <span className="font-semibold">{option.label}</span>
+                <span className="text-xs opacity-60">{option.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
     </>
   );
 }
