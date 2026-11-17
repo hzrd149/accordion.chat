@@ -21,6 +21,7 @@ import { useTheme } from "../hooks/use-theme";
 import { useDevMode } from "../hooks/use-dev-mode";
 import { setDevMode } from "../services/dev-mode";
 import { signatureVerificationMode$, setSignatureVerificationMode } from "../services/signature-verification";
+import { activeConcordAutomation, concordAutomation$, setConcordAutomation } from "../services/concord-automation";
 import { useAvailableProfileThemes } from "../hooks/use-profile-themes";
 import {
   DEFAULT_OPEN_RANKING_PROVIDER,
@@ -476,6 +477,10 @@ function DiscoveryPage() {
 function AdvancedPage() {
   const devMode = useDevMode();
   const verificationMode = use$(signatureVerificationMode$);
+  const automation = use$(concordAutomation$) ?? activeConcordAutomation;
+  const [automationError, setAutomationError] = useState("");
+  const automationChanged = (Object.keys(activeConcordAutomation) as (keyof typeof activeConcordAutomation)[])
+    .some((key) => automation[key] !== activeConcordAutomation[key]);
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Advanced</h2>
@@ -527,6 +532,47 @@ function AdvancedPage() {
             </label>
           ))}
         </div>
+      </fieldset>
+      <fieldset className="mt-7 max-w-[520px]">
+        <legend className="text-lg font-bold mb-1">Concord automation</legend>
+        <p className="text-sm opacity-70 leading-relaxed mb-4">
+          Choose which automatic Concord features run. These settings apply to all accounts in this browser after a reload.
+        </p>
+        <div className="flex flex-col gap-2">
+          {([
+            { key: "autoUnlock", label: "Automatic unlocking", hint: "Use your signer to decrypt community lists, invite lists, and incoming direct invites. Community messages still decrypt with their group keys when this is off." },
+            { key: "autoSaveCommunityList", label: "Automatic community-list sync", hint: "Publish updated community keys after background sync and repair interrupted list repacks. Explicit joins, leaves, and community creation still publish when this is off." },
+            { key: "watchDirectInvites", label: "Watch direct invites", hint: "Watch your inbox for community and private-channel invites on startup." },
+            { key: "pinUpkeep", label: "Automatic pin upkeep", hint: "Update pin lists after message edits, author deletions, and private-channel key rotations when you have permission." },
+          ] as const).map((option) => (
+            <label key={option.key} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
+              <input
+                type="checkbox"
+                className="toggle toggle-primary"
+                checked={automation[option.key]}
+                onChange={(e) => {
+                  try {
+                    setConcordAutomation(option.key, e.target.checked);
+                    setAutomationError("");
+                  } catch (error) {
+                    setAutomationError(error instanceof Error ? error.message : "Could not save automation settings.");
+                  }
+                }}
+              />
+              <span className="flex flex-col gap-px">
+                <span className="font-semibold">{option.label}</span>
+                <span className="text-xs opacity-60">{option.hint}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {automationError && <p role="alert" className="text-sm text-error mt-3">{automationError}</p>}
+        {automationChanged && (
+          <div className="mt-4 flex items-center gap-3">
+            <button className="btn btn-primary btn-sm" onClick={() => window.location.reload()}>Reload to apply</button>
+            <span role="status" className="text-xs opacity-70">Changes saved. Reloading ends any active call.</span>
+          </div>
+        )}
       </fieldset>
     </>
   );

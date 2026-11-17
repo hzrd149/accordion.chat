@@ -9,6 +9,7 @@ import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
 import { createRumorStoreFactory } from "../services/rumor-cache";
 import { createConcordStorage } from "../services/concord-storage";
+import { activeConcordAutomation } from "../services/concord-automation";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();
@@ -26,10 +27,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       uploader,
       storeFactory: stores,
       storage,
-      autoUnlock: true,
-      // Local material is committed durably before adoption. This separately
-      // publishes the encrypted complete key history for the user's other devices.
-      autoSaveCommunityList: true,
+      ...activeConcordAutomation,
       logger: logger.extend("accordion"),
     });
     return { client, stores, storage };
