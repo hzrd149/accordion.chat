@@ -2,3 +2,8 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - '@jsr/applesauce__concord@0.2.0'
+overrides:
+  '@applesauce/concord': file:./concord.local/node_modules/concord
+  # Workbox's latest release still pins deprecated glob/source-map ranges.
+  'workbox-build>glob': 14.0.6
+  'workbox-build>source-map': 0.8.0
