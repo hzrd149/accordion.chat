@@ -7,11 +7,11 @@ import "@applesauce/concord";
 import { EventStore } from "applesauce-core";
 import { persistEventsToCache } from "applesauce-core/helpers";
 import { castUser } from "applesauce-common/casts";
-import { distinctUntilChanged, map, of, shareReplay, startWith, switchMap } from "rxjs";
+import { BehaviorSubject, distinctUntilChanged, map, of, shareReplay, startWith, switchMap } from "rxjs";
 import { RelayPool } from "applesauce-relay";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { AccountManager } from "applesauce-accounts";
-import { registerCommonAccountTypes } from "applesauce-accounts/accounts";
+import { PasswordAccount, registerCommonAccountTypes } from "applesauce-accounts/accounts";
 import { NostrConnectSigner } from "applesauce-signers";
 import {
 	ENCRYPTED_SEAL_KIND,
@@ -102,6 +102,9 @@ export const LOOKUP_RELAYS: string[] = import.meta.env.VITE_LOOKUP_RELAYS?.split
 
 export const accounts = new AccountManager();
 registerCommonAccountTypes(accounts);
+// Do not start Concord or DM services with a restored, locked password signer.
+// Login activates it only after an explicit successful unlock.
+export const accountAwaitingUnlock$ = new BehaviorSubject<PasswordAccount | undefined>(undefined);
 
 export const user$ = accounts.active$.pipe(
 	map((account) => account?.pubkey),
@@ -172,7 +175,9 @@ export function loadAccounts() {
 		if (raw) {
 			accounts.fromJSON(JSON.parse(raw));
 			const active = localStorage.getItem(ACTIVE_KEY);
-			if (active && accounts.getAccount(active)) accounts.setActive(active);
+			const account = active ? accounts.getAccount(active) : undefined;
+			if (account instanceof PasswordAccount && !account.unlocked) accountAwaitingUnlock$.next(account);
+			else if (account) accounts.setActive(account);
 		}
 	} catch (err) {
 		console.warn("failed to load accounts", err);

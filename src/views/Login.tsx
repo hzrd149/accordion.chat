@@ -1,270 +1,318 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Copy, Check, Settings2 } from "lucide-react";
-import { nip19 } from "nostr-tools";
-import { ExtensionAccount, PrivateKeyAccount, NostrConnectAccount } from "applesauce-accounts/accounts";
-import type { IAccount } from "applesauce-accounts";
-import { NostrConnectSigner } from "applesauce-signers";
-import { accounts, CONCORD_SIGNER_PERMISSIONS, NOSTR_CONNECT_RELAYS } from "../nostr";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import { ArrowLeft, Check, Copy, ExternalLink, Eye, EyeOff, LockKeyhole, RefreshCw, Settings2, ShieldCheck } from "lucide-react";
+import { use$ } from "applesauce-react/hooks";
+import { NostrConnectAccount } from "applesauce-accounts/accounts";
+import { distinctUntilChanged, fromEvent, interval, map, merge, startWith } from "rxjs";
+import { accountAwaitingUnlock$, accounts, CONCORD_SIGNER_PERMISSIONS, NOSTR_CONNECT_RELAYS } from "../nostr";
 import { QRCode } from "../components/QRCode";
+import { ThemeToggle } from "../components/ThemeToggle";
+import { credentialKind, hasBrowserSigner, signerRelays } from "../helpers/sign-in";
+import { SignInSession } from "../services/sign-in";
 
-const APP_METADATA = { name: "Accordion", url: window.location.origin };
+const APP_METADATA = { name: "Accordion", url: window.location.origin, permissions: CONCORD_SIGNER_PERMISSIONS };
+const CREDENTIAL_HINTS = {
+  bunker: "Bunker link",
+  session: "Bunker session",
+  "private-key": "Private key",
+  "encrypted-key": "Encrypted private key",
+  "public-key": "This is a public key. Use your signer app or a private key to sign in.",
+  invitation: "This invitation belongs in a signer app. Paste a bunker:// link to connect here.",
+  unknown: "",
+};
 
 export function Login() {
-  const [nsec, setNsec] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [remote, setRemote] = useState(false);
-
-  function activate(account: IAccount) {
-    accounts.addAccount(account);
+  const lockedAccount = use$(accountAwaitingUnlock$);
+  const [session] = useState(() => new SignInSession(APP_METADATA, (account) => {
+    const existing = accounts.accounts.find((saved) => saved.type === account.type && saved.pubkey === account.pubkey &&
+      (!(saved instanceof NostrConnectAccount) || (account instanceof NostrConnectAccount && saved.signer.remote === account.signer.remote)));
+    if (existing && existing !== account) {
+      account.metadata = existing.metadata;
+      accounts.replaceAccount(existing, account);
+    } else if (!existing) accounts.addAccount(account);
+    accountAwaitingUnlock$.next(undefined);
     accounts.setActive(account);
-  }
+  }));
+  const state = use$(session.state$)!;
+  const extensionAvailable = use$(() => merge(interval(1000), fromEvent(window, "focus")).pipe(
+    startWith(0),
+    map(() => hasBrowserSigner(window)),
+    distinctUntilChanged(),
+  ), []);
+  const [relays, setRelays] = useState(NOSTR_CONNECT_RELAYS);
+  const [relayDraft, setRelayDraft] = useState(relays.join("\n"));
+  const [relayError, setRelayError] = useState("");
+  const [credential, setCredential] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState<Awaited<ReturnType<SignInSession["create"]>>>();
+  const [backedUp, setBackedUp] = useState(false);
+  const [copied, setCopied] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const kind = credentialKind(credential);
+  const needsPassword = kind === "private-key" || kind === "encrypted-key";
+  const newPassword = creating || kind === "private-key";
+  const busy = state.status === "connecting";
+  const keyPasswordValid = password.length >= 8 && password === confirmation;
+  const canSubmit = !!credential.trim() && !["public-key", "invitation", "unknown"].includes(kind) &&
+    (!needsPassword || (newPassword ? keyPasswordValid : !!password));
 
-  function generate() {
-    activate(PrivateKeyAccount.generateNew());
-  }
+  useEffect(() => {
+    if (!lockedAccount && !creating) session.startQr(relays);
+    return () => session.cancel();
+  }, [session, relays, lockedAccount, creating]);
 
-  function importKey() {
-    setError("");
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = setTimeout(() => setCopied(""), 2000);
+    return () => clearTimeout(timeout);
+  }, [copied]);
+
+  async function copy(value: string, label: string) {
+    setCopyError("");
     try {
-      let key: string | Uint8Array = nsec.trim();
-      if (typeof key === "string" && key.startsWith("nsec")) {
-        const decoded = nip19.decode(key);
-        if (decoded.type !== "nsec") throw new Error("not an nsec");
-        key = decoded.data;
-      }
-      activate(PrivateKeyAccount.fromKey(key));
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
     } catch {
-      setError("That doesn't look like a valid private key.");
+      setCopyError("Could not copy. Select and copy the link or backup manually.");
     }
   }
 
-  async function extension() {
-    setError("");
-    setBusy(true);
-    try {
-      if (!("nostr" in window)) throw new Error("No Nostr browser extension found. Install one, or use another sign-in option.");
-      activate(await ExtensionAccount.fromExtension());
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  function resetFields() {
+    setCredential("");
+    setPassword("");
+    setConfirmation("");
+    setCreated(undefined);
+    setBackedUp(false);
+    setCopied("");
+    setCopyError("");
   }
 
-  // Wrap a connected NostrConnectSigner into a persistable account and log in.
-  // Memoised so the remote view's effect doesn't re-run (and regenerate the
-  // signer) on every render of this component.
-  const activateRemote = useCallback(async (signer: NostrConnectSigner) => {
-    const pubkey = await signer.getPublicKey();
-    activate(new NostrConnectAccount(pubkey, signer));
-  }, []);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setCopyError("");
+    if (lockedAccount) {
+      if (password) await session.unlock(lockedAccount, password);
+    } else if (creating) {
+      if (keyPasswordValid) {
+        const result = await session.create(password);
+        setCreated(result);
+        if (result) { setPassword(""); setConfirmation(""); }
+      }
+    } else if (canSubmit) {
+      await session.credential(credential, password);
+    }
+  }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-gradient-to-b from-base-300 to-base-200">
-      <div className="card w-[420px] max-w-[calc(100vw-2rem)] bg-base-100 p-8 text-center shadow-xl">
-        <div className="mb-2 text-[40px] leading-none" aria-hidden="true">🪗</div>
-        <h1 className="mb-1 text-xl font-bold">Accordion</h1>
-        <p className="mb-6 text-sm opacity-60">Discord-style communities on Nostr, end-to-end encrypted.</p>
+    <main className="relative flex min-h-dvh items-center justify-center bg-base-200 px-4 py-8 sm:py-12">
+      <div className="absolute right-3 top-3"><ThemeToggle /></div>
+      <section aria-labelledby="sign-in-title" className={`card w-full max-w-md border border-base-300 bg-base-100 p-6 shadow-xl sm:p-8 ${!lockedAccount && !creating ? "md:max-w-3xl" : ""}`}>
+        <header className="mb-7 flex items-center justify-center gap-3">
+          <span className="text-3xl" aria-hidden="true">🪗</span>
+          <h1 id="sign-in-title" className="text-2xl font-bold">
+            {lockedAccount ? "Welcome back" : creating ? (created ? "Save your identity" : "Create an identity") : "Sign in to Accordion"}
+          </h1>
+        </header>
 
-        {error && <div className="alert alert-error mb-3 text-sm">{error}</div>}
+        {state.error && <div role="alert" className="alert alert-error mb-4 text-sm">{state.error}</div>}
 
-        {remote ? (
-          <RemoteSignerLogin
-            onBack={() => { setError(""); setRemote(false); }}
-            onError={setError}
-            onSigner={activateRemote}
-          />
-        ) : (
-          <>
-            <button className="btn btn-primary btn-block mb-2.5" onClick={generate}>
-              Create a new identity
-            </button>
-            <button className="btn btn-ghost btn-block mb-2.5" onClick={extension} disabled={busy}>
-              Sign in with browser extension
-            </button>
-            <button className="btn btn-ghost btn-block mb-2.5" onClick={() => { setError(""); setRemote(true); }}>
-              Sign in with a signer app
-            </button>
-
-            <div className="mb-4 mt-5 text-left">
-              <label className="label text-xs font-semibold uppercase opacity-70">Or import a private key</label>
-              <input
-                className="input input-bordered w-full"
-                placeholder="nsec1…"
-                value={nsec}
-                onChange={(e) => setNsec(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && importKey()}
-              />
+        {created ? (
+          <div className="space-y-4">
+            <div className="alert text-sm">
+              <ShieldCheck size={20} />
+              <span>This backup is encrypted with your password. You need both to restore your identity. Accordion cannot recover either.</span>
             </div>
-            <button className="btn btn-ghost btn-block" onClick={importKey} disabled={!nsec.trim()}>
-              Import & sign in
+            <label className="block text-sm font-medium" htmlFor="identity-backup">Encrypted identity backup</label>
+            <textarea id="identity-backup" readOnly value={created.encryptedKey} rows={4}
+              className="textarea w-full select-all break-all font-mono text-xs" />
+            <button className="btn btn-outline w-full" onClick={() => void copy(created.encryptedKey, "backup")}>
+              {copied === "backup" ? <Check size={16} /> : <Copy size={16} />}
+              {copied === "backup" ? "Copied backup" : "Copy encrypted backup"}
             </button>
-          </>
+            <label className="flex cursor-pointer items-start gap-3 text-sm">
+              <input type="checkbox" className="checkbox checkbox-sm mt-0.5" checked={backedUp} onChange={(e) => setBackedUp(e.target.checked)} />
+              I saved my encrypted backup and password somewhere safe.
+            </label>
+            <button className="btn btn-primary w-full" disabled={!backedUp} onClick={() => session.finishCreation(created)}>Continue to Accordion</button>
+          </div>
+        ) : (
+          <div className={!lockedAccount && !creating ? "grid gap-6 md:grid-cols-2 md:items-center md:gap-8" : ""}>
+            {!lockedAccount && !creating && (
+                <div className="text-center">
+                  <h2 className="mb-4 text-sm font-medium">Scan to connect</h2>
+                  {state.uri ? (
+                    <div className="flex justify-center">
+                      <a href={state.uri} aria-label="Open Nostr Connect in your signer app" className="block w-full min-w-0 max-w-[250px] rounded-lg border border-base-300 bg-white p-3">
+                        <QRCode value={state.uri} />
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="flex min-h-48 items-center justify-center rounded-lg bg-base-200 p-6">
+                      <button className="btn btn-outline" disabled={busy} onClick={() => session.startQr(relays)}>
+                        <RefreshCw size={16} /> {state.status === "idle" ? "Show connection code" : "New connection code"}
+                      </button>
+                    </div>
+                  )}
+                  <p role="status" aria-live="polite" className="my-3 flex min-h-5 items-center justify-center gap-2 text-xs text-base-content/60">
+                    {(state.status === "waiting" || busy) && <span className="loading loading-spinner loading-xs" />}
+                    {state.status === "waiting" ? "Waiting for your signer…" : busy
+                      ? state.method === "extension" ? "Approve in your browser signer…" : "Connecting securely…"
+                      : ""}
+                  </p>
+                  {state.uri && (
+                    <div className="flex justify-center gap-2">
+                      <a href={state.uri} className="btn btn-sm btn-primary"><ExternalLink size={14} /> Open signer app</a>
+                      <button className="btn btn-sm btn-ghost" onClick={() => void copy(state.uri!, "link")}>
+                        {copied === "link" ? <Check size={14} /> : <Copy size={14} />}
+                        {copied === "link" ? "Copied" : "Copy link"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+            )}
+
+            <div className={!lockedAccount && !creating ? "min-w-0 border-t border-base-300 pt-6 md:border-l md:border-t-0 md:py-4 md:pl-8" : ""}>
+              {!lockedAccount && !creating && extensionAvailable && (
+                <>
+                  <button className="btn btn-outline w-full" disabled={busy} onClick={() => void session.extension()}>
+                    Use browser signer
+                  </button>
+                  <div className="divider my-4 text-xs text-base-content/45">or</div>
+                </>
+              )}
+
+            <form onSubmit={(event) => void submit(event)} className="space-y-4">
+              {lockedAccount ? (
+                <div className="flex items-center gap-3 rounded-lg bg-base-200 p-3">
+                  <LockKeyhole size={20} className="shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">Password-protected identity</p>
+                    <p className="truncate font-mono text-xs text-base-content/60">{lockedAccount.pubkey.slice(0, 12)}…{lockedAccount.pubkey.slice(-8)}</p>
+                  </div>
+                </div>
+              ) : !creating && (
+                <div>
+                  <SecretInput id="sign-in-credential" label="Connection link or key" placeholder="bunker://, nsec, ncryptsec…"
+                    value={credential} disabled={busy} onChange={(value) => {
+                      setCredential(value); setPassword(""); setConfirmation("");
+                    }} describedBy="credential-hint" />
+                  <p id="credential-hint" aria-live="polite" className="mt-2 text-xs text-base-content/60">
+                    {kind === "unknown" && credential.trim() ? "Unrecognized link or key." : CREDENTIAL_HINTS[kind] && (["public-key", "invitation"].includes(kind)
+                      ? CREDENTIAL_HINTS[kind]
+                      : <span className="badge badge-soft badge-sm">{CREDENTIAL_HINTS[kind]}</span>)}
+                  </p>
+                </div>
+              )}
+              {(lockedAccount || creating || needsPassword) && (
+                <>
+                  <SecretInput id="sign-in-password" label={lockedAccount || !newPassword ? "Password" : "Choose a password"}
+                    placeholder={newPassword && !lockedAccount ? "At least 8 characters" : "Enter your password"}
+                    value={password} disabled={busy} onChange={setPassword}
+                    autoComplete={newPassword && !lockedAccount ? "new-password" : "current-password"} />
+                  {!lockedAccount && newPassword && (
+                    <>
+                      <SecretInput id="sign-in-confirmation" label="Confirm password" value={confirmation} disabled={busy}
+                        onChange={setConfirmation} autoComplete="new-password" />
+                      {confirmation && password !== confirmation && <p className="text-xs text-error">Passwords do not match.</p>}
+                      <p className="text-xs text-base-content/60">Encrypts your key on this device. Passwords cannot be reset.</p>
+                    </>
+                  )}
+                </>
+              )}
+              <button type="submit" className="btn btn-primary w-full"
+                disabled={busy || (lockedAccount ? !password : creating ? !keyPasswordValid : !canSubmit)}>
+                {busy ? <><span className="loading loading-spinner loading-sm" /> Please wait…</>
+                  : lockedAccount || kind === "encrypted-key" ? "Unlock & sign in"
+                    : creating ? "Create encrypted identity"
+                      : kind === "private-key" ? "Encrypt & sign in" : "Connect"}
+              </button>
+            </form>
+            </div>
+          </div>
         )}
-      </div>
-    </div>
+
+        {state.approval && (
+          <div role="status" className="alert mt-4 text-sm">
+            <div>
+              <a href={state.approval} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm mt-2">
+                <ExternalLink size={14} /> Approve connection
+              </a>
+            </div>
+          </div>
+        )}
+        {copyError && <p role="alert" className="mt-3 text-sm text-error">{copyError}</p>}
+        {busy && !created && (
+          <button className="btn btn-ghost btn-sm mt-3 w-full" onClick={() => session.cancel()}>Cancel sign-in</button>
+        )}
+
+        {!lockedAccount && !creating && (
+          <details className="mx-auto mt-5 w-full max-w-sm text-sm">
+            <summary className="flex cursor-pointer items-center justify-center gap-1.5 text-xs text-base-content/60">
+              <Settings2 size={14} /> Connection settings
+            </summary>
+            <form className="mt-3 space-y-2" onSubmit={(event) => {
+              event.preventDefault();
+              try {
+                const next = signerRelays(relayDraft);
+                setRelayError("");
+                setRelayDraft(next.join("\n"));
+                // Restart explicitly even if the addresses are unchanged.
+                if (next.join("\n") === relays.join("\n")) session.startQr(next);
+                else setRelays(next);
+              } catch (error) { setRelayError((error as Error).message); }
+            }}>
+              <label htmlFor="signer-relays" className="text-xs font-medium">Signer relays</label>
+              <textarea id="signer-relays" className="textarea w-full font-mono text-xs" rows={3} value={relayDraft}
+                disabled={busy} onChange={(e) => setRelayDraft(e.target.value)} />
+              <p className="text-xs text-base-content/60">One address per line. Applying creates a new connection code.</p>
+              {relayError && <p role="alert" className="text-xs text-error">{relayError}</p>}
+              <button className="btn btn-outline btn-sm w-full" disabled={busy}>Apply & refresh code</button>
+            </form>
+          </details>
+        )}
+
+        <footer className="mt-6 border-t border-base-300 pt-4 text-center text-sm">
+          {lockedAccount ? (
+            <button className="btn btn-ghost btn-sm" onClick={() => {
+              session.cancel(); resetFields(); accountAwaitingUnlock$.next(undefined); accounts.clearActive();
+            }}>Use another identity</button>
+          ) : creating ? (
+            <button className="btn btn-ghost btn-sm" onClick={() => { session.cancel(); resetFields(); setCreating(false); }}>
+              <ArrowLeft size={14} /> Back to sign in
+            </button>
+          ) : (
+            <div>
+              <button className="link link-primary font-medium" disabled={busy} onClick={() => {
+                session.cancel(); resetFields(); setCreating(true);
+              }}>Create an identity</button>
+            </div>
+          )}
+        </footer>
+      </section>
+    </main>
   );
 }
 
-/**
- * Remote signer (NIP-46) login. Leads with a nostrconnect:// QR that a mobile
- * signer scans; the listening relays are customizable. Also accepts a pasted
- * bunker:// URI as an alternative.
- */
-function RemoteSignerLogin({
-  onBack,
-  onError,
-  onSigner,
-}: {
-  onBack: () => void;
-  onError: (msg: string) => void;
-  onSigner: (signer: NostrConnectSigner) => Promise<void>;
+function SecretInput({ id, label, value, onChange, placeholder, disabled, autoComplete = "off", describedBy }: {
+  id: string; label: string; value: string; onChange: (value: string) => void;
+  placeholder?: string; disabled?: boolean; autoComplete?: string; describedBy?: string;
 }) {
-  const [relays, setRelays] = useState<string[]>(NOSTR_CONNECT_RELAYS);
-  const [editingRelays, setEditingRelays] = useState(false);
-  const [relaysDraft, setRelaysDraft] = useState(relays.join("\n"));
-  const [copied, setCopied] = useState(false);
-  const [bunkerUrl, setBunkerUrl] = useState("");
-  const [bunkerBusy, setBunkerBusy] = useState(false);
-  // Guards the QR session's completion handler from firing after a bunker
-  // connect (or unmount) has already claimed the login.
-  const doneRef = useRef(false);
-
-  // Create one signer per relay set and derive its QR URI, rather than setting
-  // `uri` state from the effect (which would cascade a render). The signer's
-  // start/stop lifecycle stays in the effect below.
-  const signer = useMemo(() => (relays.length ? new NostrConnectSigner({ relays }) : null), [relays]);
-  const uri = useMemo(
-    () => signer?.getNostrConnectURI({ ...APP_METADATA, permissions: CONCORD_SIGNER_PERMISSIONS }) ?? "",
-    [signer],
-  );
-
-  // (Re)start the nostrconnect:// session whenever the signer changes.
-  useEffect(() => {
-    if (!signer) return;
-    onError("");
-    const controller = new AbortController();
-    signer
-      .waitForSigner(controller.signal)
-      .then(() => {
-        if (controller.signal.aborted) return;
-        doneRef.current = true;
-        onSigner(signer);
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) onError((e as Error).message || "Failed to connect");
-      });
-
-    return () => {
-      controller.abort();
-      // A connected signer is owned by the account now; only tidy up if this
-      // QR session never completed.
-      if (!signer.isConnected) signer.close();
-    };
-  }, [signer, onError, onSigner]);
-
-  function applyRelays() {
-    const next = relaysDraft
-      .split(/[\s,]+/)
-      .map((r) => r.trim())
-      .filter(Boolean)
-      .map((r) => (r.startsWith("ws") ? r : `wss://${r}`));
-    setEditingRelays(false);
-    if (next.length) {
-      setRelaysDraft(next.join("\n"));
-      setRelays(next);
-    }
-  }
-
-  function copy() {
-    navigator.clipboard.writeText(uri).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
-
-  async function connectBunker() {
-    if (!bunkerUrl.trim()) return;
-    onError("");
-    setBunkerBusy(true);
-    try {
-      const signer = await NostrConnectSigner.fromBunkerURI(bunkerUrl.trim(), {
-        permissions: CONCORD_SIGNER_PERMISSIONS,
-      });
-      doneRef.current = true;
-      await onSigner(signer);
-    } catch (e) {
-      onError((e as Error).message || "Couldn't connect to your signer");
-      setBunkerBusy(false);
-    }
-  }
-
+  const [visible, setVisible] = useState(false);
   return (
-    <div className="text-center">
-      <p className="mb-4 text-sm opacity-60">
-        Scan with your Nostr signer app, or copy the link into it.
-      </p>
-
-      {uri && (
-        <a href={uri} className="inline-block">
-          <QRCode value={uri} />
-        </a>
-      )}
-
-      <button className="btn btn-ghost btn-block mt-4" onClick={copy} disabled={!uri}>
-        {copied ? <><Check size={16} /> Copied</> : <><Copy size={16} /> Copy connection link</>}
-      </button>
-
-      {/* Relay customization */}
-      {editingRelays ? (
-        <div className="mt-3 text-left">
-          <label className="label text-xs font-semibold uppercase opacity-70">Signer relays (one per line)</label>
-          <textarea
-            className="textarea textarea-bordered w-full font-mono text-xs"
-            rows={3}
-            value={relaysDraft}
-            onChange={(e) => setRelaysDraft(e.target.value)}
-          />
-          <div className="mt-2 flex gap-2">
-            <button className="btn btn-primary flex-1" onClick={applyRelays}>
-              Apply
-            </button>
-            <button
-              className="btn btn-ghost flex-1"
-              onClick={() => { setRelaysDraft(relays.join("\n")); setEditingRelays(false); }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          className="btn btn-ghost btn-xs mt-2.5 gap-1 opacity-60"
-          onClick={() => { setRelaysDraft(relays.join("\n")); setEditingRelays(true); }}
-        >
-          <Settings2 size={13} /> Relays: {relays.map((r) => r.replace(/^wss?:\/\//, "")).join(", ")}
+    <div>
+      <label htmlFor={id} className="mb-2 block text-sm font-medium">{label}</label>
+      <div className="input flex w-full items-center gap-2">
+        <input id={id} type={visible ? "text" : "password"} className="min-w-0 grow" value={value}
+          onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
+          autoComplete={autoComplete} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-describedby={describedBy} />
+        <button type="button" className="btn btn-ghost btn-xs btn-square shrink-0" aria-label={`${visible ? "Hide" : "Show"} ${label.toLowerCase()}`}
+          aria-pressed={visible} onClick={() => setVisible(!visible)}>
+          {visible ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
-      )}
-
-      {/* Bunker URI alternative */}
-      <div className="mb-4 mt-5 text-left">
-        <label className="label text-xs font-semibold uppercase opacity-70">Or paste a connection link from your signer</label>
-        <input
-          className="input input-bordered w-full"
-          placeholder="bunker://…"
-          value={bunkerUrl}
-          onChange={(e) => setBunkerUrl(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && connectBunker()}
-        />
       </div>
-      <button className="btn btn-ghost btn-block" onClick={connectBunker} disabled={!bunkerUrl.trim() || bunkerBusy}>
-        {bunkerBusy ? "Connecting…" : "Connect"}
-      </button>
-
-      <button className="btn btn-ghost btn-block mt-2" onClick={onBack}>
-        <ArrowLeft size={16} /> Back
-      </button>
     </div>
   );
 }
