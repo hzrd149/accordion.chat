@@ -6,6 +6,7 @@ import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
+import { INVITE_HOST_PRESETS, inviteHost$, inviteHostBase, rehostInviteUrl, setInviteHost } from "../services/invite-host";
 import { UserAvatar, UserName } from "./User";
 import { unixNow } from "applesauce-core/helpers";
 import { rumorMs } from "@applesauce/concord/helpers";
@@ -28,10 +29,10 @@ const EXPIRY_OPTIONS: { key: ExpiryKey; label: string; seconds?: number }[] = [
   { key: "30d", label: "30 days", seconds: 30 * 86_400 },
 ];
 
-export function Modal({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+export function Modal({ children, onClose, className = "" }: { children: ReactNode; onClose: () => void; className?: string }) {
   return (
     <div className="modal modal-open safe-modal" onClick={onClose}>
-      <div className="modal-box safe-modal-box" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-box safe-modal-box ${className}`} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
       <div className="modal-backdrop" />
@@ -381,6 +382,8 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const registered = use$(community?.inviteLinks$);
   const allChannels = use$(community?.channelViews$) ?? NO_CHANNELS;
   const channelNames = new Map(allChannels.map((c) => [c.channel_id, c.name]));
+  const hostId = use$(inviteHost$);
+  const hostBase = inviteHostBase(hostId);
   const [view, setView] = useState<"list" | "create">("list");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
@@ -407,16 +410,17 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   }
 
   async function copy(url: string, token: string) {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(rehostInviteUrl(url, hostBase));
     setCopied(token);
     setTimeout(() => setCopied((c) => (c === token ? null : c)), 1500);
   }
 
   if (view === "create")
     return (
-      <Modal onClose={onClose}>
+      <Modal onClose={onClose} className="max-w-2xl">
         <CreateInviteForm
           cid={cid}
+          base={hostBase}
           channels={allChannels}
           onBack={() => setView("list")}
           onCreated={() => setView("list")}
@@ -425,9 +429,10 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
     );
 
   return (
-    <Modal onClose={onClose}>
-      <div className="flex items-center gap-3 mb-1">
+    <Modal onClose={onClose} className="max-w-2xl">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         <h2 className="text-lg font-bold flex-1">Invite links</h2>
+        <InviteHostSelect value={hostId} />
         {canCreate && (
           <button className="btn btn-primary btn-sm gap-1.5" onClick={() => setView("create")}>
             <Plus size={16} />
@@ -435,21 +440,18 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
           </button>
         )}
       </div>
-      <p className="text-sm opacity-60 mb-4">
-        {canCreate
-          ? "Anyone with a link can join. Revoke a link to stop it working right away."
-          : "You need the Create Invites permission to create links."}
-      </p>
+      {!canCreate && <p className="text-sm opacity-60 mb-3">You need the Create Invites permission to create links.</p>}
       {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
 
       {invites.length === 0 ? (
-        <p className="py-8 text-center text-sm opacity-60">You have no active invite links for this community.</p>
+        <p className="py-8 text-center text-sm opacity-60">No active invite links.</p>
       ) : (
         <ul className="-mx-2 max-h-[60vh] overflow-y-auto">
           {invites.map((invite) => (
             <InviteRow
               key={invite.token}
               invite={invite}
+              url={rehostInviteUrl(invite.url, hostBase)}
               channelNames={channelNames}
               now={now}
               copied={copied === invite.token}
@@ -463,7 +465,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
       {others > 0 && (
         <p className="text-xs opacity-50 mt-3">
-          {plural(others, "more link")} created by other members {others === 1 ? "is" : "are"} active.
+          +{plural(others, "link")} by other members
         </p>
       )}
     </Modal>
@@ -472,11 +474,13 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
 function CreateInviteForm({
   cid,
+  base,
   channels,
   onBack,
   onCreated,
 }: {
   cid: string;
+  base: string;
   channels: ChannelView[];
   onBack: () => void;
   onCreated: () => void;
@@ -506,7 +510,7 @@ function CreateInviteForm({
       // Publishes the bundle, registers the link into the community (marking it
       // link-joinable), and saves it to the private Invite List.
       await client.invites.create(cid, {
-        base: window.location.origin,
+        base,
         label: label.trim() || undefined,
         expiresAt: ttl ? unixNow() + ttl : undefined,
         // Omitted when empty: a link grants no private channels unless asked.
@@ -573,9 +577,7 @@ function CreateInviteForm({
               None
             </button>
           </div>
-          <p className="text-xs opacity-60 mb-1">
-            Anyone who uses the link can read these channels, including messages sent before they joined.
-          </p>
+          <p className="text-xs opacity-60 mb-1">Link holders can read their full history.</p>
           {grantable.map((c) => (
             <label
               key={c.channel_id}
@@ -608,8 +610,29 @@ function CreateInviteForm({
   );
 }
 
+/** Which Concord client the shown/copied links open in. "This app" covers the
+ *  Accordion preset when we're already running on accordion.chat. */
+function InviteHostSelect({ value }: { value: string }) {
+  const presets = INVITE_HOST_PRESETS.filter((p) => !p.base || p.base !== window.location.origin);
+  return (
+    <select
+      className="select select-sm w-auto"
+      aria-label="Open links in"
+      value={presets.some((p) => p.id === value) ? value : "this"}
+      onChange={(e) => setInviteHost(e.target.value)}
+    >
+      {presets.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.base ? `${p.label} · ${new URL(p.base).host}` : "This app"}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function InviteRow({
   invite,
+  url,
   channelNames,
   now,
   copied,
@@ -618,6 +641,7 @@ function InviteRow({
   onRevoke,
 }: {
   invite: ConcordInviteLink;
+  url: string;
   channelNames: Map<string, string>;
   now: number;
   copied: boolean;
@@ -639,7 +663,7 @@ function InviteRow({
             Includes {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
           </div>
         ) : null}
-        <div className="font-mono text-xs truncate opacity-40" title={invite.url}>{invite.url}</div>
+        <div className="font-mono text-xs truncate opacity-40" title={url}>{url}</div>
       </div>
       <button className="btn btn-ghost btn-sm btn-square" title="Copy link" aria-label="Copy link" onClick={onCopy}>
         {copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}
