@@ -156,12 +156,34 @@ export function Login() {
                       </button>
                     </div>
                   )}
-                  <p role="status" aria-live="polite" className="my-3 flex min-h-5 items-center justify-center gap-2 text-xs text-base-content/60">
-                    {(state.status === "waiting" || busy) && <span className="loading loading-spinner loading-xs" />}
-                    {state.status === "waiting" ? "Waiting for your signer…" : busy
-                      ? state.method === "extension" ? "Approve in your browser signer…" : "Connecting securely…"
-                      : ""}
-                  </p>
+                  <details className="mx-auto my-3 w-full max-w-[250px] text-left text-sm">
+                    <summary className="flex cursor-pointer items-center justify-center gap-1.5 text-xs text-base-content/60">
+                      <Settings2 size={14} /> Change signer relay
+                    </summary>
+                    <form className="mt-3 space-y-2" onSubmit={(event) => {
+                      event.preventDefault();
+                      try {
+                        const next = signerRelays(relayDraft);
+                        setRelayError("");
+                        setRelayDraft(next.join("\n"));
+                        setCopied("");
+                        // Restart explicitly even if the addresses are unchanged.
+                        if (next.join("\n") === relays.join("\n")) session.startQr(next);
+                        else setRelays(next);
+                      } catch (error) { setRelayError((error as Error).message); }
+                    }}>
+                      <label htmlFor="signer-relays" className="text-xs font-medium">Signer relays</label>
+                      <textarea id="signer-relays" className="textarea w-full font-mono text-xs" rows={3} value={relayDraft}
+                        placeholder="wss://relay.example.com" disabled={busy} onChange={(e) => setRelayDraft(e.target.value)} />
+                      {relayError && <p role="alert" className="text-xs text-error">{relayError}</p>}
+                      <button className="btn btn-outline btn-sm w-full" disabled={busy}>Apply & refresh code</button>
+                    </form>
+                  </details>
+                  {busy && (
+                    <p role="status" aria-live="polite" className="my-3 text-xs text-base-content/60">
+                      {state.method === "extension" ? "Approve in your browser signer…" : "Connecting securely…"}
+                    </p>
+                  )}
                   {state.uri && (
                     <div className="flex justify-center gap-2">
                       <a href={state.uri} className="btn btn-sm btn-primary"><ExternalLink size={14} /> Open signer app</a>
@@ -246,32 +268,6 @@ export function Login() {
         {copyError && <p role="alert" className="mt-3 text-sm text-error">{copyError}</p>}
         {busy && !created && (
           <button className="btn btn-ghost btn-sm mt-3 w-full" onClick={() => session.cancel()}>Cancel sign-in</button>
-        )}
-
-        {!lockedAccount && !creating && (
-          <details className="mx-auto mt-5 w-full max-w-sm text-sm">
-            <summary className="flex cursor-pointer items-center justify-center gap-1.5 text-xs text-base-content/60">
-              <Settings2 size={14} /> Connection settings
-            </summary>
-            <form className="mt-3 space-y-2" onSubmit={(event) => {
-              event.preventDefault();
-              try {
-                const next = signerRelays(relayDraft);
-                setRelayError("");
-                setRelayDraft(next.join("\n"));
-                // Restart explicitly even if the addresses are unchanged.
-                if (next.join("\n") === relays.join("\n")) session.startQr(next);
-                else setRelays(next);
-              } catch (error) { setRelayError((error as Error).message); }
-            }}>
-              <label htmlFor="signer-relays" className="text-xs font-medium">Signer relays</label>
-              <textarea id="signer-relays" className="textarea w-full font-mono text-xs" rows={3} value={relayDraft}
-                disabled={busy} onChange={(e) => setRelayDraft(e.target.value)} />
-              <p className="text-xs text-base-content/60">One address per line. Applying creates a new connection code.</p>
-              {relayError && <p role="alert" className="text-xs text-error">{relayError}</p>}
-              <button className="btn btn-outline btn-sm w-full" disabled={busy}>Apply & refresh code</button>
-            </form>
-          </details>
         )}
 
         <footer className="mt-6 border-t border-base-300 pt-4 text-center text-sm">
