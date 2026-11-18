@@ -420,6 +420,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
       <Modal onClose={onClose} className="max-w-2xl">
         <CreateInviteForm
           cid={cid}
+          hostId={hostId}
           base={hostBase}
           channels={allChannels}
           onBack={() => setView("list")}
@@ -474,12 +475,14 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
 
 function CreateInviteForm({
   cid,
+  hostId,
   base,
   channels,
   onBack,
   onCreated,
 }: {
   cid: string;
+  hostId: string;
   base: string;
   channels: ChannelView[];
   onBack: () => void;
@@ -549,6 +552,13 @@ function CreateInviteForm({
       </div>
 
       <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="invite-host">
+          Opens in
+        </label>
+        <InviteHostSelect id="invite-host" value={hostId} className="w-full" />
+      </div>
+
+      <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="invite-expiry">
           Expires after
         </label>
@@ -612,11 +622,12 @@ function CreateInviteForm({
 
 /** Which Concord client the shown/copied links open in. "This app" covers the
  *  Accordion preset when we're already running on accordion.chat. */
-function InviteHostSelect({ value }: { value: string }) {
+function InviteHostSelect({ value, id, className = "select-sm w-auto" }: { value: string; id?: string; className?: string }) {
   const presets = INVITE_HOST_PRESETS.filter((p) => !p.base || p.base !== window.location.origin);
   return (
     <select
-      className="select select-sm w-auto"
+      id={id}
+      className={`select ${className}`}
       aria-label="Open links in"
       value={presets.some((p) => p.id === value) ? value : "this"}
       onChange={(e) => setInviteHost(e.target.value)}
