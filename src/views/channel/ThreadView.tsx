@@ -52,6 +52,7 @@ export function ThreadView({
     text: string,
     files: readonly File[],
     onProgress: (progress: Media.ConcordUploadProgress) => void,
+    emojis: readonly Emoji[],
   ) {
     if (!community || !account) throw new Error("The channel is unavailable");
     const media = files.length ? {
@@ -59,7 +60,7 @@ export function ThreadView({
       onProgress,
       uploader: createConcordUploader(account, account.pubkey, () => community.state$.value.metadata?.blossom_servers),
     } : undefined;
-    await sendThreadReplyAction(community, channelId, parent, text, favorites, media);
+    await sendThreadReplyAction(community, channelId, parent, text, [...emojis], media);
   }
 
   const composer = canWrite && community?.getChannel(channelId) && (
@@ -108,7 +109,7 @@ export function ThreadView({
               ) : (
                 <>
                   {!fullPage && subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
-                  <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
+                  <MessageContent community={community} channelId={channelId} text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
                 </>
               )}
             </div>
@@ -156,7 +157,7 @@ export function ThreadView({
                   {comment.deleted ? (
                     <div className="text-base-content/60 italic">(message deleted)</div>
                   ) : (
-                    <MessageContent text={comment.content} attachments={comment.attachments} emojiTags={comment.emojiTags} />
+                    <MessageContent community={community} channelId={channelId} text={comment.content} attachments={comment.attachments} emojiTags={comment.emojiTags} />
                   )}
                 </div>
                 {canWrite && (

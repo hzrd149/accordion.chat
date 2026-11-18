@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { CornerDownRight, Loader2, Paperclip, Send, SmilePlus, X } from "lucide-react";
 import { UserName } from "../../components/User";
 import { EmojiPicker } from "../../components/EmojiPicker";
-import type { Emoji } from "../../helpers/emoji";
-import type { ConcordChannelDraft, Media } from "@applesauce/concord";
+import { dedupeEmojis, type Emoji } from "../../helpers/emoji";
+import type { ConcordChannelDraft, Drafts, Media } from "@applesauce/concord";
 import { useChannelDraft } from "../../hooks/use-channel-draft";
 
 export function ThreadComposer({
@@ -19,7 +19,12 @@ export function ThreadComposer({
   fullPage: boolean;
   favorites: Emoji[];
   onClear: () => void;
-  onSend: (text: string, files: readonly File[], onProgress: (progress: Media.ConcordUploadProgress) => void) => Promise<void>;
+  onSend: (
+    text: string,
+    files: readonly File[],
+    onProgress: (progress: Media.ConcordUploadProgress) => void,
+    emojis: readonly Emoji[],
+  ) => Promise<void>;
 }) {
   const saved = useChannelDraft(draft);
   const text = saved.value.text;
@@ -42,9 +47,14 @@ export function ThreadComposer({
     setSending(true);
     setError("");
     try {
-      const customEmoji = favorites.some((emoji) => value.includes(`:${emoji.shortcode}:`));
-      const publish = files.length || customEmoji
-        ? (body: string) => onSend(body, files, setUpload)
+      // Retried/restored drafts may reference emoji no longer in favorites.
+      // Prefer current definitions when the same shortcode is still available.
+      saved.update({ emojis: dedupeEmojis([...favorites, ...(saved.value.emojis ?? [])]) });
+      // SDK thread drafts support text and custom emoji; only attachments still
+      // need the app's upload/publication adapter.
+      const publish = files.length
+        ? (snapshot: Readonly<Drafts.ConcordMessageDraft>) =>
+          onSend(snapshot.text, snapshot.files ?? [], setUpload, snapshot.emojis ?? [])
         : undefined;
       await saved.send(undefined, publish);
       if (replyingTo && (fullPage || publish)) onClear();

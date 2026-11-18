@@ -188,7 +188,7 @@ export const ChannelMessage = memo(function ChannelMessage({
         ) : (
           <>
             {subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
-            <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
+            <MessageContent community={community} channelId={channelId} text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
             {m.edited && <span className="text-[11px] text-base-content/60"> (edited)</span>}
           </>
         )}

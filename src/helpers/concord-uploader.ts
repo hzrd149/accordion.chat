@@ -12,6 +12,7 @@ import type { Media } from "@applesauce/concord";
 import type { MediaAttachment } from "@applesauce/concord/helpers";
 import { castUser } from "applesauce-core";
 import { encryptImageBlob } from "./image";
+import { assertMediaUploadSize } from "./media-policy";
 import { DEFAULT_BLOSSOM_SERVERS, dedupeServers, uploadBlob } from "./blossom";
 import { eventStore } from "../nostr";
 
@@ -31,6 +32,8 @@ export function createConcordUploader(
 ): ConcordUploader {
   return {
     async upload(file: Blob, communityId: string, options?: Media.ConcordUploadOptions): Promise<MediaAttachment> {
+      // Refuse before reading/encrypting bytes, resolving servers or signing uploads.
+      assertMediaUploadSize(file);
       options?.onProgress?.("encrypting");
       const { ciphertext, key, nonce, hash } = await encryptImageBlob(file);
       const servers = await resolveServers(communityId, pubkey, getCommunityServers);

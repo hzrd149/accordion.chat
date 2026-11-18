@@ -1,16 +1,9 @@
-// Chat actions that don't map 1:1 onto a ConcordCommunity method.
-//
-// Replies with attachments or custom emoji use CommentFactory because
-// the SDK convenience method accepts text alone.
-//
-// `sendEditWithEmojis` builds a kind-3302 edit rumor with NIP-30 `emoji` tags
-// (ConcordCommunity.editMessage doesn't accept emojis, so we chain
-// `includeEmojis` onto EditFactory app-side and publish via `sendEvent`).
+// Keep attachment replies as a narrow adapter until SDK thread drafts support
+// media. Text/custom emoji replies and edits use the SDK's messaging methods,
+// preserving its target validation, kind and expiration handling.
 
 import type { EventTemplate } from "nostr-tools";
 import { CommentFactory } from "applesauce-common/factories";
-import { EditFactory } from "@applesauce/concord/factories";
-import { includeEmojis } from "applesauce-core/operations";
 import type { Emoji } from "applesauce-common/helpers";
 import { MissingChannelKeyError, type ConcordCommunity, type Media } from "@applesauce/concord";
 import { hasChannelKey, type MediaAttachment } from "@applesauce/concord/helpers";
@@ -31,8 +24,8 @@ export async function sendThreadReply(
 ): Promise<void> {
   const parentEvent = await community.channelStore(channelId).getEvent(parent.id);
   if (!parentEvent) throw new Error("Reply target is not loaded");
-  if (!media?.files.length && !emojis?.some((emoji) => text.includes(`:${emoji.shortcode}:`))) {
-    await community.replyToThread(channelId, parentEvent, text);
+  if (!media?.files.length) {
+    await community.replyToThread(channelId, parentEvent, text, emojis);
     return;
   }
   const attachments: MediaAttachment[] = [];
@@ -71,7 +64,5 @@ export async function sendEditWithEmojis(
   emojis?: Emoji[],
 ): Promise<void> {
   if (!community) return;
-  const template = await EditFactory.create(targetId, text);
-  const withEmojis = emojis?.length ? includeEmojis(emojis)(template) : template;
-  await community.sendEvent(channelId, withEmojis);
+  await community.editMessage(channelId, targetId, text, emojis);
 }

@@ -9,7 +9,7 @@ import { useCommunity } from "../hooks/use-community";
 import { useDevMode } from "../hooks/use-dev-mode";
 import { clearCommunityReadState } from "../services/read-state";
 import { UserAvatar, UserName } from "../components/User";
-import { useDecryptedImage } from "../hooks/useDecryptedImage";
+import { useCommunityImage, useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useCommunityUserNames, useCommunityUserSearch } from "../hooks/use-user-search";
 import { PERM } from "@applesauce/concord";
 import { MessageExpiration } from "../components/MessageExpiration";
@@ -90,7 +90,7 @@ export function CommunitySettingsView({
       <nav className="w-58 shrink-0 bg-base-200 px-2.5 py-4 overflow-y-auto flex flex-col gap-0.5 max-md:w-full max-md:safe-topnav max-md:flex-row max-md:items-center max-md:gap-1 max-md:py-2 max-md:overflow-x-auto max-md:overflow-y-hidden max-md:border-b max-md:border-base-300">
         {mobileNav}
         <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-3 text-[11px] uppercase font-bold tracking-wide opacity-60 max-md:p-0 max-md:pr-1 max-md:shrink-0">
-          <CommunityIcon name={name} icon={metadata?.icon} />
+          <CommunityIcon name={name} cid={cid} />
           <span className="max-md:hidden">{name}</span>
         </div>
         {visiblePages.map((p) => (
@@ -142,8 +142,9 @@ function ControlKeyNotice({ cid }: { cid: string }) {
   );
 }
 
-function CommunityIcon({ name, icon }: { name: string; icon: BlobPointer | undefined }) {
-  const iconUrl = useDecryptedImage(icon);
+function CommunityIcon({ name, cid }: { name: string; cid: string }) {
+  const community = useCommunity(cid);
+  const iconUrl = useDecryptedImage(community, "icon");
   return (
     <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg overflow-hidden bg-base-300 font-semibold text-base-content shrink-0 text-[11px]">
       {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
@@ -283,7 +284,7 @@ function ImageField({
   disabled: boolean;
 }) {
   const community = useCommunity(cid);
-  const url = useDecryptedImage(pointer);
+  const { src: url, reason } = useCommunityImage(community, which);
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
@@ -334,7 +335,7 @@ function ImageField({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/gif,image/webp"
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -343,6 +344,10 @@ function ImageField({
         }}
       />
       {busy && <span className="text-xs opacity-60">Encrypting & uploading…</span>}
+      {reason === "unsupported-type" && <span className="text-xs text-warning">Unsupported image (including legacy SVG). Replace with PNG, JPEG, GIF or WebP.</span>}
+      {reason === "download-failed" && <span className="text-xs text-warning">Image unavailable. Check the server connection and deployment's VITE_CONCORD_MEDIA_ORIGINS allowlist.</span>}
+      {reason && reason !== "absent" && reason !== "unsupported-type" && reason !== "download-failed" &&
+        <span className="text-xs text-warning">Image unavailable ({reason}).</span>}
     </div>
   );
 }

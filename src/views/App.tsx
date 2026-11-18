@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams, useSearchParams } from "react-router";
 import { AtSign, Hash, Inbox, Lock, LogOut, Menu, MessageSquare, Plus, Settings, UserPlus, Volume2, Wrench, X } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { accounts } from "../nostr";
+import { logoutAccount, logouts$ } from "../services/logout";
 import { ConcordProvider } from "../components/ConcordProvider";
 import { CallProvider } from "../components/voice/CallProvider";
 import { useCall } from "../components/voice/call-context";
@@ -42,6 +42,22 @@ import { useChannelRoster } from "../hooks/use-channel-roster";
 
 export function App() {
   const account = useActiveAccount();
+  const logout = use$(logouts$)?.[0];
+  if (logout) return (
+    <main className="flex min-h-dvh items-center justify-center bg-base-200 p-6">
+      <section className="card w-full max-w-md space-y-4 bg-base-100 p-6 text-center">
+        <h1 className="text-xl font-semibold">{logout.status === "busy" ? "Signing out…" : "Finish signing out"}</h1>
+        {logout.status === "busy" ? (
+          <p role="status" className="text-sm text-base-content/65">Removing local data. Your communities stay joined.</p>
+        ) : (
+          <>
+            <p role="alert" className="text-sm text-error">{logout.error}</p>
+            <button className="btn btn-primary" onClick={() => void logoutAccount(logout.pubkey)}>Retry cleanup</button>
+          </>
+        )}
+      </section>
+    </main>
+  );
   if (!account) return <Login />;
   return (
     <ConcordProvider>
@@ -477,7 +493,7 @@ function RailIcon({ cid, active, onClick }: { cid: string; active: boolean; onCl
   const community = useCommunity(cid);
   const metadata = use$(community?.metadata$);
   const name = metadata?.name ?? community?.material.name ?? "";
-  const iconUrl = useDecryptedImage(metadata?.icon);
+  const iconUrl = useDecryptedImage(community, "icon");
   return (
     <div className="relative w-12 h-12 shrink-0">
       <button
@@ -615,7 +631,7 @@ function Sidebar({
   // they have to re-emit when a role grant changes the answer.
   const canManageChannels = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
   const canInvite = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
-  const bannerUrl = useDecryptedImage(metadata?.banner);
+  const bannerUrl = useDecryptedImage(community, "banner");
   const readState = useReadState(pubkey);
 
   // Every channel carries chat, so every channel can be unread.
@@ -727,7 +743,7 @@ function Sidebar({
           className="btn btn-ghost btn-sm btn-circle"
           title="Sign out"
           onClick={() => {
-            if (account) accounts.removeAccount(account);
+            if (account) void logoutAccount(account.pubkey);
           }}
         >
           <LogOut size={18} />
@@ -828,7 +844,7 @@ function MentionsView({
                         </span>
                       </div>
                       <div className="text-base-content/90 break-words">
-                        <MessageContent text={m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
+                        <MessageContent community={community} channelId={m.channelId} text={m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
                       </div>
                     </div>
                   </button>

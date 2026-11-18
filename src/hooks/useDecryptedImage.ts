@@ -1,58 +1,41 @@
 import { useEffect, useState } from "react";
+import { use$, useActiveAccount } from "applesauce-react/hooks";
+import type { ConcordCommunity, ConcordMediaUnavailableReason } from "@applesauce/concord";
+import { createMediaURLScope } from "../services/concord-media";
 
-import { decryptImagePointer } from "../helpers/image";
-import type { BlobPointer } from "@applesauce/concord";
-
-// Resolve an encrypted {@link BlobPointer} (icon / banner) to a displayable
-// object URL. Decrypt-once cache keyed on (url, key, nonce); the resolved map
-// is seeded synchronously so a remount paints on the first frame. Object URLs
-// are never revoked (the cache is bounded instead).
-
-const MAX_CACHED = 128;
-const inflight = new Map<string, Promise<string>>();
-const resolved = new Map<string, string>();
-
-function cacheKey(image: BlobPointer): string {
-  return `${image.url}\n${image.key}\n${image.nonce}`;
+/** Only current, joined-community images are read. The SDK deliberately rejects
+ * legacy SVG (and unknown signatures); callers retain their initials/empty fallback. */
+export function useCommunityImage(community: ConcordCommunity | undefined, kind: "icon" | "banner") {
+  const account = useActiveAccount();
+  const metadata = use$(community?.metadata$);
+  const dissolved = use$(community?.dissolved$);
+  const identity = JSON.stringify(metadata?.[kind]);
+  const [result, setResult] = useState<{ owner: ConcordCommunity; account: string; identity: string | undefined; url: string | null; reason?: ConcordMediaUnavailableReason; signal: AbortSignal } | null>(null);
+  useEffect(() => {
+    if (!community || !account || dissolved || !identity) return;
+    const scope = createMediaURLScope(account.pubkey, community.material.community_id, () => setResult(null));
+    // Revoke immediately on access/pointer loss, without waiting for React's next effect.
+    const metadataSub = community.metadata$.subscribe((value) => {
+      if (JSON.stringify(value?.[kind]) !== identity) scope.dispose();
+    });
+    const dissolvedSub = community.dissolved$.subscribe((value) => { if (value) scope.dispose(); });
+    void community.media.readImage(kind, { signal: scope.signal }).then((value) => {
+      if (scope.signal.aborted) return;
+      if (value.status !== "ready") {
+        setResult({ owner: community, account: account.pubkey, identity, url: null, reason: value.reason, signal: scope.signal });
+        return;
+      }
+      const url = scope.create(value.blob);
+      if (url) setResult({ owner: community, account: account.pubkey, identity, url, signal: scope.signal });
+    }).catch(() => {
+      if (!scope.signal.aborted) setResult({ owner: community, account: account.pubkey, identity, url: null, reason: "download-failed", signal: scope.signal });
+    });
+    return () => { metadataSub.unsubscribe(); dissolvedSub.unsubscribe(); scope.dispose(); };
+  }, [community, account, kind, identity, dissolved]);
+  return !dissolved && result && !result.signal.aborted && result.account === account?.pubkey &&
+    result.owner === community && result.identity === identity ? { src: result.url, reason: result.reason } : { src: null };
 }
 
-/** Returns the decrypted object URL, or null while loading / on failure. */
-export function useDecryptedImage(image: BlobPointer | undefined): string | null {
-  const ck = image ? cacheKey(image) : null;
-  // The resolved cache is the source of truth; `src` is derived from it each
-  // render. `bump` is only a re-render trigger fired from the async callback
-  // once the decrypt lands — so no state is set synchronously in the effect.
-  const cached = ck ? resolved.get(ck) ?? null : null;
-  const [, bump] = useState(0);
-
-  useEffect(() => {
-    if (!ck || resolved.has(ck)) return;
-    let cancelled = false;
-    let promise = inflight.get(ck);
-    if (!promise) {
-      promise = decryptImagePointer(image!);
-      inflight.set(ck, promise);
-      promise
-        .then((u) => {
-          resolved.set(ck, u);
-          if (resolved.size > MAX_CACHED) {
-            const oldest = resolved.keys().next().value;
-            if (oldest !== undefined && oldest !== ck) resolved.delete(oldest);
-          }
-        })
-        .catch(() => {
-          if (inflight.get(ck) === promise) inflight.delete(ck);
-        });
-    }
-    // Re-render on settle (success or failure). Two-arg form so this subscriber
-    // handles its own rejection — `.finally` would leave it unhandled.
-    const rerender = () => !cancelled && bump((n) => n + 1);
-    promise.then(rerender, rerender);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ck]);
-
-  return cached;
+export function useDecryptedImage(community: ConcordCommunity | undefined, kind: "icon" | "banner"): string | null {
+  return useCommunityImage(community, kind).src;
 }

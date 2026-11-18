@@ -7,11 +7,14 @@ import { PERM } from "@applesauce/concord";
 import type { ConcordCommunity, Role } from "@applesauce/concord";
 import { canChangeMemberRole$, channelMemberPermissions$ } from "../src/helpers/role-grant-permission";
 
-const context = vi.hoisted(() => ({ community: undefined as unknown, owner: false }));
+const context = vi.hoisted(() => ({ community: undefined as unknown, owner: false, imageReason: undefined as string | undefined }));
 vi.mock("../src/hooks/use-community", () => ({ useCommunity: () => context.community }));
 vi.mock("../src/hooks/use-concord", () => ({ useConcord: () => ({ leave: vi.fn() }) }));
 vi.mock("../src/hooks/use-dev-mode", () => ({ useDevMode: () => true }));
-vi.mock("../src/hooks/useDecryptedImage", () => ({ useDecryptedImage: () => undefined }));
+vi.mock("../src/hooks/useDecryptedImage", () => ({
+  useDecryptedImage: () => null,
+  useCommunityImage: () => ({ src: null, reason: context.imageReason }),
+}));
 vi.mock("../src/hooks/use-user-search", () => ({
   useCommunityUserSearch: () => ({ search: () => [] }),
   useCommunityUserNames: () => new Map(),
@@ -75,6 +78,7 @@ beforeEach(() => {
   state = fixture();
   context.community = state.community;
   context.owner = false;
+  context.imageReason = undefined;
 });
 
 function render(page: string) {
@@ -84,6 +88,15 @@ function render(page: string) {
 }
 
 describe("community settings visibility", () => {
+  it("explains legacy SVG rejection and custom server download policy", () => {
+    state.permissions.next(PERM.MANAGE_METADATA);
+    context.imageReason = "unsupported-type";
+    expect(render("overview")).toContain("including legacy SVG");
+    expect(render("overview")).toContain('accept="image/png,image/jpeg,image/gif,image/webp"');
+    context.imageReason = "download-failed";
+    expect(render("overview")).toContain("VITE_CONCORD_MEDIA_ORIGINS");
+  });
+
   it("renders overview metadata and expiration read-only without metadata permission", () => {
     const html = render("overview");
     expect(html).toContain("Read-only description");

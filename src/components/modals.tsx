@@ -5,7 +5,6 @@ import { ArrowLeft, Check, Copy, KeyRound, Lock, Plus, Trash2, X } from "lucide-
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
-import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { INVITE_HOST_PRESETS, inviteHost$, inviteHostBase, rehostInviteUrl, setInviteHost } from "../services/invite-host";
 import { UserAvatar, UserName } from "./User";
@@ -472,8 +471,8 @@ export function JoinModal({
 /** A preview of the community an invite link points at (name / icon / inviter),
  *  fetched before the user joins. */
 function InvitePreviewCard({ preview }: { preview: InvitePreview }) {
-  const bundle = preview.status === "ready" ? preview.bundle : undefined;
-  const iconUrl = useDecryptedImage(bundle?.icon);
+  // Before joining there is no authorized community media handle. Do not decrypt
+  // invite-supplied pointers through an unscoped fallback; show initials instead.
   if (preview.status === "idle") return null;
 
   if (preview.status === "loading")
@@ -495,7 +494,7 @@ function InvitePreviewCard({ preview }: { preview: InvitePreview }) {
   return (
     <div className="flex items-center gap-3 p-3 mb-4 rounded-box bg-base-200 border border-base-300">
       <div className="w-12 h-12 shrink-0 rounded-2xl bg-base-300 overflow-hidden flex items-center justify-center font-semibold text-lg">
-        {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+        {name.slice(0, 2).toUpperCase()}
       </div>
       <div className="min-w-0 flex-1">
         <div className="font-semibold truncate">{name}</div>

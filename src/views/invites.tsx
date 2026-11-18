@@ -5,7 +5,6 @@ import { useNavigate } from "react-router";
 import type { ConcordDirectInvite } from "@applesauce/concord/casts";
 import { useConcord } from "../hooks/use-concord";
 import { useInvites } from "../hooks/use-invites";
-import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { UserAvatar, UserName } from "../components/User";
 
 /**
@@ -88,7 +87,7 @@ function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
   const client = useConcord();
   const navigate = useNavigate();
   const bundle = invite.bundle;
-  const iconUrl = useDecryptedImage(bundle?.icon);
+  // Invite previews are not joined communities; only SDK-authorized images render.
   const [busy, setBusy] = useState<"accept" | "dismiss" | null>(null);
   const [error, setError] = useState("");
 
@@ -128,7 +127,7 @@ function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
     <div className="flex items-center gap-3 p-3 rounded-box bg-base-200 border border-base-300 max-sm:flex-col max-sm:items-stretch">
       <div className="flex min-w-0 items-center gap-3">
         <div className="w-12 h-12 shrink-0 rounded-2xl bg-base-300 overflow-hidden flex items-center justify-center font-semibold text-lg">
-          {iconUrl ? <img className="w-full h-full object-cover" src={iconUrl} alt="" /> : name.slice(0, 2).toUpperCase()}
+          {name.slice(0, 2).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold truncate flex items-center gap-1.5">

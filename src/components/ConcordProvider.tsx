@@ -1,4 +1,4 @@
-import { ConcordClient, Databases, Drafts, logger } from "@applesauce/concord";
+import { ConcordClient, Databases, Drafts, Media, logger } from "@applesauce/concord";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -9,10 +9,13 @@ import { attachUserIndexGc } from "../services/user-search";
 import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
 import { createConcordStorage } from "../services/concord-storage";
+import { createConcordDecryptionCache } from "../helpers/concord-decryption-cache";
 import { activeConcordAutomation } from "../services/concord-automation";
 import { observeSigner } from "../services/signer-activity";
 import { observeConcordSync } from "../services/concord-sync-activity";
 import { ConcordDiagnostics } from "./ConcordDiagnostics";
+import { registerAccountResource } from "../services/account-lifecycle";
+import { attachMediaGc, createMediaTransport, retireLegacyImageCache } from "../services/concord-media";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();
@@ -24,6 +27,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     const databases = Databases.createIndexedDBDatabaseFactory(account.pubkey);
     const drafts = Drafts.createIndexedDBDraftStore();
     const storage = createConcordStorage(account.pubkey);
+    const mediaFactory = Media.createIndexedDBMediaStoreFactory(account.pubkey);
     const client = new ConcordClient({
       // Observed so flows like joining can show requests awaiting signer approval.
       signer: observeSigner(account, account.pubkey),
@@ -33,18 +37,20 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       databaseFactory: databases,
       draftStore: drafts,
       storage,
+      // Lists contain membership keys and invite secrets; persist only through
+      // the account's device-encrypted adapter, never plaintext localStorage.
+      decryptionCache: createConcordDecryptionCache(storage, "lists"),
+      mediaFactory,
+      mediaTransport: createMediaTransport(import.meta.env.VITE_CONCORD_MEDIA_ORIGINS),
       // Persist both Direct Invite gift-wrap layers so a reload restores them
       // from device-encrypted storage instead of prompting the signer again.
       giftWrapReceiverOptions: {
-        decryptionCache: {
-          getItem: async (id) => (await storage.getItem(`gift-wrap-plaintext:${id}`)) ?? null,
-          setItem: (id, plaintext) => storage.setItem(`gift-wrap-plaintext:${id}`, plaintext),
-        },
+        decryptionCache: createConcordDecryptionCache(storage, "gift-wrap"),
       },
       ...activeConcordAutomation,
       logger: logger.extend("accordion"),
     });
-    return { client, databases, drafts, storage };
+    return { client, databases, drafts, storage, mediaFactory, retired: false };
   }, [account]);
   const [failure, setFailure] = useState<{ client: ConcordClient; message: string } | null>(null);
   const [retry, setRetry] = useState(0);
@@ -55,6 +61,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     let cancelled = false;
     // Give extension signers time to inject before the first request.
     const timer = setTimeout(() => {
+      if (session.retired) return;
       void client.start().then(() => {
         if (!cancelled) setFailure(null);
       }).catch((error: unknown) => {
@@ -79,17 +86,22 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     const detachUserIndex = attachUserIndexGc(session.client);
     const detachSyncActivity = observeConcordSync(session.client);
     const stopPurge = session.client.schedulePurge();
-    return () => {
+    const detachMedia = attachMediaGc(session.client, account!.pubkey);
+    void retireLegacyImageCache().catch((error: unknown) => console.warn("Could not retire legacy image cache", error));
+    const close = registerAccountResource(account!.pubkey, async () => {
+      session.retired = true;
       stopPurge();
       detachSyncActivity();
       detachVoice();
       detachUserIndex();
+      detachMedia();
       session.client.dispose();
-      void session.databases.close().catch((error: unknown) => console.warn("Could not close community cache", error));
-      void session.drafts.close();
-      void session.storage.close().catch((error: unknown) => console.warn("Could not close community storage", error));
-    };
-  }, [session]);
+      const results = await Promise.allSettled([session.databases.close(), session.drafts.close(), session.storage.close(), session.mediaFactory.close()]);
+      const failures = results.filter((result) => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Could not close community storage");
+    });
+    return () => { void close().catch((error: unknown) => console.warn("Could not close community storage", error)); };
+  }, [session, account]);
 
   if (!session) return null;
   const error = failure?.client === session.client ? failure.message : null;

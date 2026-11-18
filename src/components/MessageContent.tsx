@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { getParsedContent } from "applesauce-content/text";
 import type { Content } from "applesauce-content/nast";
 import {
@@ -14,7 +14,9 @@ import {
 import { use$, useEventStore, useRenderedContent, type ComponentMap } from "applesauce-react/hooks";
 import { kinds, type NostrEvent } from "nostr-tools";
 import Lightbox from "yet-another-react-lightbox";
-import { decryptToObjectURL } from "../helpers/image";
+import { useAttachmentSources } from "../hooks/use-attachment-sources";
+import { authorizedMediaSlides } from "../helpers/media-slides";
+import type { ConcordCommunity } from "@applesauce/concord";
 import type { MediaAttachment } from "@applesauce/concord/helpers";
 import { shortNpub } from "../helpers/util";
 import { UserAvatar, UserName } from "./User";
@@ -22,10 +24,6 @@ import { UserAvatar, UserName } from "./User";
 // Renders a chat message: applesauce-content parses the text into a NAST tree,
 // and any link whose URL matches a NIP-92 attachment is rendered as decrypted
 // inline media instead of a raw URL. Non-attachment links stay clickable.
-
-const MAX_CACHED = 256;
-const inflight = new Map<string, Promise<string>>();
-const resolved = new Map<string, string>();
 
 /** A media attachment with a resolved URL (the only kind we render). */
 type UrlAttachment = MediaAttachment & { url: string };
@@ -40,61 +38,6 @@ const LINK_CLASS = "text-info hover:text-info/80 underline underline-offset-2";
 const MAX_EMBED_DEPTH = 1;
 
 type NostrPointer = EventPointer | AddressPointer;
-
-function attKey(a: UrlAttachment): string {
-  return a.encryption ? `${a.url}\n${a.encryption.key}\n${a.encryption.nonce}` : a.url;
-}
-
-function attachmentSrc(a: UrlAttachment): string | null {
-  return a.encryption ? resolved.get(attKey(a)) ?? null : a.url;
-}
-
-/** Decrypt attachments to object URLs. Plaintext URLs pass straight through. */
-function useAttachmentSources(attachments: UrlAttachment[]) {
-  const [, bump] = useState(0);
-  const encryptedKeys = useMemo(
-    () => attachments.filter((a) => a.encryption).map(attKey).join("\0"),
-    [attachments],
-  );
-
-  useEffect(() => {
-    const encrypted = attachments.filter((a) => a.encryption);
-    if (encrypted.length === 0) return;
-    let cancelled = false;
-    encrypted.forEach((a) => {
-      const ck = attKey(a);
-      if (!a.encryption || resolved.has(ck)) return;
-      let promise = inflight.get(ck);
-      if (!promise) {
-        promise = decryptToObjectURL(a.url, a.encryption.key, a.encryption.nonce, {
-          hash: a.originalSha256,
-          mime: a.type,
-        });
-        inflight.set(ck, promise);
-        promise
-          .then((u) => {
-            resolved.set(ck, u);
-            if (resolved.size > MAX_CACHED) {
-              const oldest = resolved.keys().next().value;
-              if (oldest !== undefined && oldest !== ck) resolved.delete(oldest);
-            }
-          })
-          .catch(() => inflight.get(ck) === promise && inflight.delete(ck));
-      }
-      // Re-render on settle (success or failure). Two-arg form so this subscriber
-      // handles its own rejection — `.finally` would leave it unhandled.
-      promise
-        .then(
-          () => !cancelled && bump((n) => n + 1),
-          () => !cancelled && bump((n) => n + 1),
-        );
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [encryptedKeys]);
-}
 
 /** Images and videos tile into a gallery grid; audio/files always stand alone. */
 function isGalleryMedia(att: UrlAttachment): boolean {
@@ -112,14 +55,22 @@ function AttachmentView({
   src,
   gallery,
   onImageOpen,
+  unavailable,
 }: {
   att: UrlAttachment;
   src: string | null;
   gallery?: boolean;
   onImageOpen?: (src: string) => void;
+  unavailable?: string;
 }) {
   const kind = att.type?.split("/")[0];
 
+  if (!src && unavailable) return (
+    <div role="status" className="mt-1.5 rounded-lg bg-base-200 p-3 text-xs text-base-content/60">
+      Attachment unavailable ({unavailable}).
+      {unavailable === "download-failed" && " Check the server connection and this deployment's VITE_CONCORD_MEDIA_ORIGINS allowlist."}
+    </div>
+  );
   if (!src)
     return (
       <div
@@ -451,10 +402,14 @@ export const MessageContent = memo(function MessageContent({
   text,
   attachments,
   emojiTags,
+  community,
+  channelId,
 }: {
   text: string;
   attachments: MediaAttachment[];
   emojiTags?: string[][];
+  community?: ConcordCommunity;
+  channelId?: string;
 }) {
   // Parse against a minimal event template so applesauce's `emojis` transformer
   // can resolve `:shortcode:` against the message's NIP-30 emoji tags.
@@ -466,10 +421,23 @@ export const MessageContent = memo(function MessageContent({
     () => attachments.filter((a): a is UrlAttachment => Boolean(a.url)),
     [attachments],
   );
-  useAttachmentSources(withUrl);
+  const sources = useAttachmentSources(community, channelId, attachments);
+  const attachmentSrc = (attachment: MediaAttachment): string | null => {
+    const value = sources.get(attachment);
+    return value && "src" in value ? value.src : null;
+  };
+  const unavailable = (attachment: MediaAttachment): string | undefined => {
+    if (!community || !channelId) return "retired";
+    const value = sources.get(attachment);
+    return value && "reason" in value ? value.reason : undefined;
+  };
   const byUrl = useMemo(() => new Map(withUrl.map((a) => [a.url, a])), [withUrl]);
   const rendered = new Set<string>();
   const [lightbox, setLightbox] = useState<{ slides: ImageSlide[]; index: number } | null>(null);
+  // A decoded lightbox image must not outlive the same access boundary as its
+  // inline tile. Revoking a blob URL alone does not clear an already decoded img.
+  const lightboxSlides = authorizedMediaSlides(lightbox?.slides,
+    [...sources.values()].flatMap((value) => "src" in value ? [value.src] : []));
 
   // Build an interleaved list of text nodes and media attachments; a second pass
   // coalesces consecutive runs of image/video media into a gallery grid.
@@ -557,6 +525,7 @@ export const MessageContent = memo(function MessageContent({
           key={`m${key++}`}
           att={att}
           src={attachmentSrc(att)}
+          unavailable={unavailable(att)}
           onImageOpen={(src) => setLightbox({ slides: [{ src }], index: 0 })}
         />,
       );
@@ -572,6 +541,7 @@ export const MessageContent = memo(function MessageContent({
                 key={j}
                 att={att}
                 src={src}
+                unavailable={unavailable(att)}
                 gallery
                 onImageOpen={(openedSrc) => {
                   const slides = imageSlides().map((src) => ({ src }));
@@ -598,6 +568,7 @@ export const MessageContent = memo(function MessageContent({
             key={`m${key++}`}
             att={att}
             src={attachmentSrc(att)}
+            unavailable={unavailable(att)}
             onImageOpen={(src) => setLightbox({ slides: [{ src }], index: 0 })}
           />,
         );
@@ -609,11 +580,14 @@ export const MessageContent = memo(function MessageContent({
   return (
     <>
       <div className="whitespace-pre-wrap break-words text-base-content">{out}</div>
+      {attachments.some((attachment) => !attachment.url) && (
+        <div role="status" className="mt-1.5 text-xs text-base-content/60">Attachment unavailable (invalid-descriptor).</div>
+      )}
       <Lightbox
-        open={Boolean(lightbox)}
+        open={lightboxSlides.length > 0}
         close={() => setLightbox(null)}
-        index={lightbox?.index ?? 0}
-        slides={lightbox?.slides ?? []}
+        index={Math.min(lightbox?.index ?? 0, Math.max(0, lightboxSlides.length - 1))}
+        slides={lightboxSlides}
         controller={{ closeOnBackdropClick: true }}
       />
     </>

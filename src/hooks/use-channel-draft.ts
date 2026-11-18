@@ -41,7 +41,10 @@ export function useChannelDraft(draft: ConcordChannelDraft) {
     for (const next of buffered.current.splice(0)) persist(next);
   }
 
-  async function send(options?: ConcordSendMessageOptions, publish?: (text: string) => Promise<void>) {
+  async function send(
+    options?: ConcordSendMessageOptions,
+    publish?: (snapshot: Readonly<Drafts.ConcordMessageDraft>) => Promise<void>,
+  ) {
     const sent = current.current;
     preparing.current = true;
     try {
@@ -49,7 +52,7 @@ export function useChannelDraft(draft: ConcordChannelDraft) {
       // Queue the SDK's send snapshot before persisting typing that happened
       // during the initial IndexedDB write. Otherwise send() captures the newer
       // text and clears it, even though this UI intended to send the old text.
-      const publication = publish ? publish(sent.text) : draft.send(options);
+      const publication = publish ? publish(sent) : draft.send(options);
       flushEdits();
       await publication;
       if (publish && current.current === sent) await draft.clear();
