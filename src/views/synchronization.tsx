@@ -3,7 +3,8 @@ import { normalizeURL } from "applesauce-core/helpers/url";
 import { use$ } from "applesauce-react/hooks";
 import { Activity, Inbox, Loader2, Lock, Radio } from "lucide-react";
 import type { ReactNode } from "react";
-import { distinctUntilChanged, map } from "rxjs";
+import { debounce, distinctUntilChanged, map, of, timer } from "rxjs";
+import type { Observable } from "rxjs";
 import { RelayInfo } from "../components/ServerInfo";
 import { useCommunity } from "../hooks/use-community";
 import { useConcord } from "../hooks/use-concord";
@@ -35,8 +36,17 @@ function Status({ status }: { status: ConcordCommunityStatus | ConcordPrivateCha
   );
 }
 
+// Show discoveries immediately. Give a transient empty snapshot time to recover
+// before removing a section and moving everything below it.
+function settleEmpty<T>(isEmpty: (value: T) => boolean) {
+  return (source: Observable<T>) => source.pipe(
+    debounce((value) => isEmpty(value) ? timer(500) : of(0)),
+  );
+}
+
+const settleRelayTargets = settleEmpty<string[]>((urls) => !urls.length);
+
 function Issues({ issues }: { issues: readonly ConcordDiagnostic[] }) {
-  if (!issues.length) return <p className="text-base-content/70">No issues reported</p>;
   return (
     <ul className="space-y-2">
       {issues.map(({ stage, error, key }, index) => (
@@ -52,7 +62,6 @@ function Issues({ issues }: { issues: readonly ConcordDiagnostic[] }) {
 
 function Relays({ urls }: { urls: string[] }) {
   const statuses = use$(pool.status$);
-  if (!urls.length) return <p className="text-base-content/70">No relays yet</p>;
   return (
     <ul className="space-y-2">
       {urls.map((url) => {
@@ -77,10 +86,17 @@ function CommunitySync({ id }: { id: string }) {
   const client = useConcord();
   const community = useCommunity(id);
   const metadata = use$(community?.metadata$);
-  const channels = use$(community?.channelViews$);
+  const channels = use$(() => community?.channelViews$.pipe(
+    settleEmpty((views) => !views.some((channel) => channel.private && !channel.deleted)),
+  ), [community]);
   const status = use$(community?.status$);
   const privateStatus = use$(community?.privateChannelStatus$);
-  const relays = use$(community?.relays$);
+  const syncError = use$(() => community?.status$.pipe(
+    map(({ error }) => error),
+    distinctUntilChanged(),
+    settleEmpty((error) => !error),
+  ), [community]);
+  const relays = use$(() => community?.relays$.pipe(settleRelayTargets), [community]);
   const activity = use$(() => syncActivity$(client, id), [client, id]);
   if (!community) return null;
 
@@ -93,12 +109,17 @@ function CommunitySync({ id }: { id: string }) {
     if (channel.deleted) privateChannels.delete(channel.channel_id);
   }
 
+  const hasEvents = !!activity?.events.length;
+  const hasIssues = !!syncError || !!activity?.issues.length;
+  const hasRelays = !!relays?.length;
+  const hasChannels = privateChannels.size > 0;
+
   return (
     <section className="rounded-box border border-base-300 bg-base-100">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <h2 className="text-lg font-semibold wrap-anywhere">{metadata?.name ?? community.material.name}</h2>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-base-content/70">{publicCount} public {publicCount === 1 ? "channel" : "channels"}</span>
+          {publicCount > 0 && <span className="text-base-content/70">{publicCount} public {publicCount === 1 ? "channel" : "channels"}</span>}
           {status && <>
             <span className="text-base-content/70">Epoch {status.epoch}</span>
             <Status status={status} />
@@ -106,58 +127,54 @@ function CommunitySync({ id }: { id: string }) {
         </div>
       </header>
 
-      <div className="grid gap-5 p-4 lg:grid-cols-2">
-        <section className="min-w-0 space-y-2">
+      {(hasChannels || hasRelays || hasEvents || hasIssues) && <div className="grid items-start gap-5 border-t border-base-300 p-4 lg:grid-cols-2">
+        {hasChannels && <section className="min-w-0 space-y-2 lg:col-start-1 lg:only:col-span-2">
           <h3 className="flex items-center gap-2 font-semibold"><Lock size={18} /> Private channels</h3>
-          {privateChannels.size ? (
-            <ul className="divide-y divide-base-300">
-              {[...privateChannels].map(([channelId, channel]) => {
-                const sync = privateStatus?.get(channelId);
-                return (
-                  <li key={channelId} className="py-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="min-w-0 wrap-anywhere">{channel.name}</span>
-                      <span className="flex flex-wrap items-center gap-2">
-                        {sync && <span className="text-base-content/70">Epoch {sync.epoch}</span>}
-                        {sync ? <Status status={sync} /> : <span className="badge badge-ghost h-auto py-1 text-base">
-                          {channel.accessible ? "Waiting to sync" : "No access"}
-                        </span>}
-                      </span>
-                    </div>
-                    {sync?.error && <p className="text-error wrap-anywhere">{sync.error}</p>}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : <p className="text-base-content/70">No private channels yet</p>}
-        </section>
-
-        <section className="min-w-0 space-y-2">
-          <h3 className="flex items-center gap-2 font-semibold"><Radio size={18} /> Relays</h3>
-          <Relays urls={relays ?? []} />
-        </section>
-
-        <section className="min-w-0 space-y-2">
-          <h3 className="flex items-center gap-2 font-semibold"><Activity size={18} /> Recent local activity</h3>
-          {activity?.events.length ? (
-            <ul className="max-h-52 space-y-1 overflow-y-auto">
-              {activity.events.map(({ id, kind, observedAt, source }, index) => (
-                <li key={`${source}:${id}:${observedAt}:${index}`} className="flex flex-wrap justify-between gap-x-2 rounded bg-base-200 px-3 py-2">
-                  <span className="min-w-0 wrap-anywhere">{privateChannels.get(source)?.name ?? source} · Kind {kind}</span>
-                  <span className="font-mono" title={id}>{id.slice(0, 10)}</span>
-                  <time dateTime={new Date(observedAt).toISOString()}>{new Date(observedAt).toLocaleTimeString()}</time>
+          <ul className="divide-y divide-base-300">
+            {[...privateChannels].map(([channelId, channel]) => {
+              const sync = privateStatus?.get(channelId);
+              return (
+                <li key={channelId} className="py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0 wrap-anywhere">{channel.name}</span>
+                    <span className="flex flex-wrap items-center gap-2">
+                      {sync && <span className="text-base-content/70">Epoch {sync.epoch}</span>}
+                      {sync ? <Status status={sync} /> : <span className="badge badge-ghost h-auto py-1 text-base">
+                        {channel.accessible ? "Waiting to sync" : "No access"}
+                      </span>}
+                    </span>
+                  </div>
+                  {sync?.error && <p className="text-error wrap-anywhere">{sync.error}</p>}
                 </li>
-              ))}
-            </ul>
-          ) : <p className="text-base-content/70">No events yet</p>}
-        </section>
+              );
+            })}
+          </ul>
+        </section>}
 
-        <section className="min-w-0 space-y-2">
+        {hasRelays && <section className="min-w-0 space-y-2 lg:col-start-2 lg:only:col-span-2 lg:only:col-start-1">
+          <h3 className="flex items-center gap-2 font-semibold"><Radio size={18} /> Relays</h3>
+          <Relays urls={relays} />
+        </section>}
+
+        {hasEvents && <section className="min-w-0 space-y-2 lg:col-start-1 lg:only:col-span-2">
+          <h3 className="flex items-center gap-2 font-semibold"><Activity size={18} /> Recent local activity</h3>
+          <ul className="max-h-52 space-y-1 overflow-y-auto">
+            {activity.events.map(({ id, kind, observedAt, source }) => (
+              <li key={`${source}:${id}:${observedAt}`} className="flex flex-wrap justify-between gap-x-2 rounded bg-base-200 px-3 py-2">
+                <span className="min-w-0 wrap-anywhere">{privateChannels.get(source)?.name ?? source} · Kind {kind}</span>
+                <span className="font-mono" title={id}>{id.slice(0, 10)}</span>
+                <time dateTime={new Date(observedAt).toISOString()}>{new Date(observedAt).toLocaleTimeString()}</time>
+              </li>
+            ))}
+          </ul>
+        </section>}
+
+        {hasIssues && <section className="min-w-0 space-y-2 lg:col-start-2 lg:only:col-span-2 lg:only:col-start-1">
           <h3 className="font-semibold">Issues</h3>
-          {status?.error && <p className="text-error wrap-anywhere">{status.error}</p>}
-          {(!status?.error || !!activity?.issues.length) && <Issues issues={activity?.issues ?? []} />}
-        </section>
-      </div>
+          {syncError && <p className="text-error wrap-anywhere">{syncError}</p>}
+          {!!activity?.issues.length && <Issues issues={activity.issues} />}
+        </section>}
+      </div>}
     </section>
   );
 }
@@ -168,7 +185,7 @@ function DirectInviteSync() {
   const invites = use$(client.directInvites$);
   const receiver = client.giftWrapReceiver;
   const lifecycle = use$(receiver?.lifecycle$);
-  const relays = use$(receiver?.readRelays$);
+  const relays = use$(() => receiver?.readRelays$.pipe(settleRelayTargets), [receiver]);
   const activity = use$(() => syncActivity$(client, DIRECT_INVITE_ACTIVITY), [client]);
   const count = invites?.invites.length ?? 0;
   const watching = lifecycle === "running";
@@ -178,23 +195,23 @@ function DirectInviteSync() {
 
   return (
     <section className="rounded-box border border-base-300 bg-base-100">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold"><Inbox size={18} /> Direct invite receiver</h2>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-base-content/70">{count} {count === 1 ? "invite" : "invites"}</span>
+          {count > 0 && <span className="text-base-content/70">{count} {count === 1 ? "invite" : "invites"}</span>}
           <span className={`badge badge-soft h-auto py-1 text-base ${watching ? "badge-success" : "badge-ghost"}`}>{label}</span>
         </div>
       </header>
-      <div className="grid gap-5 p-4 lg:grid-cols-2">
-        <section className="min-w-0 space-y-2">
+      {(!!relays?.length || !!activity?.issues.length) && <div className="grid gap-5 border-t border-base-300 p-4 lg:grid-cols-2">
+        {!!relays?.length && <section className="min-w-0 space-y-2">
           <h3 className="flex items-center gap-2 font-semibold"><Radio size={18} /> Relays</h3>
-          <Relays urls={relays ?? []} />
-        </section>
+          <Relays urls={relays} />
+        </section>}
         {!!activity?.issues.length && <section className="min-w-0 space-y-2">
           <h3 className="font-semibold">Issues</h3>
           <Issues issues={activity.issues} />
         </section>}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -210,8 +227,7 @@ export function SynchronizationView({ mobileNav }: { mobileNav: ReactNode }) {
     distinctUntilChanged((a, b) => a.length === b.length && a.every((id, index) => id === b[index])),
   ), [client]);
   const listStatus = list?.locked ? "Decryption pending"
-    : list?.knowledge === "complete" ? "Restored"
-    : list?.knowledge === "confirmed-empty" ? "No saved communities on relays"
+    : list?.knowledge === "complete" || list?.knowledge === "confirmed-empty" ? "Checked"
     : list?.knowledge === "partial" ? "Partially restored"
     : status?.phase === "ready" ? "Relay copy unconfirmed" : "Looking up encrypted list";
 
@@ -245,9 +261,6 @@ export function SynchronizationView({ mobileNav }: { mobileNav: ReactNode }) {
             {!!activity?.issues.length && <div className="mt-3"><Issues issues={activity.issues} /></div>}
           </section>
           {ids?.map((id) => <CommunitySync key={id} id={id} />)}
-          {!communityCount && status?.phase === "ready" && list?.knowledge !== "confirmed-empty" && (
-            <p className="px-1 text-base-content/70">No communities loaded</p>
-          )}
           <DirectInviteSync />
         </div>
       </div>
