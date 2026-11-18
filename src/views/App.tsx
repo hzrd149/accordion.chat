@@ -59,6 +59,7 @@ import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { DevView } from "./dev";
 import { useDevMode } from "../hooks/use-dev-mode";
+import { messagesEnabled$ } from "../services/messages";
 import { InvitesView } from "./invites";
 import { DmView } from "./dm";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -185,6 +186,7 @@ function Shell() {
   const onDev = Boolean(devMatch || devRootMatch);
   const devPage = devMatch?.params.page ?? "crypto-history";
   const { count: inviteCount } = useInvites();
+  const dmEnabled = use$(messagesEnabled$);
 
   function setParam(key: string, value: string | null) {
     setSearchParams(
@@ -289,7 +291,7 @@ function Shell() {
         <div className="mt-auto shrink-0">
           <ClientStatusRailIndicator />
         </div>
-        <button
+        {dmEnabled && <button
           className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
             onDm ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl text-base-content/60"
           }`}
@@ -300,7 +302,7 @@ function Shell() {
           }}
         >
           <MessageSquare size={22} />
-        </button>
+        </button>}
         <div className="relative w-12 h-12 shrink-0">
           <button
             className={`w-full h-full bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
