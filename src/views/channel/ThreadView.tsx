@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useActiveAccount } from "applesauce-react/hooks";
+import type { Media } from "@applesauce/concord";
+import { createConcordUploader } from "../../helpers/concord-uploader";
 import { ArrowLeft, CornerDownRight, Reply } from "lucide-react";
 import { useCommunity } from "../../hooks/use-community";
 import { useThread } from "../../chat/useMessages";
@@ -33,6 +36,7 @@ export function ThreadView({
   fullPage?: boolean;
 }) {
   const community = useCommunity(cid);
+  const account = useActiveAccount();
   const comments = useThread(community, channelId, root.id);
   const subject = getSubject(root.raw);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -44,10 +48,18 @@ export function ThreadView({
   // No explicit target means replying to the thread root itself.
   const parent = replyParent ?? { id: root.id, author: root.author, kind: kinds.ChatMessage };
 
-  async function sendThreadReply(text: string) {
-    if (!community) return;
-    await sendThreadReplyAction(community, channelId, parent, text, favorites);
-    setReplyParent(null);
+  async function sendThreadReply(
+    text: string,
+    files: readonly File[],
+    onProgress: (progress: Media.ConcordUploadProgress) => void,
+  ) {
+    if (!community || !account) throw new Error("The channel is unavailable");
+    const media = files.length ? {
+      files,
+      onProgress,
+      uploader: createConcordUploader(account, account.pubkey, () => community.state$.value.metadata?.blossom_servers),
+    } : undefined;
+    await sendThreadReplyAction(community, channelId, parent, text, favorites, media);
   }
 
   const composer = canWrite && community?.getChannel(channelId) && (
@@ -144,7 +156,7 @@ export function ThreadView({
                   {comment.deleted ? (
                     <div className="text-base-content/60 italic">(message deleted)</div>
                   ) : (
-                    <MessageContent text={comment.content} attachments={[]} emojiTags={comment.emojiTags} />
+                    <MessageContent text={comment.content} attachments={comment.attachments} emojiTags={comment.emojiTags} />
                   )}
                 </div>
                 {canWrite && (

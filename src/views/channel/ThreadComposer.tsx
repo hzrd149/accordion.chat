@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { CornerDownRight, Loader2, Send, SmilePlus, X } from "lucide-react";
+import { CornerDownRight, Loader2, Paperclip, Send, SmilePlus, X } from "lucide-react";
 import { UserName } from "../../components/User";
 import { EmojiPicker } from "../../components/EmojiPicker";
 import type { Emoji } from "../../helpers/emoji";
-import type { ConcordChannelDraft } from "@applesauce/concord";
+import type { ConcordChannelDraft, Media } from "@applesauce/concord";
 import { useChannelDraft } from "../../hooks/use-channel-draft";
 
 export function ThreadComposer({
@@ -19,15 +19,18 @@ export function ThreadComposer({
   fullPage: boolean;
   favorites: Emoji[];
   onClear: () => void;
-  onSend: (text: string) => Promise<void>;
+  onSend: (text: string, files: readonly File[], onProgress: (progress: Media.ConcordUploadProgress) => void) => Promise<void>;
 }) {
   const saved = useChannelDraft(draft);
   const text = saved.value.text;
+  const files = saved.value.files ?? [];
   const setText = (value: string | ((previous: string) => string)) =>
     saved.update({ text: typeof value === "function" ? value(text) : value });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [upload, setUpload] = useState<Media.ConcordUploadProgress | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (fullPage && replyingTo && saved.ready) textareaRef.current?.focus();
@@ -35,16 +38,20 @@ export function ThreadComposer({
 
   async function send() {
     const value = text.trim();
-    if (!value || sending || !saved.ready) return;
+    if ((!value && !files.length) || sending || !saved.ready) return;
     setSending(true);
     setError("");
     try {
       const customEmoji = favorites.some((emoji) => value.includes(`:${emoji.shortcode}:`));
-      await saved.send(undefined, customEmoji ? onSend : undefined);
-      if (fullPage && replyingTo && !customEmoji) onClear();
+      const publish = files.length || customEmoji
+        ? (body: string) => onSend(body, files, setUpload)
+        : undefined;
+      await saved.send(undefined, publish);
+      if (replyingTo && (fullPage || publish)) onClear();
     } catch (err) {
       setError(String(err));
     } finally {
+      setUpload(null);
       setSending(false);
     }
   }
@@ -84,7 +91,35 @@ export function ThreadComposer({
           </button>
         </div>
       )}
+      {files.length > 0 && (
+        <ul aria-label="Attachments" className="mb-2 flex flex-wrap gap-2">
+          {files.map((file, index) => (
+            <li key={index} className="flex max-w-full items-center gap-1 bg-base-100 px-2">
+              <span className="truncate">{file.name}</span>
+              <button type="button" className="btn btn-ghost btn-square min-h-11 min-w-11"
+                aria-label={`Remove ${file.name}`} disabled={sending}
+                onClick={() => saved.update({ files: files.filter((_, i) => i !== index) })}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {upload && upload.done < upload.total && (
+        <p role="status" className="mb-2 text-base-content/70">
+          {upload.phase === "encrypting" ? "Encrypting" : "Uploading"} attachment {upload.done + 1} of {upload.total}…
+        </p>
+      )}
       <div className={fullPage ? "flex flex-wrap items-center gap-2" : "flex items-end gap-2 bg-base-100 rounded-xl p-2"}>
+        <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => {
+          saved.update({ files: [...files, ...Array.from(event.currentTarget.files ?? [])] });
+          event.currentTarget.value = "";
+        }} />
+        <button type="button" className={fullPage ? "btn btn-ghost min-h-11" : "btn btn-ghost btn-sm btn-circle"}
+          aria-label="Attach media" title="Attach media" disabled={!saved.ready || sending}
+          onClick={() => fileInputRef.current?.click()}>
+          <Paperclip size={18} aria-hidden="true" /> {fullPage && "Attach media"}
+        </button>
         <span className="relative inline-flex shrink-0">
           <button className={fullPage ? "btn btn-ghost min-h-11" : "btn btn-ghost btn-sm btn-circle"} title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
             <SmilePlus size={18} /> {fullPage && "Emoji"}
@@ -119,7 +154,7 @@ export function ThreadComposer({
           className={fullPage ? "btn btn-primary ml-auto min-h-11 text-base" : "btn btn-primary btn-sm btn-circle shrink-0"}
           title={fullPage ? "Post reply" : "Send"}
           onClick={send}
-          disabled={sending || !text.trim()}
+          disabled={!saved.ready || sending || (!text.trim() && !files.length)}
         >
           {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           {fullPage && (sending ? "Posting…" : "Post reply")}

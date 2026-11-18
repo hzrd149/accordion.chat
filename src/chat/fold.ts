@@ -42,6 +42,7 @@ export interface ThreadComment {
   deleted: boolean;
   root: { id: string; author: string; kind: number };
   parent: { id: string; author: string; kind: number };
+  attachments: MediaAttachment[];
   emojiTags: string[][];
   raw: Rumor;
 }
@@ -82,7 +83,8 @@ export function foldChannel(visible: readonly ConcordChannelMessage[], effects: 
       if (!root || !parent || root.kind !== MESSAGE) continue;
       const comments = threads.get(root.id) ?? [];
       comments.push({ id: r.id, author: r.pubkey, content, ms: rumorMs(r),
-        deleted: false, root, parent, emojiTags: (edit ?? r).tags.filter((t) => t[0] === "emoji"), raw: r });
+        deleted: false, root, parent, attachments: [...parseImeta(r.tags).values()],
+        emojiTags: (edit ?? r).tags.filter((t) => t[0] === "emoji"), raw: r });
       threads.set(root.id, comments);
     }
   }

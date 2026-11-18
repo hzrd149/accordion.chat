@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BehaviorSubject, defer, finalize } from "rxjs";
 import type { Rumor } from "applesauce-core/helpers";
 import type { ConcordChannelMessage, ConcordCommunity } from "@applesauce/concord";
-import { nip19 } from "nostr-tools";
+import { nip19, type EventTemplate } from "nostr-tools";
 import { summarize } from "../src/chat/useUnread";
 import { collectMentions } from "../src/chat/useMentions";
+import { sendThreadReply } from "../src/chat/actions";
 import { foldChannel } from "../src/chat/fold";
 import { channelProjection } from "../src/chat/projection";
 
@@ -46,6 +47,40 @@ describe("SDK channel presentation adapter", () => {
       ...reactions, rumor("delete", 5, [["e", "react"], ["e", "duplicate"]]),
     ]);
     expect(removed.messages[0].reactions).toEqual([]);
+  });
+
+  it("publishes and projects an encrypted attachment in a nested, media-only reply", async () => {
+    const attachment = {
+      url: "https://example.com/blob",
+      type: "image/png",
+      encryption: { algorithm: "aes-gcm", key: "a".repeat(64), nonce: "b".repeat(32) },
+    };
+    const sendEvent = vi.fn(async (_channelId: string, event: EventTemplate) => event);
+    const upload = vi.fn().mockResolvedValue(attachment);
+    const community = {
+      communityId: "community",
+      state$: { value: { channels: [{ channel_id: "channel", private: false }] } },
+      channelStore: () => ({ getEvent: async () => reply }),
+      sendEvent,
+    } as unknown as ConcordCommunity;
+    const files = [new File(["image"], "image.png", { type: "image/png" })];
+    const media = { files, uploader: { upload }, onProgress: vi.fn() };
+
+    await sendThreadReply(community, "channel", { id: reply.id, author: reply.pubkey, kind: reply.kind }, "", undefined, media);
+
+    const event = sendEvent.mock.calls[0][1];
+    expect(event.kind).toBe(1111);
+    expect(event.content).toBe(attachment.url);
+    const nestedReply = rumor("nested", event.kind, event.tags, event.content);
+    const projected = foldChannel([row(rumor("message")), row(reply), row(nestedReply)], [])
+      .threads.get("message")?.find((comment) => comment.id === nestedReply.id);
+    expect(projected?.parent.id).toBe(reply.id);
+    expect(projected?.attachments[0]).toMatchObject(attachment);
+
+    upload.mockRejectedValueOnce(new Error("Upload failed"));
+    await expect(sendThreadReply(community, "channel", { id: reply.id, author: reply.pubkey, kind: reply.kind }, "", undefined, media))
+      .rejects.toThrow("Upload failed");
+    expect(sendEvent).toHaveBeenCalledTimes(1);
   });
 
   it("shares SDK subscriptions and follows removals/restorations without a second authority fold", async () => {
