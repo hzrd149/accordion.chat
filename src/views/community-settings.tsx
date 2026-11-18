@@ -100,8 +100,8 @@ export function CommunitySettingsView({
           </button>
         ))}
       </nav>
-      <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
-        <div className={page === "debug" ? "max-w-5xl" : "max-w-[640px]"}>
+      <div className={`flex-1 relative overflow-y-auto ${page === "debug" ? "" : "p-10 max-md:px-4 max-md:py-6"}`}>
+        <div className={page === "debug" ? "w-full" : "max-w-[640px]"}>
           <ControlKeyNotice cid={cid} />
           {page === "overview" && <OverviewPage cid={cid} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} />}

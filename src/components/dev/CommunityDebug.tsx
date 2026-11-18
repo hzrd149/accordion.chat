@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import type { ConcordDiagnostic, JoinMaterial, RotationDiagnostic } from "@applesauce/concord";
 import { deriveConcordKeys, verifyOwner, type ConcordKeys } from "@applesauce/concord/helpers";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { Check, ChevronRight, Copy, RefreshCw } from "lucide-react";
 import { pool } from "../../nostr";
 import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
@@ -44,12 +44,13 @@ function dateTime(ms: number | undefined): string {
 
 function Card({ title, summary, open, children }: { title: string; summary?: ReactNode; open?: boolean; children: ReactNode }) {
   return (
-    <details className="border border-base-300 rounded-box mb-3 group" open={open}>
-      <summary className="cursor-pointer px-4 py-3 flex items-center gap-3 select-none">
+    <details className="group" open={open}>
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 py-2 flex items-center gap-3 select-none bg-base-200 hover:bg-base-300">
+        <ChevronRight size={14} className="shrink-0 opacity-60 transition-transform group-open:rotate-90" />
         <span className="font-bold uppercase tracking-wide text-sm opacity-70">{title}</span>
         {summary && <span className="text-sm opacity-70 truncate">{summary}</span>}
       </summary>
-      <div className="px-4 pb-4 flex flex-col gap-3 text-sm">{children}</div>
+      <div className="px-4 py-3 flex flex-col gap-3 text-sm">{children}</div>
     </details>
   );
 }
@@ -145,7 +146,7 @@ function StatusCard({ cid }: { cid: string }) {
           ))}
         </div>
       </KV>
-      <div className="border-t border-base-300 pt-3 flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5">
         <span className="font-semibold opacity-70">Community List</span>
         {entry ? (
           <>
@@ -190,7 +191,7 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
         Root epochs this device holds keys for, from local material (<code>held_roots</code> + current). Root keys are shown as sha256
         fingerprints so devices can be compared without exposing them.
       </p>
-      <div className="overflow-x-auto">
+      <div className="-mx-4 overflow-x-auto">
         <table className="table table-sm">
           <thead>
             <tr>
@@ -236,7 +237,7 @@ const PLANE_LABEL: Record<AuditPlane, string> = { control: "control", guestbook:
 
 function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: string[] }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="-mx-4 overflow-x-auto">
       <table className="table table-xs">
         <thead>
           <tr>
@@ -252,7 +253,7 @@ function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: stri
         <tbody>
           {audits.flatMap((a) =>
             AUDIT_PLANES.map((plane, pi) => (
-              <tr key={`${a.epoch}:${plane}`} className={pi === 0 ? "border-t-2 border-base-300" : undefined}>
+              <tr key={`${a.epoch}:${plane}`} className={a.epoch % 2 ? "bg-base-200/50" : undefined}>
                 <td>{pi === 0 ? a.epoch : ""}</td>
                 <td className="whitespace-nowrap">{plane === "rekey" ? `rekey → ${a.epoch + 1}` : PLANE_LABEL[plane]}</td>
                 <td><Mono title={a.addresses[plane]}>{shortHex(a.addresses[plane])}</Mono></td>
@@ -280,9 +281,9 @@ function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: stri
 function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: RotationAudit; relays: string[]; retiredAt?: number; isTip: boolean }) {
   const skew = retiredAt !== undefined ? Math.abs(retiredAt * 1000 - rotation.firstMs) : undefined;
   return (
-    <div className={`border rounded-box p-3 flex flex-col gap-2 ${rotation.complete && rotation.consistent ? "border-base-300" : "border-error"}`}>
+    <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold">Epoch {rotation.prevEpoch} → {rotation.newEpoch}</span>
+        <span className={`font-semibold ${rotation.complete && rotation.consistent ? "" : "text-error"}`}>Epoch {rotation.prevEpoch} → {rotation.newEpoch}</span>
         {rotation.complete ? <span className="badge badge-sm badge-success">complete</span> : <span className="badge badge-sm badge-error">incomplete</span>}
         {rotation.consistent ? <span className="badge badge-sm badge-success badge-outline">consistent</span> : <span className="badge badge-sm badge-error">inconsistent: {rotation.inconsistencies.join(", ")}</span>}
         {isTip && <span className="badge badge-sm badge-warning">not adopted by this device</span>}
@@ -329,8 +330,9 @@ function MembersByEpoch({ audits }: { audits: EpochAudit[] }) {
       {audits.map((a, i) => {
         const { added, removed } = diffMembers(i > 0 ? audits[i - 1].state.members : undefined, a.state.members);
         return (
-          <details key={a.epoch} className="border border-base-300 rounded-box px-3 py-2">
-            <summary className="cursor-pointer flex flex-wrap items-center gap-2">
+          <details key={a.epoch} className="group/epoch">
+            <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex flex-wrap items-center gap-2 py-1 hover:bg-base-200">
+              <ChevronRight size={12} className="opacity-60 transition-transform group-open/epoch:rotate-90" />
               <span className="font-semibold">Epoch {a.epoch}</span>
               <span className="badge badge-sm badge-ghost">{a.state.members.size} members</span>
               {added.length > 0 && <span className="badge badge-sm badge-success badge-outline">+{added.length}</span>}
@@ -414,7 +416,7 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
         </button>
         {progress && <span className="opacity-70">{progress}</span>}
       </div>
-      {error && <div className="alert alert-error py-2">{error}</div>}
+      {error && <p className="text-error">{error}</p>}
       {audits.length > 0 && (
         <>
           <PresenceMatrix audits={audits} relays={relays} />
@@ -426,15 +428,15 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
 
           <h4 className="font-semibold mt-2">Rotations</h4>
           {missingTransitions.map((a) => (
-            <div key={a.epoch} className="alert alert-error py-2">
+            <p key={a.epoch} className="text-error font-semibold">
               No rekey events for epoch {a.epoch} → {a.epoch + 1} found on any relay. The rotation's evidence is gone (or was never published here).
-            </div>
+            </p>
           ))}
           {tip && tip.rotations.length > 0 && (
-            <div className="alert alert-warning py-2">
+            <p className="text-warning font-semibold">
               Rekey events exist at the current epoch's next address — a rotation to epoch {tip.epoch + 1} this device has not adopted.
               Check the diagnostics below for a parked or rejected candidate.
-            </div>
+            </p>
           )}
           {audits.flatMap((a) =>
             a.rotations.map((r) => (
@@ -490,7 +492,7 @@ function MembershipCard({ cid }: { cid: string }) {
         ))}
       </div>
       {banlist.size > 0 && (
-        <div className="border-t border-base-300 pt-3">
+        <div>
           <p className="font-semibold opacity-70 mb-1">Banlist</p>
           <UserList pubkeys={banlist} />
         </div>
@@ -512,7 +514,7 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
       {privateViews.length === 0 && material.channels.length === 0 ? (
         <p className="opacity-60">No private channels.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="-mx-4 overflow-x-auto">
           <table className="table table-sm">
             <thead>
               <tr>
@@ -627,7 +629,7 @@ function RawCard({ material }: { material: JoinMaterial }) {
           {copied ? <Check size={12} /> : <Copy size={12} />} Copy
         </button>
       </div>
-      <pre className="max-h-[50vh] overflow-auto rounded-box bg-base-300 p-3 font-mono text-xs whitespace-pre select-text">{json}</pre>
+      <pre className="-mx-4 max-h-[50vh] overflow-auto bg-base-200 px-4 py-2 font-mono text-xs whitespace-pre select-text">{json}</pre>
     </Card>
   );
 }
@@ -658,8 +660,8 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">Debug</h2>
-      <p className="text-sm opacity-70 leading-relaxed mb-5">
+      <h2 className="text-2xl font-bold px-4 pt-6 mb-1">Debug</h2>
+      <p className="text-sm opacity-70 leading-relaxed px-4 mb-4">
         Technical state of this community: key generations, rotations and their presence on relays. Read-only.
       </p>
       <StatusCard cid={cid} />
