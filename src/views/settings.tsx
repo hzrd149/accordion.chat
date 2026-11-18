@@ -770,11 +770,12 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
       <p className="text-sm opacity-70 leading-relaxed mb-3">
         Private, end-to-end encrypted messages. These choices are saved in this browser.
       </p>
-      <div className="flex flex-col gap-2">
-        <DmEnabledToggle />
-        <DmAutoDecryptToggle />
+      {/* Side by side when the page is wide enough, stacked otherwise. */}
+      <div className="flex flex-wrap gap-2">
+        <DmEnabledToggle className="flex-1 basis-80" />
+        <DmAutoDecryptToggle className="flex-1 basis-80" />
       </div>
-      <h3 className="text-lg font-bold mt-10 mb-1">DM relays</h3>
+      <h3 className="text-lg font-bold mt-10 mb-1">Direct message inboxes</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
         Where people send your encrypted direct messages. List a couple of reliable relays so messages always reach
         you.

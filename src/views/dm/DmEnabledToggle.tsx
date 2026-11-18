@@ -3,10 +3,11 @@ import { ToggleCard } from "../../components/ToggleCard";
 import { messagesAutoDecrypt$, messagesEnabled$, setMessagesAutoDecrypt, setMessagesEnabled } from "../../services/messages";
 
 /** Card toggle for the opt-in NIP-17 inbox. */
-export function DmEnabledToggle() {
+export function DmEnabledToggle({ className }: { className?: string }) {
   const enabled = use$(messagesEnabled$);
   return (
     <ToggleCard
+      className={className}
       checked={enabled}
       onChange={setMessagesEnabled}
       label="Enable direct messages"
@@ -16,11 +17,12 @@ export function DmEnabledToggle() {
 }
 
 /** Card toggle choosing automatic or manual decryption of incoming messages. */
-export function DmAutoDecryptToggle() {
+export function DmAutoDecryptToggle({ className }: { className?: string }) {
   const enabled = use$(messagesEnabled$);
   const auto = use$(messagesAutoDecrypt$);
   return (
     <ToggleCard
+      className={className}
       checked={auto}
       disabled={!enabled}
       onChange={setMessagesAutoDecrypt}

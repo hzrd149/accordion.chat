@@ -102,7 +102,7 @@ export function DmClientStatus() {
             {decryption.unlocked} of {decryption.total} messages unlocked{locked > 0 ? `, ${locked} waiting for your signer` : ""}.
           </p>
           {failed.length > 0 && (
-            <details className="collapse collapse-arrow border border-base-300 bg-base-200 max-w-[520px]">
+            <details className="collapse collapse-arrow border border-base-300 bg-base-200 w-full">
               <summary className="collapse-title text-sm font-semibold min-h-0 py-3">
                 {failed.length} message{failed.length === 1 ? "" : "s"} could not be decrypted
               </summary>
