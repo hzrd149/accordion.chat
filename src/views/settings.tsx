@@ -524,15 +524,20 @@ function AdvancedPage() {
             { key: "autoSaveCommunityList", label: "Automatic community-list sync", hint: "Publish updated community keys after background sync and repair interrupted list repacks. Explicit joins, leaves, and community creation still publish when this is off." },
             { key: "watchDirectInvites", label: "Watch direct invites", hint: "Watch your inbox for community and private-channel invites on startup." },
             { key: "pinUpkeep", label: "Automatic pin upkeep", hint: "Update pin lists after message edits, author deletions, and private-channel key rotations when you have permission." },
+            { key: "historySync", label: "Historical synchronization", hint: "Synchronize older community history in the background. Turning this off disables historical backfill, not current-session synchronization." },
           ] as const).map((option) => (
             <label key={option.key} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
               <input
                 type="checkbox"
                 className="toggle toggle-primary"
-                checked={automation[option.key]}
+                checked={option.key === "historySync" ? automation.historySync === "background" : automation[option.key]}
                 onChange={(e) => {
                   try {
-                    setConcordAutomation(option.key, e.target.checked);
+                    if (option.key === "historySync") {
+                      setConcordAutomation("historySync", e.target.checked ? "background" : "off");
+                    } else {
+                      setConcordAutomation(option.key, e.target.checked);
+                    }
                   } catch (error) {
                     toastError(error, "Could not save automation settings.");
                   }

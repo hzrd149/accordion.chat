@@ -2,7 +2,9 @@ import type { ConcordClientOptions } from "@applesauce/concord";
 import { BehaviorSubject } from "rxjs";
 
 type AutomationKey = "autoUnlock" | "autoSaveCommunityList" | "watchDirectInvites" | "pinUpkeep";
-export type ConcordAutomation = Required<Pick<ConcordClientOptions, AutomationKey>>;
+export type ConcordAutomation = Required<Pick<ConcordClientOptions, AutomationKey>> & {
+  historySync: "background" | "off";
+};
 
 const KEY = "accordion:concordAutomation";
 const defaults: ConcordAutomation = {
@@ -10,6 +12,7 @@ const defaults: ConcordAutomation = {
   autoSaveCommunityList: true,
   watchDirectInvites: true,
   pinUpkeep: true,
+  historySync: "background",
 };
 
 function loadAutomation(): ConcordAutomation {
@@ -17,10 +20,12 @@ function loadAutomation(): ConcordAutomation {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? "null");
     if (stored && typeof stored === "object") {
-      for (const key of Object.keys(defaults) as AutomationKey[]) {
+      for (const key of ["autoUnlock", "autoSaveCommunityList", "watchDirectInvites", "pinUpkeep"] as const) {
         const value = (stored as Record<string, unknown>)[key];
         if (typeof value === "boolean") settings[key] = value;
       }
+      const historySync = (stored as Record<string, unknown>).historySync;
+      if (historySync === "background" || historySync === "off") settings.historySync = historySync;
     }
   } catch { /* Invalid or unavailable storage uses the existing app defaults. */ }
   return settings;
@@ -31,8 +36,8 @@ function loadAutomation(): ConcordAutomation {
 export const activeConcordAutomation = loadAutomation();
 export const concordAutomation$ = new BehaviorSubject<ConcordAutomation>({ ...activeConcordAutomation });
 
-export function setConcordAutomation(key: AutomationKey, enabled: boolean) {
-  const settings = { ...concordAutomation$.value, [key]: enabled };
+export function setConcordAutomation<K extends keyof ConcordAutomation>(key: K, value: ConcordAutomation[K]) {
+  const settings = { ...concordAutomation$.value, [key]: value };
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));
   } catch {
