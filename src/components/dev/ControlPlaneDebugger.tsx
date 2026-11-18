@@ -22,6 +22,7 @@ import { useCommunity } from "../../hooks/use-community";
 import { ConfirmModal } from "../modals";
 import { UserLabel } from "../User";
 import { formatTime } from "../../helpers/util";
+import { stringify } from "../../helpers/concord-history";
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -61,20 +62,6 @@ function shortHex(hex: string | undefined): string {
 
 function tagVal(rumor: Rumor, name: string): string | undefined {
   return rumor.tags.find((t) => t[0] === name)?.[1];
-}
-
-/** JSON.stringify that survives bigint (control perms) and Map/Set (state). */
-function stringify(value: unknown): string {
-  return JSON.stringify(
-    value,
-    (_k, v) => {
-      if (typeof v === "bigint") return v.toString();
-      if (v instanceof Map) return Object.fromEntries(v);
-      if (v instanceof Set) return [...v];
-      return v;
-    },
-    2,
-  );
 }
 
 function randomHex(bytes: number): string {

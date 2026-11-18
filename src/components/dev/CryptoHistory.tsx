@@ -7,16 +7,13 @@
  * example; adapted to ride the app's shared RelayPool and active account instead
  * of a standalone RelayPool + LoginView.
  */
-import type { NostrEvent } from "applesauce-core/helpers/event";
 import { StreamSigners, type CommunityState, type DecodedEvent, type InviteBundle, type JoinMaterial, type Role } from "@applesauce/concord";
 import {
   decodeWrap,
   decryptBundle,
   deriveConcordKeys,
-  EPHEMERAL_GIFT_WRAP_KIND,
   foldControl,
   foldMembers,
-  GIFT_WRAP_KIND,
   INVITE_BUNDLE_KIND,
   parseInviteLink,
   readRekey,
@@ -31,6 +28,7 @@ import type { ISigner } from "applesauce-signers";
 import { useEffect, useRef, useState } from "react";
 import { firstValueFrom, timeout, toArray } from "rxjs";
 import { pool } from "../../nostr";
+import { buildChain, fetchWraps, relaysFor, shortHex } from "../../helpers/concord-history";
 import { useConcord } from "../../hooks/use-concord";
 import { UserLabel } from "../User";
 
@@ -66,44 +64,6 @@ type LoadResult = { snapshot: EpochSnapshot; adoptedMaterial?: JoinMaterial };
 // ---- the walk (functional, over the exported crypto core) ------------------
 
 /**
- * The ordered chain of epochs the invite grants: every prior root retained in
- * `held_roots` plus the current one. `rollForward` prepends
- * `{epoch: prevEpoch, key: prevRoot}` on each Refounding, so this yields epoch
- * 0..current. Reconstructing a held epoch needs only its root — no signer.
- */
-function buildChain(material: JoinMaterial): JoinMaterial[] {
-  const roots = [...(material.held_roots ?? []), { epoch: material.root_epoch, key: material.community_root }].sort(
-    (a, b) => a.epoch - b.epoch,
-  );
-  const seen = new Set<number>();
-  const uniq = roots.filter((r) => (seen.has(r.epoch) ? false : (seen.add(r.epoch), true)));
-  return uniq.map((r) => ({
-    ...material,
-    community_root: r.key,
-    root_epoch: r.epoch,
-    // Only roots strictly older than this epoch were "held" at it (cosmetic count).
-    held_roots: uniq
-      .filter((o) => o.epoch < r.epoch)
-      .map((o) => ({ epoch: o.epoch, key: o.key }))
-      .reverse(),
-  }));
-}
-
-function relaysFor(material: JoinMaterial): string[] {
-  return material.relays.length ? material.relays : STOCK_RELAYS;
-}
-
-/** One-shot fetch of every gift wrap at `authors`, failing explicitly if the request has not completed within 10s. */
-async function fetchWraps(relays: string[], authors: string[], signers: StreamSigners): Promise<NostrEvent[]> {
-  if (authors.length === 0) return [];
-  return firstValueFrom(
-    pool
-      .request(relays, [{ kinds: [GIFT_WRAP_KIND, EPHEMERAL_GIFT_WRAP_KIND], authors }], { waitForAuth: authors, onAuthRequired: signers.onAuthRequired })
-      .pipe(toArray(), timeout(10_000)),
-  );
-}
-
-/**
  * Derive one epoch's keys, authenticate + fetch its plane events, fold them, and
  * decide how the walk continues. `prior` threads the previous epoch's key state so
  * `planes` accumulates and already-fetched history stays decodable (mirrors
@@ -129,7 +89,7 @@ async function loadEpoch(
   const guestbook: DecodedEvent[] = [];
   const dissolved: DecodedEvent[] = [];
   const rekey: DecodedEvent[] = [];
-  for (const ev of await fetchWraps(relays, authorsA, signers)) {
+  for (const ev of await fetchWraps(pool, relays, authorsA, signers)) {
     const info = keys.planes.get(ev.pubkey);
     if (!info) continue;
     const d = decodeWrap(ev, info.convKey);
@@ -147,6 +107,7 @@ async function loadEpoch(
   signers.register([...keys.channels.values()]);
   const channelDecoded: DecodedEvent[] = [];
   for (const ev of await fetchWraps(
+    pool,
     relays,
     [...keys.channels.values()].map((k) => k.pk),
     signers,
@@ -258,11 +219,6 @@ async function resolveInvite(url: string): Promise<JoinMaterial> {
 }
 
 // ---- rendering helpers -----------------------------------------------------
-
-function shortHex(hex: string): string {
-  if (!hex) return "—";
-  return `${hex.slice(0, 10)}…${hex.slice(-6)}`;
-}
 
 /** An address row, highlighted when it rolled since the previous epoch. */
 function Row({ label, value, changed }: { label: string; value: string; changed?: boolean }) {

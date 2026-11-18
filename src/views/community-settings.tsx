@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
-import { DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
+import { Bug, DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
@@ -18,15 +18,17 @@ import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/h
 import { ConfirmModal } from "../components/modals";
 import { toastError, toastSuccess } from "../services/toasts";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
+import { CommunityDebugPage } from "../components/dev/CommunityDebug";
 
-type PageId = "overview" | "roles" | "members" | "channels" | "advanced";
+type PageId = "overview" | "roles" | "members" | "channels" | "advanced" | "debug";
 
-const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
+const PAGES: { id: PageId; label: string; icon: ReactNode; devOnly?: boolean }[] = [
   { id: "overview", label: "Overview", icon: <Landmark size={18} /> },
   { id: "roles", label: "Roles", icon: <Shield size={18} /> },
   { id: "members", label: "Members", icon: <Users size={18} /> },
   { id: "channels", label: "Channels", icon: <Hash size={18} /> },
-  { id: "advanced", label: "Advanced", icon: <RefreshCw size={18} /> },
+  { id: "advanced", label: "Advanced", icon: <RefreshCw size={18} />, devOnly: true },
+  { id: "debug", label: "Debug", icon: <Bug size={18} />, devOnly: true },
 ];
 
 const PERM_LABELS: Record<PermName, string> = {
@@ -68,10 +70,10 @@ export function CommunitySettingsView({
   const account = useActiveAccount();
   const community = useCommunity(cid);
   const metadata = use$(community?.metadata$);
-  // The Advanced page (Refounding etc.) is a developer-only area — hide it from
-  // the nav, and refuse to render it via a direct URL, unless dev mode is on.
+  // Advanced (Refounding etc.) and Debug are developer-only areas — hide them from
+  // the nav, and refuse to render them via a direct URL, unless dev mode is on.
   const devMode = useDevMode();
-  const visiblePages = devMode ? PAGES : PAGES.filter((p) => p.id !== "advanced");
+  const visiblePages = devMode ? PAGES : PAGES.filter((p) => !p.devOnly);
   // Fall back to the overview page for an unknown/empty/hidden page value.
   const page: PageId = visiblePages.some((p) => p.id === pageParam) ? (pageParam as PageId) : "overview";
 
@@ -99,13 +101,14 @@ export function CommunitySettingsView({
         ))}
       </nav>
       <div className="flex-1 relative overflow-y-auto p-10 max-md:px-4 max-md:py-6">
-        <div className="max-w-[640px]">
+        <div className={page === "debug" ? "max-w-5xl" : "max-w-[640px]"}>
           <ControlKeyNotice cid={cid} />
           {page === "overview" && <OverviewPage cid={cid} isOwner={isOwner} onClose={onClose} />}
           {page === "roles" && <RolesPage cid={cid} />}
           {page === "members" && <MembersPage cid={cid} />}
           {page === "channels" && <ChannelsPage cid={cid} />}
           {page === "advanced" && <AdvancedPage cid={cid} />}
+          {page === "debug" && <CommunityDebugPage cid={cid} />}
         </div>
       </div>
     </div>
