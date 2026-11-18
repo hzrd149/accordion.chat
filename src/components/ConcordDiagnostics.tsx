@@ -6,6 +6,7 @@ export function ConcordDiagnostics({ client }: { client: ConcordClient }) {
   const [items, setItems] = useState<ConcordDiagnostic[]>([]);
   useEffect(() => {
     const sub = client.diagnostics$.subscribe((diagnostic) => {
+      if (diagnostic.stage === "direct-invite-receive") return;
       setItems((previous) => [...previous.slice(-4), diagnostic]);
     });
     return () => sub.unsubscribe();
