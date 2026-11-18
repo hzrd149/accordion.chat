@@ -5,6 +5,7 @@ import { mapEventsToStore, mapEventsToTimeline } from "applesauce-core/observabl
 import { catchError, EMPTY, lastValueFrom, merge, of } from "rxjs";
 import type { NostrEvent } from "nostr-tools";
 import { eventStore, LOOKUP_RELAYS, pool, user$ } from "../nostr";
+import { toastError } from "../services/toasts";
 import {
   ACTIVE_PROFILE_THEME_KIND,
   parseProfileThemeEvent,
@@ -21,7 +22,6 @@ export type ProfileThemesState = {
   themes: ProfileTheme[];
   authors: string[];
   fetching: boolean;
-  error: string | null;
   fetchThemes: () => Promise<void>;
 };
 
@@ -67,7 +67,6 @@ export function useAvailableProfileThemes(pubkey: string | undefined): ProfileTh
   const user = activeUser ?? (pubkey ? castUser(pubkey, eventStore) : undefined);
   const contacts = use$(() => user?.contacts$, [user]);
   const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const authors = useMemo(() => {
     if (!pubkey) return [];
@@ -100,7 +99,6 @@ export function useAvailableProfileThemes(pubkey: string | undefined): ProfileTh
     const currentAuthors = authorsKey ? authorsKey.split(",") : [];
     if (!currentAuthors.length || fetching) return;
     setFetching(true);
-    setError(null);
     try {
       const groups = await buildRelayGroups(currentAuthors);
       if (!groups.length) return;
@@ -115,11 +113,11 @@ export function useAvailableProfileThemes(pubkey: string | undefined): ProfileTh
         { defaultValue: [] as NostrEvent[] },
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch Nostr themes");
+      toastError(e, "Failed to fetch Nostr themes");
     } finally {
       setFetching(false);
     }
   }, [authorsKey, fetching]);
 
-  return { themes, authors, fetching, error, fetchThemes };
+  return { themes, authors, fetching, fetchThemes };
 }

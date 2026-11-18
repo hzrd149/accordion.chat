@@ -30,6 +30,7 @@ import {
   fetchOpenRankingCapabilities,
 } from "../services/open-ranking";
 import { useOpenRankingProvider } from "../hooks/use-open-ranking-provider";
+import { toast, toastError, toastSuccess } from "../services/toasts";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
@@ -186,7 +187,6 @@ function AppearancePage({ pubkey }: { pubkey: string }) {
             nostrThemes={profileThemes.themes}
             nostrAuthors={profileThemes.authors.length}
             fetchingNostrThemes={profileThemes.fetching}
-            fetchNostrError={profileThemes.error}
             onFetchNostrThemes={() => void profileThemes.fetchThemes()}
             onSelect={(choice) => setSlotTheme(slot, choice)}
           />
@@ -203,7 +203,6 @@ function ThemeSlotPicker({
   nostrThemes,
   nostrAuthors,
   fetchingNostrThemes,
-  fetchNostrError,
   onFetchNostrThemes,
   onSelect,
 }: {
@@ -213,7 +212,6 @@ function ThemeSlotPicker({
   nostrThemes: ReturnType<typeof useAvailableProfileThemes>["themes"];
   nostrAuthors: number;
   fetchingNostrThemes: boolean;
-  fetchNostrError: string | null;
   onFetchNostrThemes: () => void;
   onSelect: (choice: ThemeChoice) => void;
 }) {
@@ -282,7 +280,6 @@ function ThemeSlotPicker({
               {fetchingNostrThemes ? "Fetching..." : "Fetch Nostr themes"}
             </button>
           )}
-          {fetchNostrError && <span className="text-xs font-semibold text-error">{fetchNostrError}</span>}
         </div>
         {filteredNostr.length ? (
           <div className="flex flex-wrap gap-2">
@@ -325,7 +322,6 @@ function ThemeSlotPicker({
             <button className="btn btn-primary btn-sm mt-3" onClick={onFetchNostrThemes} disabled={fetchingNostrThemes || nostrAuthors === 0}>
               {fetchingNostrThemes ? "Fetching..." : "Fetch Nostr themes"}
             </button>
-            {fetchNostrError && <div className="mt-2 text-xs font-semibold text-error">{fetchNostrError}</div>}
           </div>
         )}
       </div>
@@ -375,8 +371,6 @@ function DiscoveryPage() {
   const [value, setValue] = useState(provider);
   const [seededProvider, setSeededProvider] = useState(provider);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   if (provider !== seededProvider) {
     setSeededProvider(provider);
@@ -385,8 +379,6 @@ function DiscoveryPage() {
 
   async function save(test: boolean) {
     setBusy(true);
-    setStatus(null);
-    setError(null);
     try {
       const next = setProvider(value);
       setValue(next);
@@ -394,12 +386,12 @@ function DiscoveryPage() {
         const caps = await fetchOpenRankingCapabilities(next);
         const search = caps["/search/pubkeys"];
         if (!search?.length) throw new Error("This service doesn't support searching for people");
-        setStatus(`Working: ${search[0].name || search[0].id}`);
+        toastSuccess(`Working: ${search[0].name || search[0].id}`);
       } else {
-        setStatus("Saved");
+        toastSuccess("Saved");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't save the search service");
+      toastError(e, "Couldn't save the search service");
     } finally {
       setBusy(false);
     }
@@ -408,8 +400,7 @@ function DiscoveryPage() {
   function reset() {
     resetProvider();
     setValue(DEFAULT_OPEN_RANKING_PROVIDER);
-    setStatus("Reset to the default service");
-    setError(null);
+    toast("Reset to the default service");
   }
 
   return (
@@ -419,8 +410,6 @@ function DiscoveryPage() {
         The service used to find people by name when you invite or message someone. This setting only applies to
         this browser.
       </p>
-      {error && <div className="alert alert-error text-sm mb-4">{error}</div>}
-      {status && <div className="alert alert-success text-sm mb-4">{status}</div>}
       <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="open-ranking-provider">
         Search service
       </label>
@@ -432,11 +421,7 @@ function DiscoveryPage() {
               key={preset.url}
               type="button"
               className={`btn btn-sm ${active ? "btn-primary" : "btn-outline"}`}
-              onClick={() => {
-                setValue(preset.url);
-                setStatus(null);
-                setError(null);
-              }}
+              onClick={() => setValue(preset.url)}
               title={preset.hint}
             >
               {preset.label}
@@ -448,11 +433,7 @@ function DiscoveryPage() {
         id="open-ranking-provider"
         className="input input-bordered w-full max-w-[520px]"
         value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setStatus(null);
-          setError(null);
-        }}
+        onChange={(e) => setValue(e.target.value)}
         placeholder={DEFAULT_OPEN_RANKING_PROVIDER}
       />
       <p className="text-xs opacity-60 mt-2 max-w-[520px]">
@@ -479,7 +460,6 @@ function AdvancedPage() {
   const devMode = useDevMode();
   const verificationMode = use$(signatureVerificationMode$);
   const automation = use$(concordAutomation$) ?? activeConcordAutomation;
-  const [automationError, setAutomationError] = useState("");
   const automationChanged = (Object.keys(activeConcordAutomation) as (keyof typeof activeConcordAutomation)[])
     .some((key) => automation[key] !== activeConcordAutomation[key]);
   return (
@@ -554,9 +534,8 @@ function AdvancedPage() {
                 onChange={(e) => {
                   try {
                     setConcordAutomation(option.key, e.target.checked);
-                    setAutomationError("");
                   } catch (error) {
-                    setAutomationError(error instanceof Error ? error.message : "Could not save automation settings.");
+                    toastError(error, "Could not save automation settings.");
                   }
                 }}
               />
@@ -567,7 +546,6 @@ function AdvancedPage() {
             </label>
           ))}
         </div>
-        {automationError && <p role="alert" className="text-sm text-error mt-3">{automationError}</p>}
         {automationChanged && (
           <div className="mt-4 flex items-center gap-3">
             <button className="btn btn-primary btn-sm" onClick={() => window.location.reload()}>Reload to apply</button>
@@ -598,8 +576,6 @@ function ProfilePage({ signer, pubkey }: PageProps) {
 
   const [form, setForm] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Seed the form from the loaded profile once (and whenever a fresh copy loads).
   // Reset during render (keyed on the profile object) rather than in an effect,
@@ -616,12 +592,10 @@ function ProfilePage({ signer, pubkey }: PageProps) {
 
   function set(key: string, value: string) {
     setForm((f) => ({ ...f, [key]: value }));
-    setSaved(false);
   }
 
   async function save() {
     setBusy(true);
-    setError(null);
     try {
       const content: Partial<ProfileContent> = {};
       for (const f of PROFILE_FIELDS) {
@@ -632,9 +606,9 @@ function ProfilePage({ signer, pubkey }: PageProps) {
       if (about) content.about = about;
       // UpdateProfile merges into an existing kind 0; new users have none yet.
       await runner.run(profile ? UpdateProfile : CreateProfile, content);
-      setSaved(true);
+      toastSuccess("Profile saved");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save profile");
+      toastError(e, "Failed to save profile");
     } finally {
       setBusy(false);
     }
@@ -672,12 +646,10 @@ function ProfilePage({ signer, pubkey }: PageProps) {
         <label className="label text-xs font-semibold uppercase opacity-70">About</label>
         <textarea className="textarea textarea-bordered w-full" value={form.about ?? ""} rows={4} placeholder="Tell people about yourself" onChange={(e) => set("about", e.target.value)} />
       </div>
-      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save profile"}
         </button>
-        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
     </>
   );
@@ -702,21 +674,19 @@ function RelayListEditor({
 }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function add() {
     const url = normalizeUrl(input, scheme);
     if (!url) {
-      setError("Enter a valid URL");
+      toast("Enter a valid URL", "error");
       return;
     }
-    setError(null);
     setBusy(true);
     try {
       await onAdd(url);
       setInput("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to add");
+      toastError(e, "Failed to add");
     } finally {
       setBusy(false);
     }
@@ -736,7 +706,6 @@ function RelayListEditor({
           Add
         </button>
       </div>
-      {error && <div className="alert alert-error text-sm mt-3">{error}</div>}
       {items.length === 0 ? (
         <p className="text-sm opacity-70 leading-relaxed mt-3">None configured yet.</p>
       ) : (
@@ -745,7 +714,7 @@ function RelayListEditor({
             <li key={url} className="flex items-center gap-2.5 px-3 py-2 bg-base-200 rounded-md min-w-0">
               {scheme === "wss" ? <RelayInfo url={url} /> : <HttpServerInfo url={url} />}
               {renderExtra?.(url, i)}
-              <button className="btn btn-ghost btn-sm btn-circle hover:text-error" title="Remove" onClick={() => onRemove(url)}>
+              <button className="btn btn-ghost btn-sm btn-circle hover:text-error" title="Remove" onClick={() => void onRemove(url).catch((e: unknown) => toastError(e, "Failed to remove"))}>
                 <Trash2 size={16} />
               </button>
             </li>
@@ -836,7 +805,7 @@ function BlossomPage({ signer, pubkey }: PageProps) {
           i === 0 ? (
             <span className="badge badge-primary badge-sm">Default</span>
           ) : (
-            <button className="btn btn-ghost btn-sm btn-circle" title="Set as default" onClick={() => runner.run(SetDefaultBlossomServer, new URL(url))}>
+            <button className="btn btn-ghost btn-sm btn-circle" title="Set as default" onClick={() => void runner.run(SetDefaultBlossomServer, new URL(url)).catch((e: unknown) => toastError(e, "Failed to set default"))}>
               <Star size={16} />
             </button>
           )

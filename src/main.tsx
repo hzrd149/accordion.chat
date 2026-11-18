@@ -5,6 +5,7 @@ import { eventStore, accounts, loadAccounts } from "./nostr";
 import { App } from "./views/App";
 import { startMessages } from "./services/messages";
 import { MessagesNotice } from "./components/MessagesNotice";
+import { Toaster } from "./components/Toaster";
 import "./index.css";
 import "yet-another-react-lightbox/styles.css";
 
@@ -28,6 +29,7 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <App />
         <MessagesNotice />
+        <Toaster />
       </BrowserRouter>
     </AccountsProvider>
   </EventStoreProvider>,

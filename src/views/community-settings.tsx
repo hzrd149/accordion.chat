@@ -16,6 +16,7 @@ import { MessageExpiration } from "../components/MessageExpiration";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
 import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
+import { toastError, toastSuccess } from "../services/toasts";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
 
 type PageId = "overview" | "roles" | "members" | "channels" | "advanced";
@@ -157,8 +158,6 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const [description, setDescription] = useState(() => metadata?.description ?? "");
   const [blossom, setBlossom] = useState(() => (metadata?.blossom_servers ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   // Leaving is available to every member (no permission needed) — tombstone the
@@ -173,20 +172,18 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
 
   async function save() {
     setBusy(true);
-    setSaved(false);
-    setError("");
     const blossom_servers = blossom
       .split(/[\n,]/)
       .map((s) => s.trim())
       .filter(Boolean);
     try {
       await community?.admin.editMetadata({ name: name.trim(), description: description.trim(), blossom_servers });
-      setSaved(true);
+      toastSuccess("Community settings saved");
     } catch (e) {
       // editMetadata asserts the 64-byte name / 10000-byte description caps on
       // the *merged* result. The caps are on UTF-8 bytes, so a name well inside
       // the input's 64-character limit can still be refused.
-      setError((e as Error).message);
+      toastError(e, "Failed to save community settings");
     } finally {
       setBusy(false);
     }
@@ -207,11 +204,11 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
       )}
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Name</label>
-        <input className="input input-bordered w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} maxLength={64} />
+        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
       </div>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Description</label>
-        <textarea className="textarea textarea-bordered w-full" value={description} onChange={(e) => { setDescription(e.target.value); setSaved(false); }} rows={3} />
+        <textarea className="textarea textarea-bordered w-full" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
       </div>
       {canManageMetadata && (
         <div className="mb-4">
@@ -219,18 +216,16 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
           <textarea
             className="textarea textarea-bordered w-full"
             value={blossom}
-            onChange={(e) => { setBlossom(e.target.value); setSaved(false); }}
+            onChange={(e) => setBlossom(e.target.value)}
             rows={2}
             placeholder={"https://blossom.example/\n(one per line — leave empty to use your own)"}
           />
         </div>
       )}
-      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
         </button>
-        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
 
       {community && <MessageExpiration community={community} />}
@@ -295,15 +290,13 @@ function ImageField({
   const url = useDecryptedImage(pointer);
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function onFile(file: File) {
-    setError(null);
     setBusy(true);
     try {
       await community?.admin.setCommunityImage(which, file);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      toastError(e, "Upload failed");
     } finally {
       setBusy(false);
     }
@@ -330,12 +323,11 @@ function ImageField({
             title={`Remove ${which}`}
             disabled={disabled}
             onClick={() => {
-              setError(null);
               // Routes through editMetadata, which asserts the name/description
               // byte caps on the merged result — so it can be refused over a
               // pre-existing over-cap field this action never touched.
               void Promise.resolve().then(() => community?.admin.removeCommunityImage(which)).catch((e: unknown) =>
-                setError(e instanceof Error ? e.message : "Remove failed"),
+                toastError(e, "Remove failed"),
               );
             }}
           >
@@ -355,7 +347,6 @@ function ImageField({
         }}
       />
       {busy && <span className="text-xs opacity-60">Encrypting & uploading…</span>}
-      {error && <span className="text-error text-xs">{error}</span>}
     </div>
   );
 }
@@ -405,7 +396,6 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   function toggle(p: PermName) {
     const next = new Set(perms);
@@ -416,15 +406,15 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
 
   async function create() {
     setBusy(true);
-    setError("");
     try {
       let bits = 0n;
       for (const p of perms) bits |= PERM[p];
       await community?.admin.createRole(name.trim(), roleCount + 1, bits);
       setName("");
       setPerms(new Set());
+      toastSuccess("Role created");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create role failed");
+      toastError(e, "Create role failed");
     } finally {
       setBusy(false);
     }
@@ -449,7 +439,6 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
           </div>
         ))}
       </div>
-      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={create} disabled={!canCreate || !name.trim() || busy}>
           Create role
@@ -471,8 +460,6 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
   const [perms, setPerms] = useState<Set<PermName>>(() => rolePermSet(role));
   const [memberQuery, setMemberQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (role.role_id !== seededRole) {
@@ -482,7 +469,6 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
     setColor(role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#5865f2");
     setPerms(rolePermSet(role));
     setMemberQuery("");
-    setSaved(false);
   }
 
   const canManage = canManageRole && !dissolved;
@@ -496,23 +482,20 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
     if (next.has(p)) next.delete(p);
     else next.add(p);
     setPerms(next);
-    setSaved(false);
   }
 
   async function run(action: () => Promise<unknown> | undefined) {
     setBusy(true);
-    setError("");
     try {
       await action();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Role update failed");
+      toastError(e, "Role update failed");
     } finally {
       setBusy(false);
     }
   }
 
   async function save() {
-    setSaved(false);
     await run(async () => {
       let bits = 0n;
       for (const p of perms) bits |= PERM[p];
@@ -523,7 +506,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
         permissions: bits.toString(),
         color: Number.isFinite(parsedColor) ? parsedColor : 0,
       });
-      setSaved(true);
+      toastSuccess("Role saved");
     });
   }
 
@@ -548,16 +531,16 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
       <div className="grid grid-cols-2 gap-4 mb-4 max-sm:grid-cols-1">
         <div>
           <label className="label text-xs font-semibold uppercase opacity-70">Role name</label>
-          <input className="input input-bordered w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} maxLength={64} disabled={!canManage} />
+          <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} disabled={!canManage} />
         </div>
         <div>
           <label className="label text-xs font-semibold uppercase opacity-70">Position</label>
-          <input className="input input-bordered w-full" type="number" min={1} value={position} onChange={(e) => { setPosition(e.target.value); setSaved(false); }} disabled={!canManage} />
+          <input className="input input-bordered w-full" type="number" min={1} value={position} onChange={(e) => setPosition(e.target.value)} disabled={!canManage} />
         </div>
       </div>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Color</label>
-        <input className="input input-bordered w-full max-w-40" type="color" value={color} onChange={(e) => { setColor(e.target.value); setSaved(false); }} disabled={!canManage} />
+        <input className="input input-bordered w-full max-w-40" type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={!canManage} />
       </div>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Permissions</label>
@@ -570,12 +553,10 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
           </div>
         ))}
       </div>
-      {error && <div className="alert alert-error text-sm mt-4">{error}</div>}
       <div className="flex items-center gap-3.5 mt-5 mb-7">
         <button className="btn btn-primary" onClick={save} disabled={!canManage || !name.trim() || busy}>
           {busy ? "Saving…" : "Save changes"}
         </button>
-        {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
         <button className="btn btn-error btn-outline gap-2 ml-auto" onClick={() => setDeleteOpen(true)} disabled={!canManage || busy}>
           <Trash2 size={16} />
           Delete role
@@ -676,10 +657,8 @@ function MemberRow({
   // strictly outrank the target — so these have to report rather than reject
   // into nothing. canModerate$ should already have hidden the button, but the
   // fold can move between render and click.
-  const [error, setError] = useState("");
   const guard = (action: () => Promise<unknown> | undefined) => () => {
-    setError("");
-    void Promise.resolve().then(action).catch((e: unknown) => setError((e as Error).message));
+    void Promise.resolve().then(action).catch((e: unknown) => toastError(e, "Action failed"));
   };
 
   return (
@@ -708,7 +687,6 @@ function MemberRow({
             </button>
           ))}
       </div>
-      {error && <div className="w-full pl-[42px] text-error text-sm max-sm:pl-0">{error}</div>}
       {!isOwner && canManageRoles && canGrantRoles && serverRoles.length > 0 && (
         <div className="w-full flex gap-1.5 flex-wrap pl-[42px] max-sm:pl-0">
           {serverRoles.map((r) => {
@@ -746,7 +724,6 @@ function MembersPage({ cid }: { cid: string }) {
   const canManageRoles = (use$(() => community?.can$(PERM.MANAGE_ROLES), [community]) ?? false) && !dissolved;
   const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const [banTarget, setBanTarget] = useState<string | null>(null);
-  const [unbanError, setUnbanError] = useState("");
 
   const doBan = async (member: string) => {
     // 1. Soft ban: banlist + strip roles (CORD-04). Refuses locally if we don't
@@ -798,7 +775,6 @@ function MembersPage({ cid }: { cid: string }) {
             Banned members can't rejoin. Unbanning doesn't add them back: send them a new invite
             to let them in again. They won't see messages from before they were banned.
           </p>
-          {unbanError && <div className="alert alert-error text-sm mb-3">{unbanError}</div>}
           {[...banlist].sort().map((m) => (
             <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200 max-sm:flex-wrap">
               <UserAvatar pubkey={m} />
@@ -815,9 +791,8 @@ function MembersPage({ cid }: { cid: string }) {
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => {
-                      setUnbanError("");
                       void Promise.resolve(community?.admin.unban(m)).catch((e: unknown) =>
-                        setUnbanError((e as Error).message),
+                        toastError(e, "Unban failed"),
                       );
                     }}
                   >
@@ -873,14 +848,12 @@ function ChannelsPage({ cid }: { cid: string }) {
   // `channels$` is already live-only, so a deleted channel never reaches here.
   const privateChannels = channels.filter((c) => c.private);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [kickTarget, setKickTarget] = useState<{ channelId: string; member: string; name: string } | null>(null);
 
   async function addMember(channelId: string, member: string) {
     if (!community) return;
     setBusy(true);
-    setError("");
     try {
       // Grant the channel-scoped role first (the observable roster), then deliver
       // the current channel key — CORD-03 "delivered on grant", no rotation.
@@ -892,7 +865,7 @@ function ChannelsPage({ cid }: { cid: string }) {
       }
       await community.admin.grantChannelAccess(channelId, member);
     } catch (e) {
-      setError((e as Error).message);
+      toastError(e, "Failed to add member");
     } finally {
       setBusy(false);
     }
@@ -919,7 +892,6 @@ function ChannelsPage({ cid }: { cid: string }) {
         Private channels and who can read them. Removing someone stops them from reading anything
         sent afterward.
       </p>
-      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
       {privateChannels.length === 0 && (
         <p className="text-sm opacity-70 leading-relaxed mb-5">
           No private channels yet. Create one from the sidebar (check “Private channel”).
@@ -1042,19 +1014,16 @@ function AdvancedPage({ cid }: { cid: string }) {
   const canRekey = use$(() => community?.can$(PERM.BAN), [community]) ?? false;
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   async function doRekey() {
-    setError(null);
     setBusy(true);
     try {
       // A community-wide epoch rotation is a no-exclude Refounding (CORD-06):
       // keep every current member, remove no one.
       await community?.admin.refound({ keep: [...members] });
-      setDone(true);
+      toastSuccess("Epoch rotated");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Rekey failed");
+      toastError(e, "Rekey failed");
     } finally {
       setBusy(false);
       setConfirm(false);
@@ -1082,8 +1051,6 @@ function AdvancedPage({ cid }: { cid: string }) {
         ) : (
           <p className="text-sm opacity-70 leading-relaxed mb-5">Requires ownership or the Ban Members permission.</p>
         )}
-        {done && <span className="text-success text-sm font-semibold">Rotated ✓</span>}
-        {error && <span className="text-error text-xs">{error}</span>}
       </div>
 
       {confirm && (
