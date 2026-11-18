@@ -6,10 +6,12 @@ import { App } from "./views/App";
 import { startMessages } from "./services/messages";
 import { MessagesNotice } from "./components/MessagesNotice";
 import { Toaster } from "./components/Toaster";
+import { initializeLogout } from "./services/logout";
 import "./index.css";
 import "yet-another-react-lightbox/styles.css";
 
 loadAccounts();
+initializeLogout();
 startMessages();
 
 // NOTE: intentionally NOT wrapped in <StrictMode>. StrictMode's dev-only

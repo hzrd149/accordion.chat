@@ -1,4 +1,5 @@
 import type { KeyValue } from "@applesauce/concord";
+import { accountStorageLease, registerAccountResource } from "./account-lifecycle";
 
 const DB_NAME = "accordion:concord:v1";
 const STORE = "records";
@@ -38,6 +39,9 @@ export function createConcordStorage(
   let keyPromise: Promise<CryptoKey> | undefined;
   let lane: Promise<unknown> = Promise.resolve();
   const prefix = `${pubkey}:value:`;
+  const account = pubkey.startsWith("dm:") ? pubkey.slice(3) : pubkey;
+  const assertActive = accountStorageLease(account);
+  let resourceClosed = false;
 
   function open(): Promise<IDBDatabase> {
     if (!database) {
@@ -116,7 +120,13 @@ export function createConcordStorage(
   }
 
   function enqueue<T>(work: () => Promise<T>): Promise<T> {
+    try { assertActive(); } catch (error) { return Promise.reject(error); }
+    if (resourceClosed) {
+      resourceClosed = false;
+      close = registerAccountResource(account, drain);
+    }
     const result = lane.then(work);
+    assertActive.track(result);
     const tail = result.catch(() => undefined);
     lane = tail;
     void tail.then(async () => {
@@ -127,6 +137,19 @@ export function createConcordStorage(
     });
     return result;
   }
+
+  async function drain() {
+    let pending;
+    do {
+      pending = lane;
+      await pending;
+    } while (pending !== lane);
+    const current = database;
+    database = undefined;
+    (await current)?.close();
+    resourceClosed = true;
+  }
+  let close = registerAccountResource(account, drain);
 
   return {
     getItem: (key) => enqueue(async () => {
@@ -164,15 +187,6 @@ export function createConcordStorage(
     }),
     // Disposal can be followed by SDK compensating writes after an async save.
     // Each idle lane closes its handle; later writes may reopen it safely.
-    async close() {
-      let pending;
-      do {
-        pending = lane;
-        await pending;
-      } while (pending !== lane);
-      const current = database;
-      database = undefined;
-      (await current)?.close();
-    },
+    close: () => close(),
   };
 }
