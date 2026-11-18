@@ -75,7 +75,7 @@ NostrConnectSigner.pool = pool;
 export const NOSTR_CONNECT_RELAYS =
 	import.meta.env.VITE_NOSTR_CONNECT_RELAYS?.split(",")
 		.map((r: string) => r.trim())
-		.filter(Boolean) ?? ["wss://bucket.coracle.social", "wss://relay.nsec.app"];
+		.filter(Boolean) ?? ["wss://bucket.coracle.social", "wss://relay.nip46.com"];
 
 // Permissions we request from a remote signer. The user's own key signs the
 // CORD-01 seals (SEAL_ENCRYPTED/PLAINTEXT), standard NIP-59 seals (13) for
