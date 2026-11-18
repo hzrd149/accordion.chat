@@ -24,6 +24,22 @@ export function DmClientStatus() {
     finally { setBusy(false); }
   }
 
+  async function retryOne(id: string) {
+    const envelope = client?.eventStore.getEvent(id);
+    if (!client || !envelope) throw new Error("Message envelope is no longer cached. Refresh the inbox first.");
+    await client.retryDecryption(envelope);
+  }
+
+  async function retryAll(ids: readonly string[]) {
+    let missing = 0;
+    for (const id of ids) {
+      const envelope = client?.eventStore.getEvent(id);
+      if (!client || !envelope) { missing++; continue; }
+      try { await client.retryDecryption(envelope); } catch { /* Still failing; it stays in the list. */ }
+    }
+    if (missing) throw new Error(`${missing} message envelope${missing === 1 ? " is" : "s are"} no longer cached. Refresh the inbox first.`);
+  }
+
   const syncing = status === "loading";
   const syncError = syncErrors(sync);
   const locked = decryption?.locked ?? 0;
@@ -83,27 +99,36 @@ export function DmClientStatus() {
             )}
           </div>
           <p className="text-sm opacity-70 leading-relaxed mb-3">
-            {decryption.unlocked} of {decryption.total} messages unlocked, {locked} locked, {failed.length} failed.
-            Locked messages are waiting for your signer to decrypt them. Failed ones could not be opened and can be retried.
+            {decryption.unlocked} of {decryption.total} messages unlocked{locked > 0 ? `, ${locked} waiting for your signer` : ""}.
           </p>
           {failed.length > 0 && (
-            <table className="table table-sm">
-              <thead><tr><th>Failed message</th><th className="w-20" /></tr></thead>
-              <tbody>
-                {failed.map((id) => (
-                  <tr key={id}>
-                    <td className="font-mono text-xs">{id.slice(0, 16)}…</td>
-                    <td className="text-right">
-                      <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => void run(async () => {
-                        const envelope = client.eventStore.getEvent(id);
-                        if (!envelope) throw new Error("Message envelope is no longer cached. Refresh the inbox first.");
-                        await client.retryDecryption(envelope);
-                      })}>Retry</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <details className="collapse collapse-arrow border border-base-300 bg-base-200 max-w-[520px]">
+              <summary className="collapse-title text-sm font-semibold min-h-0 py-3">
+                {failed.length} message{failed.length === 1 ? "" : "s"} could not be decrypted
+              </summary>
+              <div className="collapse-content">
+                <div className="flex items-center gap-3 mb-2">
+                  <p className="text-xs opacity-60 flex-1">
+                    Usually spam or messages not meant for you. Retry if your signer was unavailable or declined.
+                  </p>
+                  <button className="btn btn-sm gap-1 shrink-0" disabled={unlocking} onClick={() => void run(() => retryAll(failed))}>
+                    <RotateCcw size={14} /> Retry all
+                  </button>
+                </div>
+                <table className="table table-sm">
+                  <tbody>
+                    {failed.map((id) => (
+                      <tr key={id}>
+                        <td className="font-mono text-xs">{id.slice(0, 16)}…</td>
+                        <td className="text-right">
+                          <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => void run(() => retryOne(id))}>Retry</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           )}
         </section>
       )}
