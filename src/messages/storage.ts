@@ -7,7 +7,7 @@ export async function openMessageStorage(pubkey: string) {
   const encrypted = createConcordStorage(`dm:${pubkey}`);
   const conversationIndex = await IndexedDBConversationIndexStore.open(`accordion:dm-index:${pubkey}`);
   const scoped = (prefix: string) => ({
-    getItem: (key: string) => encrypted.getItem(`${prefix}:${key}`),
+    getItem: async (key: string) => (await encrypted.getItem(`${prefix}:${key}`)) ?? null,
     setItem: (key: string, value: string) => encrypted.setItem(`${prefix}:${key}`, value),
     removeItem: (key: string) => encrypted.removeItem(`${prefix}:${key}`),
   });

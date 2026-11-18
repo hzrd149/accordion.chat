@@ -135,7 +135,7 @@ export function markMentionsRead(pubkey: string, cid: string, ms: number) {
 
 /**
  * Drop a community's read state. Called when leaving a community, alongside
- * `deleteCommunityRumorCache` — the cursors are meaningless once the plaintext
+ * the SDK's community database cleanup — the cursors are meaningless once the plaintext
  * they point into is gone, and would otherwise resurrect if the user rejoined.
  */
 export function clearCommunityReadState(pubkey: string, cid: string) {

@@ -368,7 +368,7 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const live = use$(client.invites.live$) ?? NO_INVITES;
   const invites = live.filter((i) => i.communityId === cid);
   const canCreate = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
-  const allChannels = use$(community?.channels$) ?? NO_CHANNELS;
+  const allChannels = use$(community?.channelViews$) ?? NO_CHANNELS;
   // Only channels we hold a key for can be granted — the package throws on an id
   // that isn't in our material, and we couldn't hand over a key we don't have.
   // `accessible` is the package's own key-presence flag, and it re-emits on a key

@@ -1,4 +1,4 @@
-import { ConcordClient, logger } from "@applesauce/concord";
+import { ConcordClient, Databases, Drafts, logger } from "@applesauce/concord";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -7,7 +7,6 @@ import { eventStore, pool } from "../nostr";
 import { attachVoiceGc } from "../voice/registry";
 import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
-import { createRumorStoreFactory } from "../services/rumor-cache";
 import { createConcordStorage } from "../services/concord-storage";
 import { activeConcordAutomation } from "../services/concord-automation";
 
@@ -18,19 +17,21 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     const uploader = createConcordUploader(account, account.pubkey, (cid) =>
       client?.getCommunity(cid)?.state$.value.metadata?.blossom_servers,
     );
-    const stores = createRumorStoreFactory();
+    const databases = Databases.createIndexedDBDatabaseFactory(account.pubkey);
+    const drafts = Drafts.createIndexedDBDraftStore();
     const storage = createConcordStorage(account.pubkey);
     const client = new ConcordClient({
       signer: account,
       pool,
       eventStore,
       uploader,
-      storeFactory: stores,
+      databaseFactory: databases,
+      draftStore: drafts,
       storage,
       ...activeConcordAutomation,
       logger: logger.extend("accordion"),
     });
-    return { client, stores, storage };
+    return { client, databases, drafts, storage };
   }, [account]);
   const [failure, setFailure] = useState<{ client: ConcordClient; message: string } | null>(null);
   const [retry, setRetry] = useState(0);
@@ -62,10 +63,13 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
   useEffect(() => {
     if (!session) return;
     const detachVoice = attachVoiceGc(session.client);
+    const stopPurge = session.client.schedulePurge();
     return () => {
+      stopPurge();
       detachVoice();
       session.client.dispose();
-      void session.stores.dispose().catch((error: unknown) => console.warn("Could not close community cache", error));
+      void session.databases.close().catch((error: unknown) => console.warn("Could not close community cache", error));
+      void session.drafts.close();
       void session.storage.close().catch((error: unknown) => console.warn("Could not close community storage", error));
     };
   }, [session]);

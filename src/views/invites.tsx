@@ -4,7 +4,7 @@ import { Inbox, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { ConcordDirectInvite } from "@applesauce/concord/casts";
 import { useConcord } from "../hooks/use-concord";
-import { useInvites, wrapForInvite } from "../hooks/use-invites";
+import { useInvites } from "../hooks/use-invites";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { UserAvatar, UserName } from "../components/User";
 
@@ -13,20 +13,22 @@ import { UserAvatar, UserName } from "../components/User";
  * rail stays put) listing the pending invites the user has been handed directly
  * (gift-wrapped to their npub). Accepting keeps the keys and joins the
  * community; dismissing hides the invite locally (the keys are discarded, per
- * spec — decline = forget). The watcher syncs in the background; the Sync button
+   * spec — decline = forget). The client syncs in the background; the Sync button
  * forces a fresh fetch.
  */
 export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
-  const { watcher, invites, status } = useInvites();
+  const client = useConcord();
+  const { invites, status } = useInvites();
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string>();
 
   async function sync() {
-    if (!watcher || syncing) return;
+    if (syncing) return;
     setSyncing(true);
     setSyncError(undefined);
     try {
-      await watcher.refresh();
+      await client.giftWrapReceiver?.loadHistory();
+      await client.readPendingDirectInvites();
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -84,7 +86,6 @@ export function InvitesView({ mobileNav }: { mobileNav: ReactNode }) {
 
 function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
   const client = useConcord();
-  const { watcher } = useInvites();
   const navigate = useNavigate();
   const bundle = invite.bundle;
   const iconUrl = useDecryptedImage(bundle?.icon);
@@ -103,10 +104,7 @@ function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
       const community = await client.joinByBundle(bundle);
       // Once joined, drop the invite from the list too (decline-after-join is
       // moot; keeping it would re-offer a community we're already in).
-      if (watcher) {
-        const wrap = wrapForInvite(watcher, invite);
-        if (wrap) await watcher.dismiss(wrap);
-      }
+      await client.dismissDirectInvite(invite);
       navigate(`/c/${community.communityId}`);
     } catch (e) {
       setError((e as Error).message);
@@ -115,11 +113,12 @@ function InviteRow({ invite }: { invite: ConcordDirectInvite }) {
   }
 
   async function dismiss() {
-    if (!watcher || busy) return;
+    if (busy) return;
     setBusy("dismiss");
     try {
-      const wrap = wrapForInvite(watcher, invite);
-      if (wrap) await watcher.dismiss(wrap);
+      await client.dismissDirectInvite(invite);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(null);
     }

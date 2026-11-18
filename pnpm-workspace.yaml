@@ -2,9 +2,9 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - applesauce-*
+  - '@jsr/applesauce__concord@0.1.0'
 
-# Keep one validated SDK graph. Concord 00ceaa38355d explicitly disables
-# timeline batching for its synchronous authority folds.
+# Keep one validated SDK graph compatible with Concord's published dependencies.
 # Pin transitives too: direct pins alone still allow ^7 dependencies to drift.
 overrides:
   applesauce-core: 7.1.3

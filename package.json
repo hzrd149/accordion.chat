@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@applesauce/concord": "file:vendor/applesauce-concord-00ceaa38355d.tgz",
+    "@applesauce/concord": "jsr:0.1.0",
     "@livekit/components-react": "^2.9.25",
     "@livekit/components-styles": "^1.2.0",
     "@noble/curves": "^2.4.0",

@@ -7,7 +7,6 @@ import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
 import { useDevMode } from "../hooks/use-dev-mode";
-import { deleteCommunityRumorCache } from "../services/rumor-cache";
 import { clearCommunityReadState } from "../services/read-state";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
@@ -166,7 +165,6 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   // (which are meaningless once the plaintext is gone), then leave settings.
   async function leave() {
     await client.leave(cid);
-    await deleteCommunityRumorCache(cid);
     if (account) clearCommunityReadState(account.pubkey, cid);
     onClose();
     navigate("/");
@@ -861,7 +859,7 @@ function MembersPage({ cid }: { cid: string }) {
 
 function ChannelsPage({ cid }: { cid: string }) {
   const community = useCommunity(cid);
-  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const channels = use$(community?.channelViews$) ?? NO_CHANNELS;
   const roles = use$(community?.roles$) ?? NO_ROLES;
   const members = use$(community?.members$) ?? NO_MEMBERS;
   const grants = use$(community?.grants$) ?? NO_GRANTS;

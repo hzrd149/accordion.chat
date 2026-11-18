@@ -73,7 +73,7 @@ import { useFavoriteEmojis } from "../hooks/use-favorite-emojis";
 import { getMentionsLastRead, markMentionsRead } from "../services/read-state";
 import { useReadState } from "../hooks/use-read-state";
 import type { ChatMessage } from "../chat/fold";
-import type { ChannelMetadata, Role, ConcordCommunity, Storage } from "@applesauce/concord";
+import type { ChannelMetadata, Role, ConcordCommunity, Media } from "@applesauce/concord";
 import { MissingChannelKeyError, PERM } from "@applesauce/concord";
 import { hasChannelKey } from "@applesauce/concord/helpers";
 import { kinds } from "nostr-tools";
@@ -239,7 +239,7 @@ function Shell() {
   // restored from the local mirror or relay list, so don't replace them just
   // because the current fold has not surfaced them yet.
   const activeCommunity = useCommunity(selectedCid ?? undefined);
-  const activeChannels = use$(activeCommunity?.channels$) ?? NO_CHANNELS;
+  const activeChannels = use$(activeCommunity?.channelViews$) ?? NO_CHANNELS;
   const defaultDestination = defaultRoute(
     pathname,
     communityIds[0],
@@ -642,7 +642,7 @@ function Sidebar({
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
   const metadata = use$(community?.metadata$);
-  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const channels = use$(community?.channelViews$) ?? NO_CHANNELS;
   const dissolved = use$(community?.dissolved$) ?? false;
   // The `$` forms, not the `canDo` snapshots: these gate rendered controls, so
   // they have to re-emit when a role grant changes the answer.
@@ -881,7 +881,7 @@ function MentionsView({
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
   const metadata = use$(community?.metadata$);
-  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const channels = use$(community?.channelViews$) ?? NO_CHANNELS;
   const readState = useReadState(pubkey);
 
   // Only scan text channels the user can read (public + held private channels).
@@ -1001,7 +1001,7 @@ function ChatView({
   const account = useActiveAccount();
   const pubkey = account?.pubkey ?? "";
   const metadata = use$(community?.metadata$);
-  const channels = use$(community?.channels$) ?? NO_CHANNELS;
+  const channels = use$(community?.channelViews$) ?? NO_CHANNELS;
   const membersState = use$(community?.members$) ?? NO_MEMBERS;
   const dissolved = use$(community?.dissolved$) ?? false;
   const messages = useMessages(community, channelId);
@@ -1102,7 +1102,7 @@ function ChatView({
       value: string,
       files: File[],
       reply: ReplyTarget | null,
-      onUploadProgress: (progress: Storage.ConcordUploadProgress) => void,
+      onUploadProgress: (progress: Media.ConcordUploadProgress) => void,
     ) => {
       setReplyTo(null);
       await community?.sendMessage(channelId, value, reply ?? undefined, files.length ? files : undefined, favorites, {
@@ -2171,14 +2171,14 @@ const Composer = memo(function Composer({
     text: string,
     files: File[],
     reply: ReplyTarget | null,
-    onUploadProgress: (progress: Storage.ConcordUploadProgress) => void,
+    onUploadProgress: (progress: Media.ConcordUploadProgress) => void,
   ) => Promise<void>;
 }) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
-  const [upload, setUpload] = useState<Storage.ConcordUploadProgress | null>(null);
+  const [upload, setUpload] = useState<Media.ConcordUploadProgress | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
