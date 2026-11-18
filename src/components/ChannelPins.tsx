@@ -10,6 +10,8 @@ export function ChannelPins({ community, channelId, onJump }: {
   const allowed = use$(() => community.can$(PERM.PIN_MESSAGES), [community]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Only show the section when there is something pinned (or an unpin error to report).
+  if (!pins.length && !error) return null;
   return <details className="border-b border-base-300 px-4 py-2">
     <summary className="cursor-pointer text-sm">Pinned messages ({pins.length})</summary>
     <div className="max-h-60 overflow-y-auto">
@@ -23,7 +25,6 @@ export function ChannelPins({ community, channelId, onJump }: {
           ).catch((reason: unknown) => setError(String(reason))).finally(() => setBusy(false));
         }}>Unpin</button>}
       </div>)}
-      {!pins.length && <p className="text-sm opacity-60 py-2">No pinned messages.</p>}
       {error && <p role="alert" className="text-error text-sm">{error}</p>}
     </div>
   </details>;
