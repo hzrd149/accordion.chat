@@ -33,7 +33,7 @@ export function DmMessageList({ conversation, peer }: { conversation: WrappedCon
 /** A run of consecutive messages from one author within five minutes (the
  * applesauce `groupMessageEvents` rule noStrudel uses). The group is newest-first,
  * so it renders column-reverse: the oldest message sits on top and carries the
- * avatar/name/time header, and only the newest, bottom bubble keeps its tail. */
+ * name/time header; the newest, bottom bubble carries the avatar and tail. */
 function DmMessageGroup({ messages, own }: { messages: Rumor[]; own: boolean }) {
   return (
     <div className="flex flex-col-reverse">
@@ -47,7 +47,7 @@ function DmMessageGroup({ messages, own }: { messages: Rumor[]; own: boolean }) 
 function DmMessageBubble({ message, own, header, tail }: { message: Rumor; own: boolean; header: boolean; tail: boolean }) {
   return (
     <div className={`chat ${own ? "chat-end" : "chat-start"} py-0.5`} title={header ? undefined : formatTime(message.created_at * 1000)}>
-      <div className="chat-image w-9">{header && <UserAvatar pubkey={message.pubkey} className="w-9 h-9" />}</div>
+      <div className="chat-image w-9">{tail && <UserAvatar pubkey={message.pubkey} className="w-9 h-9" />}</div>
       {header && <div className="chat-header text-xs opacity-70"><UserName pubkey={message.pubkey} /> <time>{formatTime(message.created_at * 1000)}</time></div>}
       <div className={`chat-bubble whitespace-pre-line break-words max-w-[min(32rem,75vw)] ${tail ? "" : "before:hidden rounded-field"}`}>
         {message.kind === 15 ? <span className="italic opacity-70">Encrypted attachment</span> : message.content}
