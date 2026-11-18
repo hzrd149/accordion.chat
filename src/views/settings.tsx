@@ -10,6 +10,7 @@ import type { ProfileContent } from "applesauce-core/helpers/profile";
 import type { ISigner } from "applesauce-signers";
 import { createSettingsRunner, saveRelayList, userFor } from "../helpers/settings-actions";
 import { UserAvatar } from "../components/User";
+import { HttpServerInfo, RelayInfo } from "../components/ServerInfo";
 import {
   DARK_DAISY_THEMES,
   LIGHT_DAISY_THEMES,
@@ -742,7 +743,7 @@ function RelayListEditor({
         <ul className="mt-3.5 flex flex-col gap-1">
           {items.map((url, i) => (
             <li key={url} className="flex items-center gap-2.5 px-3 py-2 bg-base-200 rounded-md min-w-0">
-              <span className="flex-1 font-mono text-[13px] overflow-hidden text-ellipsis whitespace-nowrap">{url.replace(/^(wss|https?):\/\//, "")}</span>
+              {scheme === "wss" ? <RelayInfo url={url} /> : <HttpServerInfo url={url} />}
               {renderExtra?.(url, i)}
               <button className="btn btn-ghost btn-sm btn-circle hover:text-error" title="Remove" onClick={() => onRemove(url)}>
                 <Trash2 size={16} />
