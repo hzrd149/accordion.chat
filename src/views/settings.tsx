@@ -32,6 +32,8 @@ import {
 import { useOpenRankingProvider } from "../hooks/use-open-ranking-provider";
 import { toast, toastError, toastSuccess } from "../services/toasts";
 import { DmClientStatus } from "./dm/DmClientStatus";
+import { DmEnabledToggle } from "./dm/DmEnabledToggle";
+import { messagesEnabled$ } from "../services/messages";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
@@ -765,10 +767,16 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
   const user = useMemo(() => userFor(pubkey), [pubkey]);
   const runner = useMemo(() => createSettingsRunner(signer, pubkey), [signer, pubkey]);
   const relays = use$(() => user.directMessageRelays$, [user]) ?? [];
+  const enabled = use$(messagesEnabled$);
 
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Direct Messages</h2>
+      <p className="text-sm opacity-70 leading-relaxed mb-3">
+        When disabled, Accordion does not connect to DM relays or decrypt private messages. Saved in this browser.
+      </p>
+      <DmEnabledToggle />
+      <h3 className="text-lg font-bold mt-10 mb-1">DM relays</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
         Where people send your encrypted direct messages. List a couple of reliable relays so messages always reach
         you.
@@ -779,7 +787,7 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
         onAdd={(url) => runner.run(AddDirectMessageRelay, url)}
         onRemove={(url) => runner.run(RemoveDirectMessageRelay, url)}
       />
-      <DmClientStatus />
+      {enabled && <DmClientStatus />}
     </>
   );
 }

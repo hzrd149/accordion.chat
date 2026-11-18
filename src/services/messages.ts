@@ -8,6 +8,21 @@ export const messagesError$ = new BehaviorSubject<string | null>(null);
 const restart$ = new BehaviorSubject(0);
 let subscription: Subscription | undefined;
 
+/** Direct messaging is opt-in: nothing connects or decrypts until the user enables it. */
+const ENABLED_KEY = "accordion:dm-enabled";
+function readEnabled(): boolean {
+  try { return localStorage.getItem(ENABLED_KEY) === "1"; } catch { return false; }
+}
+export const messagesEnabled$ = new BehaviorSubject<boolean>(readEnabled());
+
+export function setMessagesEnabled(enabled: boolean) {
+  try {
+    if (enabled) localStorage.setItem(ENABLED_KEY, "1");
+    else localStorage.removeItem(ENABLED_KEY);
+  } catch { /* Storage may be unavailable; the choice still applies to this session. */ }
+  if (messagesEnabled$.value !== enabled) messagesEnabled$.next(enabled);
+}
+
 export function dismissMessagesError() {
   messagesError$.next(null);
 }
@@ -19,11 +34,11 @@ export function restartMessages() {
 /** Own the inbox independently of React mounts and route subscriptions. */
 export function startMessages() {
   if (subscription) return;
-  subscription = combineLatest([accounts.active$.pipe(distinctUntilChanged()), restart$]).pipe(
-    switchMap(([account]) => new Observable<WrappedMessagesClient | null>((subscriber) => {
+  subscription = combineLatest([accounts.active$.pipe(distinctUntilChanged()), messagesEnabled$.pipe(distinctUntilChanged()), restart$]).pipe(
+    switchMap(([account, enabled]) => new Observable<WrappedMessagesClient | null>((subscriber) => {
       subscriber.next(null);
       dismissMessagesError();
-      if (!account) return;
+      if (!account || !enabled) return;
       let cancelled = false;
       let client: WrappedMessagesClient | undefined;
       let storage: Awaited<ReturnType<typeof openMessageStorage>> | undefined;
