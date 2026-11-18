@@ -1,7 +1,9 @@
 import type { ConcordClient, ConcordCommunity, ConcordDiagnostic } from "@applesauce/concord";
-import { auditTime, BehaviorSubject, distinctUntilChanged, map, merge, Subject, switchMap } from "rxjs";
+import { auditTime, BehaviorSubject, distinctUntilChanged, EMPTY as NO_ERRORS, filter, map, merge, Subject, switchMap } from "rxjs";
 
 const HISTORY = 20;
+export const DIRECT_INVITE_ACTIVITY = Symbol("direct invite receiver");
+type ActivityKey = string | typeof DIRECT_INVITE_ACTIVITY;
 
 interface SyncEvent {
   id: string;
@@ -16,11 +18,11 @@ interface SyncActivity {
 }
 
 const EMPTY: SyncActivity = { events: [], issues: [] };
-const journals = new WeakMap<ConcordClient, BehaviorSubject<ReadonlyMap<string, SyncActivity>>>();
+const journals = new WeakMap<ConcordClient, BehaviorSubject<ReadonlyMap<ActivityKey, SyncActivity>>>();
 function journalFor(client: ConcordClient) {
   let journal = journals.get(client);
   if (!journal) {
-    journal = new BehaviorSubject<ReadonlyMap<string, SyncActivity>>(new Map());
+    journal = new BehaviorSubject<ReadonlyMap<ActivityKey, SyncActivity>>(new Map());
     journals.set(client, journal);
   }
   return journal;
@@ -44,9 +46,9 @@ function communityEvents(community: ConcordCommunity) {
   );
 }
 
-export function syncActivity$(client: ConcordClient, communityId = "") {
+export function syncActivity$(client: ConcordClient, scope: ActivityKey = "") {
   return journalFor(client).pipe(
-    map((journal) => journal.get(communityId) ?? EMPTY),
+    map((journal) => journal.get(scope) ?? EMPTY),
     distinctUntilChanged(),
   );
 }
@@ -55,14 +57,31 @@ export function syncActivity$(client: ConcordClient, communityId = "") {
 export function observeConcordSync(client: ConcordClient) {
   const journal = journalFor(client);
   const updates = new Subject<void>();
-  const entries = new Map<string, SyncActivity>();
+  const entries = new Map<ActivityKey, SyncActivity>();
   const subscription = updates.pipe(auditTime(150)).subscribe(() => journal.next(new Map(entries)));
 
-  subscription.add(client.diagnostics$.subscribe((issue) => {
-    const id = issue.communityId ?? "";
-    const current = entries.get(id) ?? EMPTY;
-    entries.set(id, { ...current, issues: [issue, ...current.issues.slice(0, HISTORY - 1)] });
+  const recordIssue = (scope: ActivityKey, issue: ConcordDiagnostic) => {
+    const current = entries.get(scope) ?? EMPTY;
+    entries.set(scope, { ...current, issues: [issue, ...current.issues.slice(0, HISTORY - 1)] });
     updates.next();
+  };
+
+  subscription.add(client.diagnostics$.subscribe((issue) => {
+    // Concord flattens receiver errors, so use the receiver's operation below.
+    if (issue.stage === "direct-invite-receive") return;
+    const scope = issue.stage === "direct-invite-dismissed-persist"
+      ? DIRECT_INVITE_ACTIVITY
+      : issue.communityId ?? "";
+    recordIssue(scope, issue);
+  }));
+
+  subscription.add(merge(client.phase$, client.directInvites$).pipe(
+    map(() => client.giftWrapReceiver),
+    distinctUntilChanged(),
+    switchMap((receiver) => receiver?.errors$ ?? NO_ERRORS),
+    filter(({ operation }) => operation !== "decrypt"),
+  ).subscribe(({ error }) => {
+    recordIssue(DIRECT_INVITE_ACTIVITY, { stage: "direct-invite-receive", error });
   }));
 
   subscription.add(client.communities$.pipe(
@@ -71,7 +90,7 @@ export function observeConcordSync(client: ConcordClient) {
     switchMap((communities) => {
       const activeIds = new Set(communities.map(({ material }) => material.community_id));
       for (const id of entries.keys()) {
-        if (id && !activeIds.has(id)) entries.delete(id);
+        if (typeof id === "string" && id && !activeIds.has(id)) entries.delete(id);
       }
       updates.next();
       return merge(...communities.map((community) => {

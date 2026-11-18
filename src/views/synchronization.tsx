@@ -1,13 +1,14 @@
 import type { ConcordCommunityStatus, ConcordDiagnostic, ConcordPrivateChannelStatus } from "@applesauce/concord";
 import { normalizeURL } from "applesauce-core/helpers/url";
 import { use$ } from "applesauce-react/hooks";
-import { Activity, Loader2, Lock, Radio } from "lucide-react";
+import { Activity, Inbox, Loader2, Lock, Radio } from "lucide-react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
 import { useCommunity } from "../hooks/use-community";
 import { useConcord } from "../hooks/use-concord";
 import { pool } from "../nostr";
-import { syncActivity$ } from "../services/concord-sync-activity";
+import { activeConcordAutomation } from "../services/concord-automation";
+import { DIRECT_INVITE_ACTIVITY, syncActivity$ } from "../services/concord-sync-activity";
 
 const phaseLabels = {
   idle: "Waiting to sync",
@@ -160,6 +161,43 @@ function CommunitySync({ id }: { id: string }) {
   );
 }
 
+function DirectInviteSync() {
+  const client = useConcord();
+  const phase = use$(client.phase$);
+  const invites = use$(client.directInvites$);
+  const receiver = client.giftWrapReceiver;
+  const lifecycle = use$(receiver?.lifecycle$);
+  const relays = use$(receiver?.readRelays$);
+  const activity = use$(() => syncActivity$(client, DIRECT_INVITE_ACTIVITY), [client]);
+  const count = invites?.invites.length ?? 0;
+  const watching = lifecycle === "running";
+  const label = watching ? "Listening"
+    : !activeConcordAutomation.watchDirectInvites ? "Background sync off"
+    : phase === "starting" ? "Starting" : "Stopped";
+
+  return (
+    <section className="rounded-box border border-base-300 bg-base-100">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 py-3">
+        <h2 className="flex items-center gap-2 text-lg font-semibold"><Inbox size={18} /> Direct invite receiver</h2>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-base-content/70">{count} {count === 1 ? "invite" : "invites"}</span>
+          <span className={`badge badge-soft h-auto py-1 text-base ${watching ? "badge-success" : "badge-ghost"}`}>{label}</span>
+        </div>
+      </header>
+      <div className="grid gap-5 p-4 lg:grid-cols-2">
+        <section className="min-w-0 space-y-2">
+          <h3 className="flex items-center gap-2 font-semibold"><Radio size={18} /> Relays</h3>
+          <Relays urls={relays ?? []} />
+        </section>
+        {!!activity?.issues.length && <section className="min-w-0 space-y-2">
+          <h3 className="font-semibold">Issues</h3>
+          <Issues issues={activity.issues} />
+        </section>}
+      </div>
+    </section>
+  );
+}
+
 export function SynchronizationView({ mobileNav }: { mobileNav: ReactNode }) {
   const client = useConcord();
   const status = use$(client.status$);
@@ -209,6 +247,7 @@ export function SynchronizationView({ mobileNav }: { mobileNav: ReactNode }) {
           {!communityCount && status?.phase === "ready" && list?.knowledge !== "confirmed-empty" && (
             <p className="px-1 text-base-content/70">No communities loaded</p>
           )}
+          <DirectInviteSync />
         </div>
       </div>
     </main>
