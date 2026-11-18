@@ -30,6 +30,14 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       databaseFactory: databases,
       draftStore: drafts,
       storage,
+      // Persist both Direct Invite gift-wrap layers so a reload restores them
+      // from device-encrypted storage instead of prompting the signer again.
+      giftWrapReceiverOptions: {
+        decryptionCache: {
+          getItem: async (id) => (await storage.getItem(`gift-wrap-plaintext:${id}`)) ?? null,
+          setItem: (id, plaintext) => storage.setItem(`gift-wrap-plaintext:${id}`, plaintext),
+        },
+      },
       ...activeConcordAutomation,
       logger: logger.extend("accordion"),
     });
