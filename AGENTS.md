@@ -25,6 +25,8 @@ Direct Invites are exposed by `client.directInvites$` and dismissed with `dismis
 
 ## Git workflow
 
+Do not create or commit planning documents, investigation reports, handoffs, or other task write-ups in this application repository. Keep task plans and findings in the conversation instead.
+
 **Commit after every feature or self-contained change.** Once a feature works (app tests, build and lint pass), make a focused git commit before moving on. Keep commits small and scoped to one feature so history stays reviewable; don't batch unrelated changes into one commit. Do not push unless asked.
 
 Never end a task with your own significant changes left uncommitted. Commit your paths with `git commit --only -- <paths>`. If the user's uncommitted edits share a file you must commit (e.g. `package.json`/`pnpm-lock.yaml`, which cannot be split), include them in the same commit and say so in the message and your reply. Do not skip the commit or wait to ask.
