@@ -15,8 +15,8 @@ export function MessageExpiration({ community }: { community: ConcordCommunity }
   return <section className="mt-6">
     <h3 className="font-semibold">Disappearing messages</h3>
     <p className="text-sm opacity-70 mb-2">Applies to new messages in every channel. Existing messages keep their original timer.</p>
-    <select className="select select-bordered" aria-label="Message expiration"
-      value={seconds} disabled={!allowed || dissolved || busy}
+    {allowed && !dissolved ? <select className="select select-bordered" aria-label="Message expiration"
+      value={seconds} disabled={busy}
       onChange={(event) => {
         setBusy(true);
         void community.setMessageExpiration(Number(event.target.value))
@@ -24,6 +24,6 @@ export function MessageExpiration({ community }: { community: ConcordCommunity }
           .finally(() => setBusy(false));
       }}>
       {[...choices].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-    </select>
+    </select> : <p className="text-sm">{choices.get(seconds)}</p>}
   </section>;
 }

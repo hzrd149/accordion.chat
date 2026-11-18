@@ -14,6 +14,7 @@ import { useCommunityUserNames, useCommunityUserSearch } from "../hooks/use-user
 import { PERM } from "@applesauce/concord";
 import { MessageExpiration } from "../components/MessageExpiration";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
+import { canChangeMemberRole$, channelMemberPermissions$ } from "../helpers/role-grant-permission";
 import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
 import { toastError, toastSuccess } from "../services/toasts";
@@ -54,6 +55,7 @@ const NO_ROLES: Role[] = [];
 const NO_CHANNELS: ChannelMetadata[] = [];
 const NO_MEMBERS: ReadonlySet<string> = new Set();
 const NO_GRANTS: ReadonlyMap<string, string[]> = new Map();
+const NO_CHANNEL_PERMISSIONS = { add: NO_MEMBERS, remove: NO_MEMBERS };
 
 /** Full-page community settings, with a sub-page per admin area. */
 export function CommunitySettingsView({
@@ -158,7 +160,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const navigate = useNavigate();
   const metadata = use$(community?.metadata$);
   const dissolved = use$(community?.dissolved$) ?? false;
-  const canManageMetadata = use$(() => community?.can$(PERM.MANAGE_METADATA), [community]) ?? false;
+  const canManageMetadata = (use$(() => community?.can$(PERM.MANAGE_METADATA), [community]) ?? false) && !dissolved;
   const devMode = useDevMode();
   const [name, setName] = useState(() => metadata?.name ?? community?.material.name ?? "");
   const [description, setDescription] = useState(() => metadata?.description ?? "");
@@ -176,6 +178,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   }
 
   async function save() {
+    if (!canManageMetadata) return;
     setBusy(true);
     try {
       await community?.admin.editMetadata({ name: name.trim(), description: description.trim() });
@@ -203,6 +206,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
           </div>
         </div>
       )}
+      {canManageMetadata ? <>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Name</label>
         <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} />
@@ -216,7 +220,10 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
           {busy ? "Saving…" : "Save changes"}
         </button>
       </div>
-
+      </> : <dl className="space-y-4">
+        <div><dt className="text-xs font-semibold uppercase opacity-70">Name</dt><dd>{metadata?.name ?? community?.material.name}</dd></div>
+        <div><dt className="text-xs font-semibold uppercase opacity-70">Description</dt><dd className="whitespace-pre-wrap">{metadata?.description || "No description."}</dd></div>
+      </dl>}
       {community && <MessageExpiration community={community} />}
       {devMode && (
         <div className="mt-6 mb-4">
@@ -230,7 +237,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
           <DoorOpen size={18} />
           Leave community
         </button>
-        {isOwner && (
+        {isOwner && !dissolved && (
           <button
             className="btn btn-error"
             onClick={async () => {
@@ -352,9 +359,10 @@ function RolesPage({ cid }: { cid: string }) {
   const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const [tab, setTab] = useState<string>(serverRoles[0]?.role_id ?? "new");
 
-  const selectedRole = serverRoles.find((r) => r.role_id === tab);
-  const activeTab = selectedRole ? selectedRole.role_id : "new";
   const canCreate = canManageRoles && !dissolved;
+  const selectedRole = serverRoles.find((r) => r.role_id === tab) ?? (!canCreate ? serverRoles[0] : undefined);
+  const activeTab = selectedRole ? selectedRole.role_id : "new";
+  const newRolePosition = Math.max(0, ...roles.map((role) => role.position)) + 1;
 
   return (
     <>
@@ -366,13 +374,14 @@ function RolesPage({ cid }: { cid: string }) {
             {r.name}
           </button>
         ))}
-        <button className={`tab shrink-0 ${activeTab === "new" ? "tab-active" : ""}`} onClick={() => setTab("new")}>
+        {canCreate && <button className={`tab shrink-0 ${activeTab === "new" ? "tab-active" : ""}`} onClick={() => setTab("new")}>
           New role
-        </button>
+        </button>}
       </div>
 
       {activeTab === "new" ? (
-        <NewRolePanel cid={cid} roleCount={roles.length} canCreate={canCreate} />
+        canCreate ? <NewRolePanel cid={cid} position={newRolePosition} canCreate={canCreate} /> :
+          <p className="text-sm opacity-70">Select a role to view its permissions.</p>
       ) : selectedRole ? (
         <RolePanel cid={cid} role={selectedRole} dissolved={dissolved} onDeleted={() => setTab("new")} />
       ) : null}
@@ -380,7 +389,7 @@ function RolesPage({ cid }: { cid: string }) {
   );
 }
 
-function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: number; canCreate: boolean }) {
+function NewRolePanel({ cid, position, canCreate }: { cid: string; position: number; canCreate: boolean }) {
   const community = useCommunity(cid);
   const [name, setName] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
@@ -394,11 +403,12 @@ function NewRolePanel({ cid, roleCount, canCreate }: { cid: string; roleCount: n
   }
 
   async function create() {
+    if (!canCreate) return;
     setBusy(true);
     try {
       let bits = 0n;
       for (const p of perms) bits |= PERM[p];
-      await community?.admin.createRole(name.trim(), roleCount + 1, bits);
+      await community?.admin.createRole(name.trim(), position, bits);
       setName("");
       setPerms(new Set());
       toastSuccess("Role created");
@@ -474,6 +484,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
   }
 
   async function run(action: () => Promise<unknown> | undefined) {
+    if (!canManage) return;
     setBusy(true);
     try {
       await action();
@@ -515,8 +526,8 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
 
   return (
     <>
-      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mb-2">Edit role</h3>
-      {!canManage && <p className="text-sm opacity-70 leading-relaxed mb-5">You need Manage Roles permission and must outrank this role to edit it.</p>}
+      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mb-2">{canManage ? "Edit role" : role.name}</h3>
+      {canManage ? <>
       <div className="grid grid-cols-2 gap-4 mb-4 max-sm:grid-cols-1">
         <div>
           <label className="label text-xs font-semibold uppercase opacity-70">Role name</label>
@@ -551,8 +562,12 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
           Delete role
         </button>
       </div>
+      </> : <dl className="space-y-3">
+        <div><dt className="text-xs font-semibold uppercase opacity-70">Position</dt><dd>{role.position}</dd></div>
+        <div><dt className="text-xs font-semibold uppercase opacity-70">Permissions</dt><dd>{[...rolePermSet(role)].map((p) => PERM_LABELS[p]).join(", ") || "None"}</dd></div>
+      </dl>}
 
-      {deleteOpen && (
+      {deleteOpen && canManage && (
         <ConfirmModal
           title={`Delete ${role.name}?`}
           danger
@@ -579,29 +594,27 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
         <div key={m} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-base-200">
           <UserAvatar pubkey={m} />
           <div className="font-medium min-w-0 truncate"><UserName pubkey={m} /></div>
-          <button className="btn btn-ghost btn-sm ml-auto" onClick={() => removeMember(m)} disabled={!canManage || busy}>
-            Remove
-          </button>
+          {canManage && <RoleGrantButton cid={cid} member={m} roleId={role.role_id} busy={busy} className="btn btn-ghost btn-sm ml-auto" onClick={() => removeMember(m)}>Remove</RoleGrantButton>}
         </div>
       ))}
 
-      <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Add member</h3>
-      <input className="input input-bordered w-full" value={memberQuery} onChange={(e) => setMemberQuery(e.target.value)} placeholder="Search members by name or npub" disabled={!canManage} />
-      {canManage && (
+      {canManage && <>
+        <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-2">Add member</h3>
+        <input className="input input-bordered w-full" value={memberQuery} onChange={(e) => setMemberQuery(e.target.value)} placeholder="Search members by name or npub" />
         <div className="mt-2 rounded-box border border-base-300 overflow-hidden">
           {results.length === 0 ? (
             <div className="p-3 text-sm opacity-70">No matching members.</div>
           ) : (
             results.map((c) => (
-              <button key={c.pubkey} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left min-w-0" onClick={() => addMember(c.pubkey)} disabled={busy}>
+              <RoleGrantButton key={c.pubkey} cid={cid} member={c.pubkey} roleId={role.role_id} busy={busy} className="w-full flex items-center gap-2.5 p-2 hover:bg-base-200 text-left min-w-0" onClick={() => addMember(c.pubkey)}>
                 <UserAvatar pubkey={c.pubkey} />
                 <span className="font-medium truncate">{c.name}</span>
                 <span className="text-xs opacity-60 ml-auto truncate max-sm:hidden">{c.npub}</span>
-              </button>
+              </RoleGrantButton>
             ))
           )}
         </div>
-      )}
+      </>}
     </>
   );
 }
@@ -609,6 +622,26 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
 function rolePermSet(role: Role): Set<PermName> {
   const bits = parsePermissions(role.permissions);
   return new Set((Object.keys(PERM) as PermName[]).filter((p) => hasPerm(bits, PERM[p])));
+}
+
+function RoleGrantButton({ cid, member, roleId, busy, onClick, children, className }: {
+  cid: string; member: string; roleId: string; busy?: boolean;
+  onClick: () => void; children: ReactNode; className: string;
+}) {
+  const community = useCommunity(cid);
+  const allowed = use$(() => community && canChangeMemberRole$(community, member, roleId), [community, member, roleId]) ?? false;
+  if (!allowed) return null;
+  return <button className={className} disabled={busy} onClick={onClick}>{children}</button>;
+}
+
+function UnbanButton({ cid, member }: { cid: string; member: string }) {
+  const community = useCommunity(cid);
+  const allowed = use$(() => community?.canModerate$(member, PERM.BAN), [community, member]) ?? false;
+  const dissolved = use$(community?.dissolved$) ?? false;
+  if (!allowed || dissolved) return null;
+  return <button className="btn btn-ghost btn-sm" onClick={() => {
+    void Promise.resolve().then(() => community?.admin.unban(member)).catch((e: unknown) => toastError(e, "Unban failed"));
+  }}>Unban</button>;
 }
 
 // ---- Members -------------------------------------------------------------
@@ -636,6 +669,7 @@ function MemberRow({
   onBan: () => void;
 }) {
   const community = useCommunity(cid);
+  const dissolved = use$(community?.dissolved$) ?? false;
   const grants = use$(community?.grants$) ?? NO_GRANTS;
   const canKick = use$(() => community?.canModerate$(member, PERM.KICK), [community, member]) ?? false;
   const canBan = use$(() => community?.canModerate$(member, PERM.BAN), [community, member]) ?? false;
@@ -660,12 +694,12 @@ function MemberRow({
         {isOwner && <span className="badge badge-warning badge-sm">Owner</span>}
       </div>
       <div className="ml-auto flex gap-1.5 max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:flex-wrap max-sm:justify-end">
-        {canKick && (
+        {canKick && canGrantRoles && !dissolved && (
           <button className="btn btn-ghost btn-sm" onClick={guard(() => community?.admin.kick(member))}>
             Kick
           </button>
         )}
-        {canBan &&
+        {canBan && !dissolved && (banned || held.size === 0 || canGrantRoles) &&
           (banned ? (
             <button className="btn btn-ghost btn-sm" onClick={guard(() => community?.admin.unban(member))}>
               Unban
@@ -681,8 +715,9 @@ function MemberRow({
           {serverRoles.map((r) => {
             const on = held.has(r.role_id);
             return (
-              <button
+              <RoleGrantButton
                 key={r.role_id}
+                cid={cid} member={member} roleId={r.role_id}
                 className={`badge badge-sm cursor-pointer ${on ? "badge-primary" : "badge-ghost"}`}
                 onClick={guard(async () => {
                   const next = new Set(held);
@@ -692,7 +727,7 @@ function MemberRow({
                 })}
               >
                 {r.name}
-              </button>
+              </RoleGrantButton>
             );
           })}
         </div>
@@ -709,10 +744,14 @@ function MembersPage({ cid }: { cid: string }) {
   const dissolved = use$(community?.dissolved$) ?? false;
   // Whether the caller holds the bit at all, which gates the section. Whether they
   // may use it on a *particular* member is that row's own canModerate$ question.
-  const canBanAny = use$(() => community?.can$(PERM.BAN), [community]) ?? false;
+  const canBanAny = (use$(() => community?.can$(PERM.BAN), [community]) ?? false) && !dissolved;
   const canManageRoles = (use$(() => community?.can$(PERM.MANAGE_ROLES), [community]) ?? false) && !dissolved;
   const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const [banTarget, setBanTarget] = useState<string | null>(null);
+  const grants = use$(community?.grants$) ?? NO_GRANTS;
+  const canBanTarget = use$(() => community && banTarget ? community.canModerate$(banTarget, PERM.BAN) : undefined, [community, banTarget]) ?? false;
+  const canStripBanTarget = use$(() => community && banTarget ? community.canModerate$(banTarget, PERM.MANAGE_ROLES) : undefined, [community, banTarget]) ?? false;
+  const canCompleteBan = canBanTarget && (!banTarget || !grants.get(banTarget)?.length || canStripBanTarget);
 
   const doBan = async (member: string) => {
     // 1. Soft ban: banlist + strip roles (CORD-04). Refuses locally if we don't
@@ -776,24 +815,13 @@ function MembersPage({ cid }: { cid: string }) {
                 </span>
               </div>
               <div className="ml-auto max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:text-right">
-                {canBanAny && (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      void Promise.resolve(community?.admin.unban(m)).catch((e: unknown) =>
-                        toastError(e, "Unban failed"),
-                      );
-                    }}
-                  >
-                    Unban
-                  </button>
-                )}
+                {canBanAny && <UnbanButton cid={cid} member={m} />}
               </div>
             </div>
           ))}
         </>
       )}
-      {banTarget && (
+      {banTarget && canBanAny && canCompleteBan && (
         <ConfirmModal
           title="Ban member"
           danger
@@ -829,7 +857,8 @@ function ChannelsPage({ cid }: { cid: string }) {
   const roles = use$(community?.roles$) ?? NO_ROLES;
   const members = use$(community?.members$) ?? NO_MEMBERS;
   const grants = use$(community?.grants$) ?? NO_GRANTS;
-  const canManage = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
+  const dissolved = use$(community?.dissolved$) ?? false;
+  const canManage = (use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false) && !dissolved;
   const owner = community?.material.owner ?? "";
   // Display names for the "Add a member…" <select>, whose <option>s can't host <UserName>.
   const memberNames = useCommunityUserNames(community);
@@ -838,6 +867,9 @@ function ChannelsPage({ cid }: { cid: string }) {
   const [busy, setBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [kickTarget, setKickTarget] = useState<{ channelId: string; member: string; name: string } | null>(null);
+  const canKickTarget = use$(() => community && kickTarget
+    ? channelMemberPermissions$(community, kickTarget.channelId).pipe(map((permissions) => permissions.remove.has(kickTarget.member)))
+    : undefined, [community, kickTarget]) ?? false;
 
   async function addMember(channelId: string, member: string) {
     if (!community) return;
@@ -893,7 +925,8 @@ function ChannelsPage({ cid }: { cid: string }) {
           .map((m) => ({ pubkey: m, name: memberNames.get(m) ?? "Loading…" }))
           .sort((a, b) => a.name.localeCompare(b.name));
         return (
-          <div key={ch.channel_id} className="mb-7">
+          <ChannelMembershipControls key={ch.channel_id} cid={cid} channelId={ch.channel_id}>
+          {(permissions) => <div className="mb-7">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Lock size={16} />
               <strong>{ch.name}</strong>
@@ -918,7 +951,7 @@ function ChannelsPage({ cid }: { cid: string }) {
                   </div>
                   {m === owner && <span className="badge badge-warning badge-sm">Owner</span>}
                 </div>
-                {canManage && m !== owner && (
+                {canManage && permissions.remove.has(m) && m !== owner && (
                   <div className="ml-auto max-sm:ml-[42px] max-sm:w-[calc(100%-42px)] max-sm:text-right">
                     <button
                       className="btn btn-ghost btn-sm"
@@ -931,7 +964,7 @@ function ChannelsPage({ cid }: { cid: string }) {
                 )}
               </div>
             ))}
-            {canManage && outsiders.length > 0 && (
+            {canManage && outsiders.some((m) => permissions.add.has(m.pubkey)) && (
               <div className="mt-2">
                 <select
                   className="select select-bordered w-full"
@@ -942,7 +975,7 @@ function ChannelsPage({ cid }: { cid: string }) {
                   }}
                 >
                   <option value="">Add a member…</option>
-                  {outsiders.map((m) => (
+                  {outsiders.filter((m) => permissions.add.has(m.pubkey)).map((m) => (
                     <option key={m.pubkey} value={m.pubkey}>
                       {m.name}
                     </option>
@@ -950,10 +983,11 @@ function ChannelsPage({ cid }: { cid: string }) {
                 </select>
               </div>
             )}
-          </div>
+          </div>}
+          </ChannelMembershipControls>
         );
       })}
-      {deleteTarget && (
+      {deleteTarget && canManage && (
         <ConfirmModal
           title={`Delete #${deleteTarget.name}`}
           danger
@@ -970,7 +1004,7 @@ function ChannelsPage({ cid }: { cid: string }) {
           }
         />
       )}
-      {kickTarget && (
+      {kickTarget && canManage && canKickTarget && (
         <ConfirmModal
           title="Remove from channel"
           danger
@@ -991,6 +1025,15 @@ function ChannelsPage({ cid }: { cid: string }) {
   );
 }
 
+function ChannelMembershipControls({ cid, channelId, children }: {
+  cid: string; channelId: string;
+  children: (permissions: { add: ReadonlySet<string>; remove: ReadonlySet<string> }) => ReactNode;
+}) {
+  const community = useCommunity(cid);
+  const permissions = use$(() => community && channelMemberPermissions$(community, channelId), [community, channelId]) ?? NO_CHANNEL_PERMISSIONS;
+  return children(permissions);
+}
+
 // ---- Advanced (testing/debug actions) ------------------------------------
 
 function AdvancedPage({ cid }: { cid: string }) {
@@ -999,11 +1042,13 @@ function AdvancedPage({ cid }: { cid: string }) {
   const metadata = use$(community?.metadata$);
   // Refounding requires ownership or BAN; the owner holds every bit, so asking
   // for BAN covers both.
-  const canRekey = use$(() => community?.can$(PERM.BAN), [community]) ?? false;
+  const dissolved = use$(community?.dissolved$) ?? false;
+  const canRekey = (use$(() => community?.can$(PERM.BAN), [community]) ?? false) && !dissolved;
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function doRekey() {
+    if (!canRekey) return;
     setBusy(true);
     try {
       // A community-wide epoch rotation is a no-exclude Refounding (CORD-06):
@@ -1041,7 +1086,7 @@ function AdvancedPage({ cid }: { cid: string }) {
         )}
       </div>
 
-      {confirm && (
+      {confirm && canRekey && (
         <ConfirmModal
           title="Rotate epoch"
           danger

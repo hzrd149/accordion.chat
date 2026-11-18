@@ -88,7 +88,7 @@ export function CommunityNetworkPage({ cid }: { cid: string }) {
   }, [activeSet, publishedRelays]);
 
   async function save() {
-    if (!community) return;
+    if (!community || !canEdit) return;
     if (relays.length === 0) {
       toastError(new Error("A community needs at least one relay"), "Can't save network settings");
       return;
@@ -123,7 +123,7 @@ export function CommunityNetworkPage({ cid }: { cid: string }) {
         Up to {MAX_RELAYS} relays, in order of preference.
       </p>
       <UrlList
-        urls={relays}
+        urls={canEdit ? relays : publishedRelays}
         editable={canEdit}
         limit={MAX_RELAYS}
         empty="No relays. Default relays are used."
@@ -154,7 +154,7 @@ export function CommunityNetworkPage({ cid }: { cid: string }) {
         Blossom servers for encrypted images and attachments.
       </p>
       <UrlList
-        urls={servers}
+        urls={canEdit ? servers : publishedServers}
         editable={canEdit}
         empty="No servers. Members use their own."
         renderRow={(url) => <ServerRow url={url} />}
