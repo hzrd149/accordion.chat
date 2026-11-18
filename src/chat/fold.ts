@@ -1,8 +1,9 @@
-// App-owned chat and NIP-22 effects over retained, ban-filtered channel inputs.
+// Presentation-only adapter over SDK-resolved messages and visible reactions.
 
 import { kinds, type NostrEvent } from "nostr-tools";
 import type { Rumor } from "applesauce-core/helpers";
-import { EDIT_KIND, parseImeta, rumorMs, type MediaAttachment } from "@applesauce/concord/helpers";
+import type { ConcordChannelMessage } from "@applesauce/concord";
+import { parseImeta, rumorMs, type MediaAttachment } from "@applesauce/concord/helpers";
 import {
   getReactionEmoji,
   getCommentRootPointer,
@@ -12,7 +13,6 @@ import {
 
 const MESSAGE = kinds.ChatMessage; // 9
 const REACTION = kinds.Reaction; // 7
-const DELETE = kinds.EventDeletion; // 5
 const COMMENT = 1111; // NIP-22
 
 export interface ChatMessage {
@@ -51,59 +51,43 @@ function eventPointer(pointer: CommentPointer | null): { id: string; author: str
   return { id: pointer.id, author: pointer.pubkey ?? "", kind: pointer.kind };
 }
 
-export type CanDelete = (deleter: string, author: string) => boolean;
-const authorDelete: CanDelete = (deleter, author) => deleter === author;
-
 export interface ChannelProjection {
   messages: ChatMessage[];
   threads: Map<string, ThreadComment[]>;
 }
 
-/** One coherent view of messages and effects, rebuilt against current authority.
- * Inputs must come from channelTimeline so banned authors cannot contribute effects.
- * Deletions are requests, never irreversible tombstones: revoking authority restores history.
- */
-export function foldChannel(rumors: Rumor[], canDelete: CanDelete = authorDelete): ChannelProjection {
-  const byId = new Map(rumors.map((r) => [r.id, r]));
-  const deleted = new Set<string>();
-  for (const r of rumors) {
-    if (r.kind !== DELETE) continue;
-    for (const tag of r.tags) {
-      if (tag[0] !== "e") continue;
-      const target = byId.get(tag[1]);
-      if (target && target.kind !== DELETE && canDelete(r.pubkey, target.pubkey)) deleted.add(target.id);
-    }
-  }
+/** Concord owns edits, authorization, bans, deletes and expiry. This adapter only
+ * groups visible rows for Accordion's thread/reaction UI and keeps originals for inspection. */
+export function foldChannel(visible: readonly ConcordChannelMessage[], effects: readonly Rumor[]): ChannelProjection {
   const messages = new Map<string, ChatMessage>();
   const threads = new Map<string, ThreadComment[]>();
-  const edits = new Map<string, Rumor>();
   const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
+  const authorDeleted = new Set(effects.filter((effect) => effect.kind === 5).flatMap((deletion) =>
+    deletion.tags.filter((tag) => tag[0] === "e").map((tag) => `${deletion.pubkey}:${tag[1]}`)));
 
-  for (const r of rumors) {
+  for (const { rumor: r, edit, content } of visible) {
     if (r.kind === MESSAGE) {
       const q = r.tags.find((t) => t[0] === "q");
       messages.set(r.id, {
         id: r.id, author: r.pubkey, content: r.content, ms: rumorMs(r),
-        deleted: deleted.has(r.id),
+        deleted: false, edited: edit ? content : undefined,
         replyTo: q ? { id: q[1], author: q[3] ?? "" } : undefined,
         threadReplyCount: 0, reactions: [], attachments: [...parseImeta(r.tags).values()],
-        emojiTags: r.tags.filter((t) => t[0] === "emoji"), raw: r,
+        emojiTags: (edit ?? r).tags.filter((t) => t[0] === "emoji"), raw: r,
       });
-    } else if (r.kind === COMMENT && !deleted.has(r.id)) {
+    } else if (r.kind === COMMENT) {
       const event = r as unknown as NostrEvent;
       const root = eventPointer(getCommentRootPointer(event));
       const parent = eventPointer(getCommentReplyPointer(event));
-      if (!root || !parent || root.kind !== MESSAGE || deleted.has(root.id)) continue;
+      if (!root || !parent || root.kind !== MESSAGE) continue;
       const comments = threads.get(root.id) ?? [];
-      comments.push({ id: r.id, author: r.pubkey, content: r.content, ms: rumorMs(r),
-        deleted: false, root, parent, emojiTags: r.tags.filter((t) => t[0] === "emoji"), raw: r });
+      comments.push({ id: r.id, author: r.pubkey, content, ms: rumorMs(r),
+        deleted: false, root, parent, emojiTags: (edit ?? r).tags.filter((t) => t[0] === "emoji"), raw: r });
       threads.set(root.id, comments);
-    } else if (r.kind === EDIT_KIND && !deleted.has(r.id)) {
-      const target = r.tags.find((t) => t[0] === "e")?.[1];
-      if (!target || byId.get(target)?.pubkey !== r.pubkey) continue;
-      const previous = edits.get(target);
-      if (!previous || compareRumors(previous, r) < 0) edits.set(target, r);
-    } else if (r.kind === REACTION && !deleted.has(r.id)) {
+    }
+  }
+  for (const r of effects) {
+    if (r.kind === REACTION && !authorDeleted.has(`${r.pubkey}:${r.id}`)) {
       const target = r.tags.find((t) => t[0] === "e")?.[1];
       if (!target) continue;
       const emojis = reactions.get(target) ?? new Map();
@@ -115,13 +99,8 @@ export function foldChannel(rumors: Rumor[], canDelete: CanDelete = authorDelete
       reactions.set(target, emojis);
     }
   }
+  for (const root of threads.keys()) if (!messages.has(root)) threads.delete(root);
   for (const msg of messages.values()) {
-    if (msg.deleted) continue;
-    const edit = edits.get(msg.id);
-    if (edit) {
-      msg.edited = edit.content;
-      msg.emojiTags = edit.tags.filter((t) => t[0] === "emoji");
-    }
     msg.reactions = [...(reactions.get(msg.id) ?? [])].map(([emoji, { url, authors }]) => ({
       emoji, url, count: authors.size, authors: [...authors],
     }));
@@ -133,16 +112,4 @@ export function foldChannel(rumors: Rumor[], canDelete: CanDelete = authorDelete
 
 function compareRows(a: { ms: number; id: string }, b: { ms: number; id: string }): number {
   return a.ms - b.ms || a.id.localeCompare(b.id);
-}
-function compareRumors(a: Rumor, b: Rumor): number {
-  return rumorMs(a) - rumorMs(b) || a.id.localeCompare(b.id);
-}
-
-/** Standalone fold for adapters/tests; live consumers share channelProjection. */
-export function foldMessages(rumors: Rumor[], canDelete?: CanDelete): ChatMessage[] {
-  return foldChannel(rumors, canDelete).messages;
-}
-
-export function foldThread(rumors: Rumor[], rootId: string, canDelete?: CanDelete): ThreadComment[] {
-  return foldChannel(rumors, canDelete).threads.get(rootId) ?? [];
 }

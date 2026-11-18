@@ -1,4 +1,4 @@
-import type { ConcordStorage } from "@applesauce/concord";
+import type { KeyValue } from "@applesauce/concord";
 
 const DB_NAME = "accordion:concord:v1";
 const STORE = "records";
@@ -30,7 +30,7 @@ function committed(transaction: IDBTransaction): Promise<void> {
 export function createConcordStorage(
   pubkey: string,
   options: { indexedDB?: IDBFactory; crypto?: Crypto; legacy?: Pick<Storage, "getItem" | "removeItem"> } = {},
-): ConcordStorage & { close(): Promise<void> } {
+): KeyValue.ConcordStorage & { close(): Promise<void> } {
   const factory = options.indexedDB ?? globalThis.indexedDB;
   const crypto = options.crypto ?? globalThis.crypto;
   const legacy = options.legacy ?? globalThis.localStorage;

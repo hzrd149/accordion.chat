@@ -9,6 +9,7 @@ import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
 import { createConcordStorage } from "../services/concord-storage";
 import { activeConcordAutomation } from "../services/concord-automation";
+import { ConcordDiagnostics } from "./ConcordDiagnostics";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
   const account = useActiveAccount();
@@ -85,6 +86,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
         </div>
       )}
       <CommunityKeySync key={account?.id} client={session.client} />
+      <ConcordDiagnostics key={`diagnostics:${account?.id}`} client={session.client} />
       {children(session.client)}
     </ClientContext.Provider>
   );

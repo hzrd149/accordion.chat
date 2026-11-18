@@ -12,6 +12,7 @@ import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
 import { PERM } from "@applesauce/concord";
+import { MessageExpiration } from "../components/MessageExpiration";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
 import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
@@ -37,7 +38,7 @@ const PERM_LABELS: Record<PermName, string> = {
   CREATE_INVITE: "Create Invites",
   VIEW_AUDIT_LOG: "View Audit Log",
   MENTION_EVERYONE: "Mention Everyone",
-  PIN_MESSAGES: "Pin Messages (coming soon)",
+  PIN_MESSAGES: "Pin Messages",
 };
 
 // Each page below subscribes only the slices it renders, never the aggregate
@@ -232,6 +233,7 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
         {saved && <span className="text-success text-sm font-semibold">Saved ✓</span>}
       </div>
 
+      {community && <MessageExpiration community={community} />}
       {devMode && (
         <div className="mt-6 mb-4">
           <label className="label text-xs font-semibold uppercase opacity-70">Community ID</label>

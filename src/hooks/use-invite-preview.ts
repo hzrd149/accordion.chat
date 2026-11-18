@@ -15,6 +15,7 @@ import {
   INVITE_BUNDLE_KIND,
   STOCK_RELAYS,
   getInviteBundle,
+  isInviteBundleExpired,
   isInviteBundleRevoked,
   isValidInviteBundle,
   parseInviteLink,
@@ -65,9 +66,9 @@ export function useInvitePreview(link: string): InvitePreview {
         ).catch(() => [] as NostrEvent[]);
 
         const live = events
-          .filter((e) => isValidInviteBundle(e) && !isInviteBundleRevoked(e))
+          .filter((e) => isValidInviteBundle(e))
           .sort((a, b) => b.created_at - a.created_at)[0];
-        if (!live) {
+        if (!live || isInviteBundleRevoked(live)) {
           if (!cancelled) setPreview({ status: "error", error: "Invite not found or revoked." });
           return;
         }
@@ -76,9 +77,7 @@ export function useInvitePreview(link: string): InvitePreview {
           if (!cancelled) setPreview({ status: "error", error: "Invite link failed verification." });
           return;
         }
-        // CORD-05 `expires_at` is a unix *second* stamp, so compare in seconds —
-        // against Date.now() every live bundle reads as long expired.
-        const expired = Boolean(bundle.expires_at && unixNow() > bundle.expires_at);
+        const expired = isInviteBundleExpired(bundle, unixNow());
         if (!cancelled) setPreview({ status: "ready", bundle, expired });
       } catch (e) {
         if (!cancelled) setPreview({ status: "error", error: (e as Error).message });

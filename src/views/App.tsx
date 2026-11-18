@@ -65,6 +65,7 @@ import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/Cli
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
+import { ChannelPins, PinMessageButton } from "../components/ChannelPins";
 import { DirectInviteModal } from "../components/DirectInviteModal";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
@@ -73,7 +74,8 @@ import { useFavoriteEmojis } from "../hooks/use-favorite-emojis";
 import { getMentionsLastRead, markMentionsRead } from "../services/read-state";
 import { useReadState } from "../hooks/use-read-state";
 import type { ChatMessage } from "../chat/fold";
-import type { ChannelMetadata, Role, ConcordCommunity, Media } from "@applesauce/concord";
+import type { ChannelMetadata, Role, ConcordCommunity, ConcordChannelDraft, Media } from "@applesauce/concord";
+import { useChannelDraft } from "../hooks/use-channel-draft";
 import { MissingChannelKeyError, PERM } from "@applesauce/concord";
 import { hasChannelKey } from "@applesauce/concord/helpers";
 import { kinds } from "nostr-tools";
@@ -1097,21 +1099,6 @@ function ChatView({
   // Set reference so the composer's memo isn't defeated by unrelated re-renders.
   const members = useMemo(() => [...membersState], [membersState]);
 
-  const handleSend = useCallback(
-    async (
-      value: string,
-      files: File[],
-      reply: ReplyTarget | null,
-      onUploadProgress: (progress: Media.ConcordUploadProgress) => void,
-    ) => {
-      setReplyTo(null);
-      await community?.sendMessage(channelId, value, reply ?? undefined, files.length ? files : undefined, favorites, {
-        onUploadProgress,
-      });
-    },
-    [community, channelId, favorites],
-  );
-
   const jumpToMessage = useCallback((id: string) => {
     const scrollEl = scrollRef.current;
     const target = scrollEl?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
@@ -1172,6 +1159,7 @@ function ChatView({
         />
       )}
       {channel && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
+      {community && <ChannelPins key={channelId} community={community} channelId={channelId} onJump={jumpToMessage} />}
       <MessageList
         ref={scrollRef}
         messages={messages}
@@ -1188,16 +1176,17 @@ function ChatView({
         onJumpToMessage={jumpToMessage}
         onThread={(m) => onOpenThread(m.id)}
       />
-      {canWrite && (
+      {canWrite && community?.getChannel(channelId) && (
         <Composer
-          key={channelId}
+          key={`${pubkey}:${cid}:${channelId}`}
+          draft={community.getChannel(channelId)!.draft()}
           channelName={channel?.name}
           channelPrivate={Boolean(channel?.private)}
+          forum={channel?.view === "forum"}
           favorites={favorites}
           members={members}
           replyTo={replyTo}
           onClearReply={() => setReplyTo(null)}
-          onSend={handleSend}
         />
       )}
     </div>
@@ -1463,9 +1452,17 @@ const Message = memo(function Message({
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const canModerate = use$(() => community?.canModerate$(m.author, PERM.MANAGE_MESSAGES), [community, m.author]) ?? false;
+  const canDelete = !m.deleted && (m.author === myPubkey || canModerate);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const react = (reaction: string | Emoji) => community?.react(channelId, m.raw, reaction);
+  async function deleteMessage() {
+    setActionError("");
+    try { await community?.deleteMessage(channelId, m.raw); }
+    catch (error) { setActionError(String(error)); }
+  }
 
   useEffect(() => {
     return () => {
@@ -1528,6 +1525,7 @@ const Message = memo(function Message({
         </div>
       )}
       <div className="min-w-0 flex-1">
+        {actionError && <p role="alert" className="text-error text-xs">{actionError}</p>}
         {m.replyTo && (
           <button
             type="button"
@@ -1564,8 +1562,12 @@ const Message = memo(function Message({
           <div className="text-base-content/60 italic">(message deleted)</div>
         ) : (
           <>
+            {m.raw.tags.find((tag) => tag[0] === "subject")?.[1] && (
+              <h3 className="font-semibold">{m.raw.tags.find((tag) => tag[0] === "subject")?.[1]}</h3>
+            )}
             <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
             {m.edited && <span className="text-[11px] text-base-content/60"> (edited)</span>}
+            {canWrite && community && <PinMessageButton community={community} channelId={channelId} messageId={m.id} />}
           </>
         )}
         {m.reactions.length > 0 && (
@@ -1637,11 +1639,11 @@ const Message = memo(function Message({
                 >
                   <Pencil size={16} />
                 </button>
-                <button className="btn btn-ghost btn-sm btn-circle" title="Delete" onClick={() => community?.deleteMessage(channelId, m.raw)}>
-                  <Trash2 size={16} />
-                </button>
               </>
             )}
+            {canDelete && <button className="btn btn-ghost btn-sm btn-circle" title="Delete" onClick={deleteMessage}>
+              <Trash2 size={16} />
+            </button>}
           </>
         )}
         {devMode && (
@@ -1723,11 +1725,11 @@ const Message = memo(function Message({
                       >
                         <Pencil size={18} /> Edit
                       </button>
-                      <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => community?.deleteMessage(channelId, m.raw))}>
-                        <Trash2 size={18} /> Delete
-                      </button>
                     </>
                   )}
+                  {canDelete && <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => void deleteMessage())}>
+                    <Trash2 size={18} /> Delete
+                  </button>}
                 </div>
               </>
             )}
@@ -2029,8 +2031,10 @@ function ThreadView({
           })}
         </div>
       </div>
-      {canWrite && (
+      {canWrite && community?.getChannel(channelId) && (
         <ThreadComposer
+          key={parent.id}
+          draft={community.getChannel(channelId)!.draft(parent.id)}
           replyingTo={replyParent?.author ?? null}
           favorites={favorites}
           onClear={() => setReplyParent(null)}
@@ -2044,31 +2048,37 @@ function ThreadView({
 /** `replyingTo` is null when the reply targets the thread root — the common case,
  * where the placeholder alone is enough and the reply bar would just be noise. */
 function ThreadComposer({
+  draft,
   replyingTo,
   favorites,
   onClear,
   onSend,
 }: {
+  draft: ConcordChannelDraft;
   replyingTo: string | null;
   favorites: Emoji[];
   onClear: () => void;
   onSend: (text: string) => Promise<void>;
 }) {
-  const [text, setText] = useState("");
+  const saved = useChannelDraft(draft);
+  const text = saved.value.text;
+  const setText = (value: string | ((previous: string) => string)) =>
+    saved.update({ text: typeof value === "function" ? value(text) : value });
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function send() {
     const value = text.trim();
-    if (!value || sending) return;
-    setText("");
+    if (!value || sending || !saved.ready) return;
     setSending(true);
+    setError("");
     try {
-      await onSend(value);
+      const customEmoji = favorites.some((emoji) => value.includes(`:${emoji.shortcode}:`));
+      await saved.send(undefined, customEmoji ? onSend : undefined);
     } catch (err) {
-      console.error("thread reply failed", err);
-      setText(value);
+      setError(String(err));
     } finally {
       setSending(false);
     }
@@ -2095,6 +2105,7 @@ function ThreadComposer({
 
   return (
     <div className="shrink-0 px-4 pb-4 max-sm:px-2">
+      {(error || saved.error) && <p role="alert" className="text-error text-sm">{error || saved.error}</p>}
       {replyingTo && (
         <div className="flex items-center justify-between gap-2 px-1 pb-1 text-[12px] text-base-content/60">
           <span className="flex items-center gap-1 min-w-0">
@@ -2110,7 +2121,7 @@ function ThreadComposer({
       )}
       <div className="flex items-end gap-2 bg-base-100 rounded-xl p-2">
         <span className="relative inline-flex shrink-0">
-          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
+          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
             <SmilePlus size={18} />
           </button>
           {pickerOpen && (
@@ -2126,6 +2137,7 @@ function ThreadComposer({
         <textarea
           ref={textareaRef}
           className="flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
+          disabled={!saved.ready}
           rows={1}
           placeholder={replyingTo ? "Write a reply…" : "Reply in thread"}
           value={text}
@@ -2153,29 +2165,39 @@ function ThreadComposer({
 // The message composer. Owns its draft state locally so keystrokes re-render only
 // this component, not the message list above it.
 const Composer = memo(function Composer({
+  draft,
   channelName,
   channelPrivate,
+  forum,
   favorites,
   members,
   replyTo,
   onClearReply,
-  onSend,
 }: {
+  draft: ConcordChannelDraft;
   channelName: string | undefined;
   channelPrivate: boolean;
+  forum: boolean;
   favorites: Emoji[];
   members: string[];
   replyTo: ReplyTarget | null;
   onClearReply: () => void;
-  onSend: (
-    text: string,
-    files: File[],
-    reply: ReplyTarget | null,
-    onUploadProgress: (progress: Media.ConcordUploadProgress) => void,
-  ) => Promise<void>;
 }) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const saved = useChannelDraft(draft);
+  const text = saved.value.text;
+  const files = saved.value.files ?? [];
+  const activeReply = replyTo ?? saved.value.replyTo;
+  const { ready: draftReady, update: updateDraft } = saved;
+  useEffect(() => {
+    if (draftReady && replyTo) updateDraft({ replyTo });
+  }, [draftReady, replyTo, updateDraft]);
+  function setText(value: string | ((previous: string) => string)) {
+    saved.update({ text: typeof value === "function" ? value(text) : value, emojis: favorites,
+      replyTo: activeReply });
+  }
+  function setFiles(value: File[] | ((previous: readonly File[]) => File[])) {
+    saved.update({ files: typeof value === "function" ? value(files) : value });
+  }
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [upload, setUpload] = useState<Media.ConcordUploadProgress | null>(null);
@@ -2248,18 +2270,16 @@ const Composer = memo(function Composer({
 
   async function send() {
     const value = text.trim();
-    if (sending) return;
+    if (sending || !saved.ready) return;
     if (!value && files.length === 0) return;
-    const attach = files;
-    const reply = replyTo;
-    setText("");
     setMention(null);
-    setFiles([]);
     setSending(true);
     setUpload(null);
     setSendError("");
     try {
-      await onSend(value, attach, reply, setUpload);
+      saved.update({ replyTo: activeReply, emojis: favorites });
+      await saved.send({ onUploadProgress: setUpload });
+      onClearReply();
     } catch (err) {
       console.error("send failed", err);
       // A key can be rotated out from under an open composer, so name that case
@@ -2269,9 +2289,7 @@ const Composer = memo(function Composer({
           ? "You no longer hold this channel's key, so your message can't be encrypted."
           : `Couldn't send: ${(err as Error).message}`,
       );
-      // Restore the draft so the user doesn't lose their message/attachments.
-      setText(value);
-      setFiles(attach);
+      // The SDK retains a failed draft and edits made while uploading.
     } finally {
       setUpload(null);
       setSending(false);
@@ -2280,6 +2298,15 @@ const Composer = memo(function Composer({
 
   return (
     <div className="px-4 pb-5 safe-bottombar shrink-0 max-sm:px-2">
+      {saved.error && <div role="alert" className="text-error text-sm">{saved.error}</div>}
+      {forum && <input
+        className="input input-bordered w-full mb-2"
+        aria-label="Post title"
+        placeholder="Post title"
+        disabled={!saved.ready}
+        value={saved.value.subject ?? ""}
+        onChange={(event) => saved.update({ subject: event.target.value })}
+      />}
       {sendError && (
         <div className="flex justify-between items-center gap-2 bg-error/10 text-error rounded-t-lg px-4 py-1.5 text-[13px] -mb-1 max-sm:px-2">
           <span>{sendError}</span>
@@ -2288,12 +2315,15 @@ const Composer = memo(function Composer({
           </button>
         </div>
       )}
-      {replyTo && (
+      {activeReply && (
         <div className="flex justify-between bg-base-200 rounded-t-lg px-4 py-1.5 text-[13px] text-base-content/60 -mb-1 max-sm:px-2">
           <span>
-            Replying to <UserName pubkey={replyTo.author} />
+            Replying to <UserName pubkey={activeReply.author} />
           </span>
-          <button className="btn btn-ghost btn-sm btn-circle" onClick={onClearReply}>
+          <button className="btn btn-ghost btn-sm btn-circle" onClick={() => {
+            saved.update({ replyTo: undefined });
+            onClearReply();
+          }}>
             <X size={16} />
           </button>
         </div>
@@ -2331,11 +2361,11 @@ const Composer = memo(function Composer({
             e.target.value = "";
           }}
         />
-        <button className="btn btn-ghost btn-sm btn-circle" title="Attach files" onClick={() => fileInputRef.current?.click()}>
+        <button className="btn btn-ghost btn-sm btn-circle" title="Attach files" disabled={!saved.ready} onClick={() => fileInputRef.current?.click()}>
           <Paperclip size={20} />
         </button>
         <span className="relative inline-flex">
-          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" onClick={() => setPickerOpen((v) => !v)}>
+          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
             <SmilePlus size={20} />
           </button>
           {pickerOpen && (
@@ -2383,6 +2413,7 @@ const Composer = memo(function Composer({
         )}
         <textarea
           ref={textareaRef}
+          disabled={!saved.ready}
           rows={1}
           className="composer-textarea flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
           placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}

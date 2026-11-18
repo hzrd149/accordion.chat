@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { BehaviorSubject } from "rxjs";
 import type { Rumor } from "applesauce-core/helpers";
-import type { ConcordCommunity, CommunityState } from "@applesauce/concord";
+import type { ConcordCommunity } from "@applesauce/concord";
 import { foldChannel } from "../src/chat/fold";
 import { channelProjection } from "../src/chat/projection";
 
@@ -17,14 +17,15 @@ it("profiles a 2000-rumor channel and verifies four consumers share identical pr
     rumors.push({ id: `edit-${i}`, kind: 3302, pubkey: `author-${i % 20}`, content: `Edited ${i}`,
       created_at: 4000 + i, tags: [["e", `message-${i}`]] });
   }
-  for (let i = 0; i < 20; i++) foldChannel(rumors);
+  const visible = rumors.filter((rumor) => rumor.kind === 9).map((rumor) => ({ rumor, content: rumor.content }));
+  for (let i = 0; i < 20; i++) foldChannel(visible, rumors);
   const count = 100;
   const start = performance.now();
-  for (let i = 0; i < count; i++) foldChannel(rumors);
+  for (let i = 0; i < count; i++) foldChannel(visible, rumors);
   const singleMs = (performance.now() - start) / count;
-  const state$ = new BehaviorSubject({ roles: [], grants: new Map(), banlist: new Set(), material: {} } as unknown as CommunityState);
   const inputs$ = new BehaviorSubject(rumors);
-  const community = { state$, channelTimeline: () => inputs$, admin: { hasPerm: () => false } } as unknown as ConcordCommunity;
+  const channel = { id: "channel", messages$: new BehaviorSubject(visible), timeline$: () => inputs$ };
+  const community = { channels$: new BehaviorSubject([channel]) } as unknown as ConcordCommunity;
   const views: unknown[] = [];
   const subs = Array.from({ length: 4 }, () => channelProjection(community, "channel").subscribe((v) => views.push(v)));
   await new Promise((resolve) => setTimeout(resolve, 0));

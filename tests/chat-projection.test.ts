@@ -1,100 +1,95 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BehaviorSubject, defer, finalize } from "rxjs";
 import type { Rumor } from "applesauce-core/helpers";
-import type { ConcordCommunity, CommunityState } from "@applesauce/concord";
+import type { ConcordChannelMessage, ConcordCommunity } from "@applesauce/concord";
 import { nip19 } from "nostr-tools";
 import { summarize } from "../src/chat/useUnread";
 import { collectMentions } from "../src/chat/useMentions";
 import { foldChannel } from "../src/chat/fold";
 import { channelProjection } from "../src/chat/projection";
 
-const rumor = (id: string, kind = 9, pubkey = "author", tags: string[][] = [], content = id, time = 1): Rumor =>
-  ({ id, kind, pubkey, tags, content, created_at: time });
-const comment = (id: string) => rumor(id, 1111, "reader", [
+const rumor = (id: string, kind = 9, tags: string[][] = [], content = id): Rumor =>
+  ({ id, kind, pubkey: "author", tags, content, created_at: 1 });
+const row = (r: Rumor): ConcordChannelMessage => ({ rumor: r, content: r.content });
+const reply = rumor("reply", 1111, [
   ["E", "message", "", "author"], ["K", "9"], ["P", "author"],
   ["e", "message", "", "author"], ["k", "9"], ["p", "author"],
 ]);
 
-describe("channel visibility projection", () => {
+describe("SDK channel presentation adapter", () => {
   afterEach(() => vi.useRealTimers());
-  it("applies deletes to reactions and NIP-22 replies as well as messages", () => {
-    const input = [rumor("message"), comment("reply"),
-      rumor("react", 7, "reader", [["e", "message"]], "👍"),
-      rumor("delete", 5, "reader", [["e", "reply"], ["e", "react"]])];
-    const view = foldChannel(input);
-    expect(view.messages[0].threadReplyCount).toBe(0);
-    expect(view.messages[0].reactions).toEqual([]);
-    expect(view.threads.size).toBe(0);
-  });
 
-  it("restores effects from retained inputs when moderator authority is revoked", () => {
-    const input = [rumor("message"), comment("reply"), rumor("delete", 5, "moderator", [["e", "message"]])];
-    const hidden = foldChannel(input, () => true);
-    expect(hidden.messages[0].deleted).toBe(true);
-    expect(hidden.threads.size).toBe(0);
-    const restored = foldChannel(input);
-    expect(restored.messages[0].deleted).toBe(false);
-    expect(restored.messages[0].threadReplyCount).toBe(1);
-  });
-
-  it("selects the newest author edit independent of arrival order, excluding deleted edits", () => {
-    const input = [rumor("message"), rumor("new", 3302, "author", [["e", "message"]], "new", 3),
-      rumor("old", 3302, "author", [["e", "message"]], "old", 2),
-      rumor("forged", 3302, "attacker", [["e", "message"]], "forged", 4)];
-    expect(foldChannel(input).messages[0].edited).toBe("new");
-    expect(foldChannel([...input, rumor("delete", 5, "author", [["e", "new"]])]).messages[0].edited).toBe("old");
-  });
-
-  it("keeps unread badges and mention rows aligned with edits and deletes", () => {
+  it("keeps authenticated originals while using SDK edits for text, emoji and mentions", () => {
     const pubkey = "a".repeat(64);
-    const mention = `nostr:${nip19.npubEncode(pubkey)}`;
-    const base = [rumor("message", 9, "author", [], "hello"),
-      rumor("edit", 3302, "author", [["e", "message"]], mention, 2)];
-    const messages = foldChannel(base).messages;
+    const content = `nostr:${nip19.npubEncode(pubkey)}`;
+    const original = rumor("message");
+    const edit = rumor("edit", 3302, [["emoji", "party", "https://example.com/party.png"]], content);
+    const visible = [{ rumor: original, edit, content }];
+    const messages = foldChannel(visible, []).messages;
+    expect(messages[0].raw).toBe(original);
+    expect(messages[0].content).toBe("message");
+    expect(messages[0].edited).toBe(content);
+    expect(messages[0].emojiTags).toEqual(edit.tags);
     expect(summarize(messages, 0, pubkey)).toEqual({ count: 1, mention: true });
-    expect(collectMentions([["channel", messages]], pubkey).map((r) => r.content)).toEqual([mention]);
-    const removedMention = foldChannel([...base,
-      rumor("newEdit", 3302, "author", [["e", "message"]], "no mention", 3)]).messages;
-    expect(summarize(removedMention, 0, pubkey)).toEqual({ count: 1, mention: false });
-    expect(collectMentions([["channel", removedMention]], pubkey)).toEqual([]);
-    const deleted = foldChannel([...base, rumor("delete", 5, "author", [["e", "message"]])]).messages;
-    expect(summarize(deleted, 0, pubkey)).toEqual({ count: 0, mention: false });
-    expect(collectMentions([["channel", deleted]], pubkey)).toEqual([]);
+    expect(collectMentions([["channel", messages]], pubkey)[0].content).toBe(content);
+    expect(summarize(foldChannel([], []).messages, 0, pubkey)).toEqual({ count: 0, mention: false });
   });
 
-  it("shares one source and fold and invalidates authority without new chat", async () => {
+  it("groups visible reactions and threaded replies without retaining hidden roots", () => {
+    const reactions = [rumor("react", 7, [["e", "message"]], "👍"), rumor("duplicate", 7, [["e", "message"]], "👍")];
+    const view = foldChannel([row(rumor("message")), { ...row(reply), content: "edited reply" }], reactions);
+    expect(view.messages[0].threadReplyCount).toBe(1);
+    expect(view.messages[0].reactions[0].count).toBe(1);
+    expect(view.threads.get("message")?.[0].content).toBe("edited reply");
+    expect(foldChannel([row(reply)], reactions).threads.size).toBe(0);
+    const removed = foldChannel([row(rumor("message"))], [
+      ...reactions, rumor("delete", 5, [["e", "react"], ["e", "duplicate"]]),
+    ]);
+    expect(removed.messages[0].reactions).toEqual([]);
+  });
+
+  it("shares SDK subscriptions and follows removals/restorations without a second authority fold", async () => {
     vi.useFakeTimers();
-    let subscriptions = 0;
     let active = 0;
-    let allowed = false;
-    const state = { roles: [], grants: new Map(), banlist: new Set(), material: {}, controlVerification: {} };
-    const state$ = new BehaviorSubject(state as unknown as CommunityState);
-    const inputs$ = new BehaviorSubject([rumor("message"), rumor("delete", 5, "moderator", [["e", "message"]])]);
-    const community = {
-      state$, channelTimeline: () => defer(() => {
-        subscriptions++; active++;
-        return inputs$.pipe(finalize(() => active--));
-      }),
-      standingOf: () => ({ position: 100 }), admin: { hasPerm: () => allowed },
-    } as unknown as ConcordCommunity;
-    const views: boolean[] = [];
-    const source = channelProjection(community, "channel");
-    const a = source.subscribe((v) => views.push(v.messages[0].deleted));
+    const messages$ = new BehaviorSubject([row(rumor("message"))]);
+    const reactions$ = new BehaviorSubject<Rumor[]>([]);
+    const channel = {
+      id: "channel",
+      messages$: defer(() => { active++; return messages$.pipe(finalize(() => active--)); }),
+      timeline$: () => defer(() => { active++; return reactions$.pipe(finalize(() => active--)); }),
+    };
+    const community = { channels$: new BehaviorSubject([channel]) } as unknown as ConcordCommunity;
+    const views: number[] = [];
+    const a = channelProjection(community, "channel").subscribe((view) => views.push(view.messages.length));
     const b = channelProjection(community, "channel").subscribe();
-    expect(subscriptions).toBe(1);
+    expect(active).toBe(2);
     await vi.runAllTimersAsync();
-    allowed = true;
-    state$.next({ ...state$.value, controlVerification: {} } as CommunityState);
+    messages$.next([]);
     await vi.runAllTimersAsync();
-    expect(views).toEqual([false, true]);
-    state$.next({ ...state$.value, members: new Set(["new arrival"]) });
+    messages$.next([row(rumor("message"))]);
     await vi.runAllTimersAsync();
-    expect(views).toEqual([false, true]);
-    // A synchronous cache hydration burst needs only one additional fold.
-    for (let i = 0; i < 100; i++) inputs$.next([...inputs$.value]);
+    expect(views).toEqual([1, 0, 1]);
+    for (let i = 0; i < 100; i++) messages$.next([...messages$.value]);
     await vi.runAllTimersAsync();
-    expect(views).toEqual([false, true, true]);
+    expect(views).toEqual([1, 0, 1, 1]);
     a.unsubscribe(); b.unsubscribe();
     expect(active).toBe(0);
+  });
+
+  it("waits for a channel discovered during sync and releases it when removed", async () => {
+    vi.useFakeTimers();
+    const channel = { id: "channel", messages$: new BehaviorSubject([row(rumor("message"))]),
+      timeline$: () => new BehaviorSubject<Rumor[]>([]) };
+    const channels$ = new BehaviorSubject<typeof channel[]>([]);
+    const community = { channels$ } as unknown as ConcordCommunity;
+    const views: number[] = [];
+    const sub = channelProjection(community, "channel").subscribe((view) => views.push(view.messages.length));
+    await vi.runAllTimersAsync();
+    channels$.next([channel]);
+    await vi.runAllTimersAsync();
+    channels$.next([]);
+    await vi.runAllTimersAsync();
+    expect(views).toEqual([0, 1, 0]);
+    sub.unsubscribe();
   });
 });

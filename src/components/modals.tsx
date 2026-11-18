@@ -299,6 +299,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   const grants = use$(community?.grants$);
   const [name, setName] = useState("");
   const [priv, setPriv] = useState(false);
+  const [view, setView] = useState<"chat" | "forum">("chat");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -308,7 +309,7 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
     setError("");
     try {
       const slug = name.trim().toLowerCase().replace(/\s+/g, "-");
-      const channelId = await community.admin.createChannel(slug, { private: priv });
+      const channelId = await community.admin.createChannel(slug, { private: priv, view });
       // A private channel's membership is a channel-scoped role (CORD-04 §2, see
       // chat/channel-roles.ts): mint it and self-grant so the creator is roster
       // member #1. Public channels ride the community root — no role needed.
@@ -334,6 +335,12 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
   return (
     <Modal onClose={onClose}>
       <h2 className="text-lg font-bold mb-4">Create channel</h2>
+      <label className="label text-xs font-semibold uppercase opacity-70">Channel layout</label>
+      <select className="select select-bordered w-full mb-4" value={view}
+        onChange={(event) => setView(event.target.value as "chat" | "forum")}>
+        <option value="chat">Chat</option>
+        <option value="forum">Forum (titled posts with replies)</option>
+      </select>
       <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Channel name</label>
         <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="new-channel" autoFocus maxLength={64} />
