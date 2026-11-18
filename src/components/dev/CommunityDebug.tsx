@@ -694,8 +694,8 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold px-4 pt-6 mb-1">Debug</h2>
-      <p className="opacity-70 leading-relaxed px-4 mb-4">
+      <h2 className="text-2xl font-bold mb-1">Debug</h2>
+      <p className="opacity-70 leading-relaxed mb-5">
         Technical state of this community: key generations, rotations and their presence on relays. Read-only.
       </p>
       <StatusCard cid={cid} />
