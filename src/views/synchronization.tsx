@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { debounce, distinctUntilChanged, map, of, timer } from "rxjs";
 import type { Observable } from "rxjs";
 import { RelayInfo } from "../components/ServerInfo";
+import { ConcordDataCoverage } from "../components/ConcordDataCoverage";
 import { useCommunity } from "../hooks/use-community";
 import { useConcord } from "../hooks/use-concord";
 import { pool } from "../nostr";
@@ -14,8 +15,8 @@ import { DIRECT_INVITE_ACTIVITY, syncActivity$ } from "../services/concord-sync-
 
 const phaseLabels = {
   idle: "Waiting to sync",
-  syncing: "Catching up",
-  live: "Up to date",
+  syncing: "Preparing live sync",
+  live: "Live sync ready",
   removed: "Access removed",
   error: "Sync failed",
   dissolved: "Dissolved",
@@ -26,7 +27,7 @@ function Status({ status }: { status: ConcordCommunityStatus | ConcordPrivateCha
     : status.phase === "syncing" ? "badge-info"
     : status.phase === "live" && status.connected ? "badge-success" : "badge-ghost";
   const label = status.error ? phaseLabels.error
-    : status.phase === "live" && !status.connected ? "Caught up · offline"
+    : status.phase === "live" && !status.connected ? "Live sync ready · offline"
     : phaseLabels[status.phase];
   return (
     <span className={`badge badge-soft h-auto py-1 text-base ${tone}`}>
@@ -129,10 +130,12 @@ function CommunitySync({ id }: { id: string }) {
           </>}
         </div>
       </header>
+      <ConcordDataCoverage community={community} historyEnabled={activeConcordAutomation.historySync === "background"} />
 
       {(hasChannels || hasRelays || hasEvents || hasIssues) && <div className="grid items-start gap-5 border-t border-base-300 p-4 lg:grid-cols-2">
         {hasChannels && <section className="min-w-0 space-y-2 lg:col-start-1 lg:only:col-span-2">
           <h3 className="flex items-center gap-2 font-semibold"><Lock size={18} /> Private channels</h3>
+          <p className="text-base-content/70">Current-key readiness only; older private messages may still be loading.</p>
           <ul className="divide-y divide-base-300">
             {[...privateChannels].map(([channelId, channel]) => {
               const sync = privateStatus?.get(channelId);
@@ -257,7 +260,7 @@ export function SynchronizationView({ mobileNav }: { mobileNav: ReactNode }) {
             </div>
             {communityCount > 0 && <div className="mt-3 max-w-md">
               <label className="font-medium" htmlFor="community-sync-progress">
-                {liveCount} of {communityCount} communities up to date
+                {liveCount} of {communityCount} communities ready for live sync
               </label>
               <progress id="community-sync-progress" className="progress progress-primary mt-2 block w-full" value={liveCount} max={communityCount} />
             </div>}

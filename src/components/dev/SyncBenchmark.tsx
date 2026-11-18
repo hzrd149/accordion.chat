@@ -120,7 +120,7 @@ export function SyncBenchmark() {
         </div>
         <div className="overflow-x-auto">
           <table className="table table-sm">
-            <thead><tr><th>Community</th><th>Phase</th><th>Live</th><th>Full coverage</th><th>Complete planes</th><th>Retained routes</th></tr></thead>
+            <thead><tr><th>Community</th><th>Phase</th><th>Live readiness</th><th>Reported coverage</th><th>Complete planes</th><th>Retained routes</th></tr></thead>
             <tbody>{report.communities.map((row) => <tr key={row.id}>
               <td>{row.name}</td><td>{row.phase}</td><td>{time(row.liveMs)}</td><td>{time(row.completeMs)}</td>
               <td>{row.completePlanes} / {row.planes}</td><td>{row.retained}</td>
@@ -128,8 +128,9 @@ export function SyncBenchmark() {
           </table>
         </div>
         <p className="text-sm opacity-60">
-          Completion requires the full list (when selected), live community engines and complete current/history plane coverage,
-          stable for one second. Failed or incomplete reads never count as complete; a timeout is a partial result.
+          Completion requires the full list (when selected), live community engines, private-channel live readiness and complete
+          reported community data coverage, stable for one second. This is not proof that all history has been discovered or that
+          private-channel backfill is complete. Failed or incomplete reads never count as complete; a timeout is a partial result.
           Times are from the start of the run. Payload bytes include duplicate EVENT deliveries, not WebSocket overhead.
           Retained routes are SDK processing counts, not unique visible messages. Event-loop delay measures the worker, not CPU time.
           Backend initialization is measured separately and excluded from synchronization timings. Both outer-event and wrapped-seal

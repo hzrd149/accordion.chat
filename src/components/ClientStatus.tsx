@@ -34,7 +34,7 @@ interface Derived {
 /** Fold a whole-client status snapshot into a single visual state. */
 function deriveClient(s: ConcordClientStatus): Derived {
   if (s.phase !== "ready") return { tone: "info", label: "Starting…", spin: true, detail: "Starting up…" };
-  const counts = `${s.live} of ${s.communities} communities up to date${s.syncing ? ` · ${s.syncing} syncing` : ""}`;
+  const counts = `${s.live} of ${s.communities} communities ready for live sync${s.syncing ? ` · ${s.syncing} starting` : ""}`;
   if (!s.connected) return { tone: "ghost", label: "Offline", spin: false, detail: `Offline · ${counts}` };
   if (s.syncing > 0) return { tone: "info", label: "Syncing…", spin: true, detail: counts };
   return { tone: "success", label: "Connected", spin: false, detail: counts };
@@ -46,8 +46,8 @@ function deriveCommunity(s: ConcordCommunityStatus): Derived {
   if (s.phase === "dissolved") return { tone: "error", label: "Dissolved", spin: false, detail: "Community dissolved" };
   if (s.phase === "removed") return { tone: "ghost", label: "Removed", spin: false, detail: "No longer a member" };
   if (!s.connected) return { tone: "ghost", label: "Offline", spin: false, detail: "Not connected" };
-  if (s.phase !== "live") return { tone: "info", label: "Syncing…", spin: true, detail: "Catching up…" };
-  return { tone: "success", label: "Live", spin: false, detail: "Up to date" };
+  if (s.phase !== "live") return { tone: "info", label: "Syncing…", spin: true, detail: "Preparing current keys and live sync…" };
+  return { tone: "success", label: "Live", spin: false, detail: "Live sync ready; message history loads separately" };
 }
 
 /** A colored status dot; spins a small loader overlay while `spin` is set. */

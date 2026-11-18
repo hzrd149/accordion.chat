@@ -513,7 +513,7 @@ function AdvancedPage() {
             { key: "autoSaveCommunityList", label: "Automatic community-list sync", hint: "Back up community-key updates automatically. Explicit membership changes still sync when off." },
             { key: "watchDirectInvites", label: "Watch direct invites", hint: "Watch for community and private-channel invites on startup." },
             { key: "pinUpkeep", label: "Automatic pin upkeep", hint: "Keep pins updated after edits, deletions, and key rotations." },
-            { key: "historySync", label: "Historical synchronization", hint: "Load older community history in the background. Live sync is unaffected." },
+            { key: "historySync", label: "Historical synchronization", hint: "Backfill older messages and reconcile held historical keys in the background. Current-key sync, current messages and required authority evidence still load when this is off." },
           ] as const).map((option) => (
             <label key={option.key} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
               <input
