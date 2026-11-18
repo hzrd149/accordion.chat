@@ -1,5 +1,5 @@
 import { memo, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { Hand } from "lucide-react";
 import { groupMessages } from "../../helpers/util";
 import { useDevMode } from "../../hooks/use-dev-mode";
@@ -74,10 +74,17 @@ export const ChannelTimeline = memo(function ChannelTimeline({
   const devMode = useDevMode();
   const scrollRef = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef<string | null>(null);
+  const reportedAtBottom = useRef<boolean | undefined>(undefined);
   const started = useRef(false);
   const [cache] = useState(createMessageHeightCache);
   const [width, setWidth] = useState(0);
   const getItemKey = useCallback((index: number) => rows[index].message.id, [rows]);
+  const onVirtualChange = useCallback((instance: Virtualizer<HTMLDivElement, HTMLDivElement>) => {
+    const atBottom = instance.isAtEnd();
+    if (reportedAtBottom.current === atBottom) return;
+    reportedAtBottom.current = atBottom;
+    onAtBottomChange(atBottom);
+  }, [onAtBottomChange]);
   // React Compiler is not enabled here; this mutable library instance must not
   // be compiler-memoized if it is enabled in future.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -93,14 +100,21 @@ export const ChannelTimeline = memo(function ChannelTimeline({
     scrollEndThreshold: 80,
     paddingStart: 16,
     paddingEnd: 16,
-    onChange: (instance) => onAtBottomChange(instance.isAtEnd()),
+    onChange: onVirtualChange,
   });
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
     item.end <= (instance.scrollOffset ?? 0);
 
   useLayoutEffect(() => {
     const el = scrollRef.current!;
-    const update = () => { if (el.clientWidth > 0) setWidth(el.clientWidth); };
+    let observedWidth = 0;
+    const update = () => {
+      const next = el.clientWidth;
+      if (next > 0 && next !== observedWidth) {
+        observedWidth = next;
+        setWidth(next);
+      }
+    };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(el);
@@ -117,8 +131,8 @@ export const ChannelTimeline = memo(function ChannelTimeline({
     if (!pendingFocus.current) return;
     const target = scrollRef.current?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(pendingFocus.current)}"]`);
     if (target) {
-      target.focus({ preventScroll: true });
       pendingFocus.current = null;
+      target.focus({ preventScroll: true });
     }
   }, []);
   useImperativeHandle(ref, () => ({

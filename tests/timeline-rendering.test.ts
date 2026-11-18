@@ -96,18 +96,26 @@ it("mounts a bounded window of a long history and jumps to an unmounted message"
   document.body.append(host);
   const root = createRoot(host);
   const ref = createRef<ChannelTimelineHandle>();
+  const onAtBottomChange = vi.fn();
   const messages = foldChannel(Array.from({ length: 10_000 }, (_, i) => row(`m${i}`, "alice", i)), []).messages;
   try {
     await act(async () => root.render(createElement(ChannelTimeline, {
       ref, messages, channelName: "chat", ownerPubkey: "owner", myPubkey: "me",
       canWrite: true, community: undefined, channelId: "channel", dividerId: undefined,
-      favorites: [], quickReactions: [], onReply: vi.fn(), onJumpToMessage: vi.fn(), onThread: vi.fn(), onAtBottomChange: vi.fn(),
+      favorites: [], quickReactions: [], onReply: vi.fn(), onJumpToMessage: vi.fn(), onThread: vi.fn(), onAtBottomChange,
     })));
     expect(host.querySelectorAll("[data-msg-id]").length).toBeLessThan(60);
     expect(host.querySelector('[data-msg-id="m9999"]')).not.toBeNull();
     expect(host.querySelector('[data-msg-id="m5000"]')).toBeNull();
+    const bottomNotifications = onAtBottomChange.mock.calls.length;
+    const scroll = host.querySelector('[class*="overflow-anchor"]')!;
+    await act(async () => {
+      for (let i = 0; i < 20; i++) scroll.dispatchEvent(new Event("scroll"));
+    });
+    expect(onAtBottomChange).toHaveBeenCalledTimes(bottomNotifications);
     await act(async () => { expect(ref.current!.scrollToMessage("m5000")).toBe(true); });
     expect(host.querySelector('[data-msg-id="m5000"]')).not.toBeNull();
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
     expect(ref.current!.scrollToMessage("missing")).toBe(false);
     expect(host.querySelectorAll("[data-msg-id]").length).toBeLessThan(60);
   } finally {

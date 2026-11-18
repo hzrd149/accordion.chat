@@ -7,17 +7,18 @@ export interface MessageLayout {
   divider: boolean;
 }
 
+export function sameMessageLayout(a: MessageLayout, b: MessageLayout): boolean {
+  return a.message === b.message && a.showHeader === b.showHeader &&
+    a.groupStart === b.groupStart && a.divider === b.divider;
+}
+
 /** Owned by one mounted timeline, never by a global service or browser storage. */
 export function createMessageHeightCache() {
   const heights = new Map<string, { layout: MessageLayout; width: number; height: number }>();
   return {
     get(layout: MessageLayout, width: number) {
       const saved = heights.get(layout.message.id);
-      return saved && saved.width === width &&
-        saved.layout.message === layout.message &&
-        saved.layout.showHeader === layout.showHeader &&
-        saved.layout.groupStart === layout.groupStart &&
-        saved.layout.divider === layout.divider ? saved.height : undefined;
+      return saved && saved.width === width && sameMessageLayout(saved.layout, layout) ? saved.height : undefined;
     },
     set(layout: MessageLayout, width: number, height: number) {
       // Hidden/disconnected elements must not poison the measurements.
