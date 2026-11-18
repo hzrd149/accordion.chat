@@ -248,6 +248,9 @@ function Shell() {
   // because the current fold has not surfaced them yet.
   const activeCommunity = useCommunity(selectedCid ?? undefined);
   const activeChannels = use$(activeCommunity?.channelViews$) ?? NO_CHANNELS;
+  const viewingForumPost = Boolean(searchParams.get("post")) && channelViewMode(
+    activeChannels.find((channel) => channel.channel_id === selectedChannel),
+  ) === "forum";
   const defaultDestination = defaultRoute(
     pathname,
     communityIds[0],
@@ -437,7 +440,7 @@ function Shell() {
               </div>
             </div>
           )}
-          {panelMode && (
+          {panelMode && (!viewingForumPost || onMentions) && (
             <SidePanel
               mode={panelMode}
               cid={activeCommunity.material.community_id}
@@ -1014,9 +1017,29 @@ function ChatView({
   const dissolved = use$(community?.dissolved$) ?? false;
   const messages = useMessages(community, channelId);
   const channel = channels.find((c) => c.channel_id === channelId);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { state } = useLocation();
   const jumpTargetId = searchParams.get("msg");
   const isForum = channelViewMode(channel) === "forum";
+  const postId = isForum ? searchParams.get("post") : null;
+  const post = postId ? messages.find((message) =>
+    message.id === postId && !message.deleted && getSubject(message.raw) !== undefined
+  ) : undefined;
+
+  function navigateToPost(id: string | null) {
+    if (id === null && state?.fromForumFeed) {
+      navigate(-1);
+      return;
+    }
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete("msg");
+      if (id) next.set("post", id);
+      else next.delete("post");
+      return next;
+    }, { replace: id === null, state: id ? { fromForumFeed: true } : null });
+  }
   const [newPostOpen, setNewPostOpen] = useState(false);
   const newPostButton = useRef<HTMLButtonElement>(null);
   const closeNewPost = () => {
@@ -1067,7 +1090,7 @@ function ChatView({
     const onScroll = () => setAtBottom(-el.scrollTop < BOTTOM_THRESHOLD_PX);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [showTimeline]);
+  }, [postId, showTimeline]);
 
   // The list is column-reverse, so entering a channel already lands on the
   // newest message and stays there as messages arrive — no effect needed. Only
@@ -1090,7 +1113,7 @@ function ChatView({
       if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
     }
     positionedFor.current = jumpTargetId ?? "";
-  }, [messages, dividerId, jumpTargetId, showTimeline]);
+  }, [messages, dividerId, jumpTargetId, postId, showTimeline]);
 
   // Writing needs the channel's key as well as a live community: every channel
   // write path now throws MissingChannelKeyError for a private channel we can't
@@ -1138,12 +1161,12 @@ function ChatView({
         >
           <UserPlus size={18} />
         </button>
-        <button className={`btn btn-ghost btn-sm btn-circle ${threadsOpen ? "btn-active" : ""}`} title="Threads" onClick={onToggleThreads}>
+        {!postId && <button className={`btn btn-ghost btn-sm btn-circle ${threadsOpen ? "btn-active" : ""}`} title="Threads" onClick={onToggleThreads}>
           <MessageSquare size={18} />
-        </button>
-        <button className={`btn btn-ghost btn-sm btn-circle ${membersOpen ? "btn-active" : ""}`} title="Members" onClick={onToggleMembers}>
+        </button>}
+        {!postId && <button className={`btn btn-ghost btn-sm btn-circle ${membersOpen ? "btn-active" : ""}`} title="Members" onClick={onToggleMembers}>
           <Users size={18} />
-        </button>
+        </button>}
       </div>
       {directInviteOpen && community && (
         <DirectInviteModal community={community} channel={channel} onClose={() => setDirectInviteOpen(false)} />
@@ -1163,8 +1186,8 @@ function ChatView({
         />
       )}
       {channel && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
-      {community && <ChannelPins key={channelId} community={community} channelId={channelId} onJump={jumpToMessage} />}
-      {isForum && channelAccessible && (
+      {!postId && community && <ChannelPins key={channelId} community={community} channelId={channelId} onJump={jumpToMessage} />}
+      {!postId && isForum && channelAccessible && (
         <div role="group" aria-label="Channel view" className="flex flex-wrap items-center gap-2 border-b border-base-300 px-4 py-2">
           <button type="button" className={`btn min-h-11 text-base ${!showTimeline ? "btn-active" : "btn-ghost"}`}
             aria-pressed={!showTimeline} onClick={() => setViewChoice({ jumpTargetId, timeline: false })}>Posts</button>
@@ -1181,9 +1204,24 @@ function ChatView({
           )}
         </div>
       )}
-      {isForum && channelAccessible && !showTimeline ? (
-        <ForumPosts messages={messages} onOpenThread={onOpenThread} hidden={composingPost && canWrite} />
-      ) : (
+      {isForum && channelAccessible && (!showTimeline || postId) && (
+        <ForumPosts messages={messages} onOpenThread={navigateToPost} hidden={Boolean(postId) || (composingPost && canWrite)} />
+      )}
+      {postId ? (
+        <>
+          <div className="shrink-0 border-b border-base-300 px-4 py-2">
+            <button type="button" className="btn btn-ghost min-h-11 text-base" onClick={() => navigateToPost(null)}>
+              <ArrowLeft size={20} aria-hidden="true" /> All posts
+            </button>
+          </div>
+          {post && channelAccessible ? (
+            <ThreadView key={post.id} cid={cid} channelId={channelId} root={post}
+              canWrite={canWrite} favorites={favorites} fullPage />
+          ) : (
+            <p role="status" className="p-6 text-base-content/70">This post is unavailable.</p>
+          )}
+        </>
+      ) : (!isForum || !channelAccessible || showTimeline) && (
         <MessageList
           ref={scrollRef}
           messages={messages}
@@ -1201,7 +1239,7 @@ function ChatView({
           onThread={(m) => onOpenThread(m.id)}
         />
       )}
-      {canWrite && (showTimeline || composingPost) && community?.getChannel(channelId) && (
+      {!postId && canWrite && (showTimeline || composingPost) && community?.getChannel(channelId) && (
         <Composer
           key={`${pubkey}:${cid}:${channelId}`}
           draft={community.getChannel(channelId)!.draft()}
@@ -1973,17 +2011,23 @@ function ThreadView({
   canWrite,
   favorites,
   onBack,
+  fullPage = false,
 }: {
   cid: string;
   channelId: string;
   root: ChatMessage;
   canWrite: boolean;
   favorites: Emoji[];
-  onBack: () => void;
+  onBack?: () => void;
+  fullPage?: boolean;
 }) {
   const community = useCommunity(cid);
   const comments = useThread(community, channelId, root.id);
   const subject = getSubject(root.raw);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (fullPage) headingRef.current?.focus({ preventScroll: true });
+  }, [fullPage]);
   const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
   const byId = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
   // No explicit target means replying to the thread root itself.
@@ -1995,19 +2039,38 @@ function ThreadView({
     setReplyParent(null);
   }
 
+  const composer = canWrite && community?.getChannel(channelId) && (
+    <ThreadComposer
+      key={parent.id}
+      draft={community.getChannel(channelId)!.draft(parent.id)}
+      fullPage={fullPage}
+      replyingTo={replyParent?.author ?? null}
+      favorites={favorites}
+      onClear={() => setReplyParent(null)}
+      onSend={sendThreadReply}
+    />
+  );
+
   return (
     <>
-      <button
-        className="shrink-0 flex items-center gap-1.5 px-4 py-2 text-base-content/60 text-[13px] hover:text-base-content"
-        onClick={onBack}
-      >
-        <ArrowLeft size={14} /> All threads
-      </button>
+      {onBack && (
+        <button className="shrink-0 flex items-center gap-1.5 px-4 py-2 text-base-content/60 text-[13px] hover:text-base-content"
+          onClick={onBack}>
+          <ArrowLeft size={14} /> All threads
+        </button>
+      )}
       {/* col-reverse keeps the scroll anchored to the newest comment: the browser
        * pins scrollTop to the reversed start, so new replies don't push the view.
        * The inner wrapper is one flex item, so its content still reads top-down. */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col-reverse">
-        <div>
+      <div className={fullPage
+        ? "flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-8"
+        : "flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col-reverse"}>
+        <div className={fullPage ? "mx-auto w-full max-w-4xl" : undefined}>
+          {fullPage && (
+            <h1 ref={headingRef} tabIndex={-1} className="mb-5 break-words text-2xl font-semibold sm:text-3xl">
+              {displaySubject(subject ?? "").trim() || "Untitled post"}
+            </h1>
+          )}
           <div className="flex gap-3 pb-3">
             <UserAvatar pubkey={root.author} className="w-10 h-10 mt-0.5" />
             <div className="min-w-0 flex-1">
@@ -2015,25 +2078,27 @@ function ThreadView({
                 <span className="font-semibold" style={{ color: colorFor(root.author) }}>
                   <UserName pubkey={root.author} />
                 </span>
-                <span className="text-[11px] text-base-content/60">{formatTime(root.ms)}</span>
+                <span className={fullPage ? "text-sm text-base-content/70" : "text-[11px] text-base-content/60"}>{formatTime(root.ms)}</span>
               </div>
               {root.deleted ? (
                 <div className="text-base-content/60 italic">(message deleted)</div>
               ) : (
                 <>
-                  {subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
+                  {!fullPage && subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
                   <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
                 </>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50">
+          <h2 className={fullPage
+            ? "mt-5 border-t border-base-300 py-4 text-xl font-semibold"
+            : "flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50"}>
             <span className="shrink-0">
               {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
             </span>
-            <span className="h-px flex-1 bg-base-300" />
-          </div>
+            {!fullPage && <span className="h-px flex-1 bg-base-300" />}
+          </h2>
 
           {comments.map((comment) => {
             // Nested replies stay in one flat list; the chip names the parent so the
@@ -2042,13 +2107,13 @@ function ThreadView({
             const replying = replyParent?.id === comment.id;
             return (
               <div
-                className={`group flex gap-3 -mx-2 px-2 py-1.5 rounded-lg ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
+                className={`group flex gap-3 rounded-lg ${fullPage ? "flex-wrap items-start border border-base-300 mb-3 p-3" : "-mx-2 px-2 py-1.5"} ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
                 key={comment.id}
               >
                 <UserAvatar pubkey={comment.author} className="w-8 h-8 mt-0.5" />
                 <div className="min-w-0 flex-1">
                   {parentComment && (
-                    <div className="flex items-center gap-1 mb-0.5 text-[11px] text-base-content/50 min-w-0">
+                    <div className={`flex items-center gap-1 mb-0.5 text-base-content/60 min-w-0 ${fullPage ? "text-sm" : "text-[11px]"}`}>
                       <CornerDownRight size={11} className="shrink-0" />
                       <span className="shrink-0">replying to</span>
                       <span className="font-medium truncate" style={{ color: colorFor(parentComment.author) }}>
@@ -2057,10 +2122,10 @@ function ThreadView({
                     </div>
                   )}
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-semibold text-sm" style={{ color: colorFor(comment.author) }}>
+                    <span className={fullPage ? "font-semibold" : "font-semibold text-sm"} style={{ color: colorFor(comment.author) }}>
                       <UserName pubkey={comment.author} />
                     </span>
-                    <span className="text-[11px] text-base-content/60">{clockTime(comment.ms)}</span>
+                    <span className={fullPage ? "text-sm text-base-content/70" : "text-[11px] text-base-content/60"}>{fullPage ? formatTime(comment.ms) : clockTime(comment.ms)}</span>
                   </div>
                   {comment.deleted ? (
                     <div className="text-base-content/60 italic">(message deleted)</div>
@@ -2070,28 +2135,22 @@ function ThreadView({
                 </div>
                 {canWrite && (
                   <button
-                    className="btn btn-ghost btn-xs btn-circle self-start shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+                    className={fullPage
+                      ? "btn btn-ghost min-h-11 text-base"
+                      : "btn btn-ghost btn-xs btn-circle self-start shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100"}
                     title="Reply to this comment"
                     onClick={() => setReplyParent({ id: comment.id, author: comment.author, kind: COMMENT_KIND })}
                   >
-                    <Reply size={14} />
+                    <Reply size={fullPage ? 18 : 14} /> {fullPage && "Reply"}
                   </button>
                 )}
               </div>
             );
           })}
+          {fullPage && composer}
         </div>
       </div>
-      {canWrite && community?.getChannel(channelId) && (
-        <ThreadComposer
-          key={parent.id}
-          draft={community.getChannel(channelId)!.draft(parent.id)}
-          replyingTo={replyParent?.author ?? null}
-          favorites={favorites}
-          onClear={() => setReplyParent(null)}
-          onSend={sendThreadReply}
-        />
-      )}
+      {!fullPage && composer}
     </>
   );
 }
@@ -2101,12 +2160,14 @@ function ThreadView({
 function ThreadComposer({
   draft,
   replyingTo,
+  fullPage,
   favorites,
   onClear,
   onSend,
 }: {
   draft: ConcordChannelDraft;
   replyingTo: string | null;
+  fullPage: boolean;
   favorites: Emoji[];
   onClear: () => void;
   onSend: (text: string) => Promise<void>;
@@ -2119,6 +2180,9 @@ function ThreadComposer({
   const [error, setError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (fullPage && replyingTo && saved.ready) textareaRef.current?.focus();
+  }, [fullPage, replyingTo, saved.ready]);
 
   async function send() {
     const value = text.trim();
@@ -2128,6 +2192,7 @@ function ThreadComposer({
     try {
       const customEmoji = favorites.some((emoji) => value.includes(`:${emoji.shortcode}:`));
       await saved.send(undefined, customEmoji ? onSend : undefined);
+      if (fullPage && replyingTo && !customEmoji) onClear();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -2155,25 +2220,25 @@ function ThreadComposer({
   }
 
   return (
-    <div className="shrink-0 px-4 pb-4 max-sm:px-2">
+    <div className={fullPage ? "mt-5 rounded-box border border-base-300 p-3" : "shrink-0 px-4 pb-4 max-sm:px-2"}>
       {(error || saved.error) && <p role="alert" className="text-error text-sm">{error || saved.error}</p>}
       {replyingTo && (
-        <div className="flex items-center justify-between gap-2 px-1 pb-1 text-[12px] text-base-content/60">
+        <div className={`flex items-center justify-between gap-2 px-1 pb-1 text-base-content/60 ${fullPage ? "text-base" : "text-[12px]"}`}>
           <span className="flex items-center gap-1 min-w-0">
             <CornerDownRight size={12} className="shrink-0" />
             <span className="truncate">
               Replying to <UserName pubkey={replyingTo} />
             </span>
           </span>
-          <button className="btn btn-ghost btn-xs btn-circle shrink-0" title="Reply to the thread instead" onClick={onClear}>
-            <X size={14} />
+          <button className={fullPage ? "btn btn-ghost min-h-11 shrink-0" : "btn btn-ghost btn-xs btn-circle shrink-0"} title="Reply to the thread instead" onClick={onClear}>
+            <X size={fullPage ? 18 : 14} /> {fullPage && "Cancel"}
           </button>
         </div>
       )}
-      <div className="flex items-end gap-2 bg-base-100 rounded-xl p-2">
+      <div className={fullPage ? "flex flex-wrap items-center gap-2" : "flex items-end gap-2 bg-base-100 rounded-xl p-2"}>
         <span className="relative inline-flex shrink-0">
-          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
-            <SmilePlus size={18} />
+          <button className={fullPage ? "btn btn-ghost min-h-11" : "btn btn-ghost btn-sm btn-circle"} title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
+            <SmilePlus size={18} /> {fullPage && "Emoji"}
           </button>
           {pickerOpen && (
             <EmojiPicker
@@ -2187,26 +2252,28 @@ function ThreadComposer({
         </span>
         <textarea
           ref={textareaRef}
-          className="flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"
+          className={fullPage ? "textarea order-first w-full resize-y text-base" : "flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"}
           disabled={!saved.ready}
-          rows={1}
+          rows={fullPage ? 4 : 1}
+          aria-label="Reply"
           placeholder={replyingTo ? "Write a reply…" : "Reply in thread"}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (!fullPage && e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
             }
           }}
         />
         <button
-          className="btn btn-primary btn-sm btn-circle shrink-0"
-          title="Send"
+          className={fullPage ? "btn btn-primary ml-auto min-h-11 text-base" : "btn btn-primary btn-sm btn-circle shrink-0"}
+          title={fullPage ? "Post reply" : "Send"}
           onClick={send}
           disabled={sending || !text.trim()}
         >
           {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+          {fullPage && (sending ? "Posting…" : "Post reply")}
         </button>
       </div>
     </div>
