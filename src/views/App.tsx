@@ -213,7 +213,7 @@ function Shell() {
 
   return (
     <div className="flex h-screen overflow-hidden max-md:h-[100dvh]">
-      {(navOpen || panelMode) && (
+      {(navOpen || (panelMode && !viewingForumPost)) && (
         <div className="fixed inset-0 z-[35] bg-black/50 md:hidden" onClick={closeDrawers} />
       )}
 
@@ -221,7 +221,7 @@ function Shell() {
       <div
         className={`w-18 bg-base-300 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:safe-rail-y max-md:safe-x max-md:transition-transform ${
           navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"
-        }`}
+        } ${viewingForumPost ? "md:hidden" : ""}`}
       >
         {communityIds.map((cid) => (
           <RailIcon
@@ -342,7 +342,7 @@ function Shell() {
         ) : (
         <>
           <div
-            className={`md:contents max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:safe-fixed-y max-md:transition-transform ${
+            className={`${viewingForumPost ? "md:hidden" : "md:contents"} max-md:fixed max-md:inset-y-0 max-md:left-18 max-md:z-40 max-md:safe-fixed-y max-md:transition-transform ${
               navOpen ? "max-md:translate-x-0" : "max-md:-translate-x-[calc(100%+4.5rem)]"
             }`}
           >

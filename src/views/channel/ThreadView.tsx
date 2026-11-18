@@ -74,15 +74,15 @@ export function ThreadView({
        * pins scrollTop to the reversed start, so new replies don't push the view.
        * The inner wrapper is one flex item, so its content still reads top-down. */}
       <div className={fullPage
-        ? "flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-8"
+        ? "flex-1 min-h-0 overflow-y-auto"
         : "flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col-reverse"}>
-        <div className={fullPage ? "mx-auto w-full max-w-4xl" : undefined}>
+        <div>
           {fullPage && (
-            <h1 ref={headingRef} tabIndex={-1} className="mb-5 break-words text-2xl font-semibold sm:text-3xl">
+            <h1 ref={headingRef} tabIndex={-1} className="bg-base-200 px-4 py-4 break-words text-2xl font-semibold sm:px-8 sm:text-3xl">
               {displaySubject(subject ?? "").trim() || "Untitled post"}
             </h1>
           )}
-          <div className="flex gap-3 pb-3">
+          <div className={fullPage ? "flex gap-4 px-4 py-5 sm:px-8" : "flex gap-3 pb-3"}>
             <UserAvatar pubkey={root.author} className="w-10 h-10 mt-0.5" />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2 flex-wrap">
@@ -103,7 +103,7 @@ export function ThreadView({
           </div>
 
           <h2 className={fullPage
-            ? "mt-5 border-t border-base-300 py-4 text-xl font-semibold"
+            ? "bg-base-300 px-4 py-2 text-lg font-semibold sm:px-8"
             : "flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50"}>
             <span className="shrink-0">
               {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
@@ -118,7 +118,10 @@ export function ThreadView({
             const replying = replyParent?.id === comment.id;
             return (
               <div
-                className={`group flex gap-3 rounded-lg ${fullPage ? "flex-wrap items-start border border-base-300 mb-3 p-3" : "-mx-2 px-2 py-1.5"} ${replying ? "bg-primary/10" : "hover:bg-base-300/50"}`}
+                className={`group flex gap-3 ${fullPage
+                  ? "flex-wrap items-start border-b border-base-300/60 px-4 py-4 odd:bg-base-200/50 sm:px-8"
+                  : "-mx-2 rounded-lg px-2 py-1.5"}
+                  ${replying ? "!bg-primary/10" : ""} ${!fullPage && !replying ? "hover:bg-base-300/50" : ""}`}
                 key={comment.id}
               >
                 <UserAvatar pubkey={comment.author} className="w-8 h-8 mt-0.5" />

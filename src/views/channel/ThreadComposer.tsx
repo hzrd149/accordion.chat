@@ -69,7 +69,7 @@ export function ThreadComposer({
   }
 
   return (
-    <div className={fullPage ? "mt-5 rounded-box border border-base-300 p-3" : "shrink-0 px-4 pb-4 max-sm:px-2"}>
+    <div className={fullPage ? "bg-base-200 px-4 py-5 sm:px-8" : "shrink-0 px-4 pb-4 max-sm:px-2"}>
       {(error || saved.error) && <p role="alert" className="text-error text-sm">{error || saved.error}</p>}
       {replyingTo && (
         <div className={`flex items-center justify-between gap-2 px-1 pb-1 text-base-content/60 ${fullPage ? "text-base" : "text-[12px]"}`}>
@@ -101,7 +101,7 @@ export function ThreadComposer({
         </span>
         <textarea
           ref={textareaRef}
-          className={fullPage ? "textarea order-first w-full resize-y text-base" : "flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"}
+          className={fullPage ? "textarea order-first w-full resize-y bg-base-100 text-base" : "flex-1 min-w-0 min-h-9 max-h-35 resize-y bg-transparent outline-none border-0 leading-snug text-base-content"}
           disabled={!saved.ready}
           rows={fullPage ? 4 : 1}
           aria-label="Reply"
