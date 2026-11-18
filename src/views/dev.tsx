@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { History, Landmark, Wrench } from "lucide-react";
+import { Gauge, History, Landmark, Wrench } from "lucide-react";
 import { CryptoHistory } from "../components/dev/CryptoHistory";
 import { ControlPlaneDebugger } from "../components/dev/ControlPlaneDebugger";
+import { SyncBenchmark } from "../components/dev/SyncBenchmark";
 
 /**
  * Developer tools — surfaced only when developer mode is enabled (see
@@ -9,11 +10,12 @@ import { ControlPlaneDebugger } from "../components/dev/ControlPlaneDebugger";
  * a content pane, with page selection delegated back to the Shell via
  * `onSelectPage` → `navigate("/dev/:page")`. Add new tools by extending `PAGES`.
  */
-type PageId = "crypto-history" | "control-plane";
+type PageId = "crypto-history" | "control-plane" | "sync-benchmark";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode }[] = [
   { id: "crypto-history", label: "Group Crypto History", icon: <History size={18} /> },
   { id: "control-plane", label: "Control Plane Debugger", icon: <Landmark size={18} /> },
+  { id: "sync-benchmark", label: "Cold Sync Benchmark", icon: <Gauge size={18} /> },
 ];
 
 export function DevView({
@@ -57,6 +59,7 @@ export function DevView({
           <div className="w-full">
             {page === "crypto-history" && <CryptoHistory />}
             {page === "control-plane" && <ControlPlaneDebugger />}
+            {page === "sync-benchmark" && <SyncBenchmark />}
           </div>
         </div>
       </div>
