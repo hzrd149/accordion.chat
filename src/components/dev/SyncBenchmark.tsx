@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../../hooks/use-concord";
 import { startConcordBenchmark } from "../../services/concord-benchmark";
-import type { BenchmarkReport, BenchmarkTarget } from "../../services/concord-benchmark";
-import { signatureVerificationMode$ } from "../../services/signature-verification";
+import type { BenchmarkReport, BenchmarkTarget, BenchmarkVerification } from "../../services/concord-benchmark";
 
 const time = (ms?: number) => ms === undefined ? "—" : `${(ms / 1_000).toFixed(2)} s`;
 
@@ -11,7 +10,7 @@ export function SyncBenchmark() {
   const account = useActiveAccount();
   const client = useConcord();
   const communities = use$(() => client?.communities$, [client]) ?? [];
-  const verification = use$(signatureVerificationMode$);
+  const [verification, setVerification] = useState<BenchmarkVerification>("wasm");
   const [source, setSource] = useState("list");
   const [invite, setInvite] = useState("");
   const [seconds, setSeconds] = useState(120);
@@ -36,7 +35,7 @@ export function SyncBenchmark() {
       active.current = startConcordBenchmark(account, target, seconds * 1_000, (next) => {
         setReport(next);
         if (next.status !== "running") setRuns((previous) => [next, ...previous].slice(0, 10));
-      });
+      }, verification);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
   function downloadRuns() {
@@ -50,13 +49,13 @@ export function SyncBenchmark() {
   return (
     <div className="max-w-5xl flex flex-col gap-5">
       <p className="opacity-70">
-        Benchmark cold community synchronization with fresh in-memory stores and new relay connections.
+        Benchmark cold community synchronization in an isolated worker with fresh in-memory stores, crypto state and relay connections.
         Nothing is joined, saved to disk, or published. Historical backfill is always enabled; attachments and profiles are not downloaded.
       </p>
       <div className="alert alert-info text-sm">
         Full list includes relay discovery and signer decryption (which may prompt). A selected community reuses only its
         membership keys; an invite fetches its bundle without publishing a Join. Only history accessible to those keys can be tested.
-        The normal app keeps running, so its network/CPU activity can affect results. Verification: {verification}.
+        The normal app keeps running, so its network/CPU activity can affect results. Its verification settings are never changed.
         This is a cold data/client test, not a cold browser, DNS, TLS, or JavaScript startup test.
       </div>
       <div className="flex flex-wrap items-end gap-3">
@@ -71,6 +70,15 @@ export function SyncBenchmark() {
           </select>
         </label>
         <label className="flex flex-col gap-1">
+          <span className="text-sm font-semibold">Signature verification</span>
+          <select className="select" value={verification} disabled={running}
+            onChange={(event) => setVerification(event.target.value as BenchmarkVerification)}>
+            <option value="wasm">WASM (full verification)</option>
+            <option value="javascript">Built-in JavaScript (full verification)</option>
+            <option value="none">No signature verification</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
           <span className="text-sm font-semibold">Timeout (seconds)</span>
           <input className="input w-32" type="number" min={1} max={900} value={seconds} disabled={running}
             onChange={(event) => setSeconds(Number(event.target.value))} />
@@ -80,6 +88,10 @@ export function SyncBenchmark() {
         </button>
         {running && <button className="btn" onClick={() => active.current?.cancel()}>Cancel</button>}
       </div>
+      {verification === "none" && <div className="alert alert-warning text-sm">
+        Unsafe benchmark baseline: event and wrapped-seal signatures are not checked. Untrusted data may be accepted.
+        This applies only to the isolated benchmark, not your normal client.
+      </div>}
       {source === "invite" && <label className="flex flex-col gap-1">
         <span className="text-sm font-semibold">Invite link</span>
         <input className="input w-full" type="text" autoComplete="off" value={invite} disabled={running}
@@ -96,11 +108,12 @@ export function SyncBenchmark() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
           {[
             ["Client/engine start", time(report.startupMs)],
+            ["Worker crypto setup (excluded)", time(report.preparationMs)],
             ["First relay event", time(report.firstEventMs)],
             ["Received / unique outer events", `${report.receivedEvents} / ${report.uniqueEvents}`],
             ["EVENT payload", `${(report.receivedEventBytes / 1_048_576).toFixed(2)} MiB`],
             ["Outer events / second", (report.receivedEvents / Math.max(report.elapsedMs / 1_000, 0.001)).toFixed(1)],
-            ["Max event-loop delay", `${Math.max(0, report.maxEventLoopLagMs).toFixed(0)} ms`],
+            ["Max worker event-loop delay", `${Math.max(0, report.maxEventLoopLagMs).toFixed(0)} ms`],
           ].map(([label, value]) => <div key={label} className="rounded-box border border-base-300 p-3">
             <div className="opacity-60">{label}</div><strong>{value}</strong>
           </div>)}
@@ -118,7 +131,9 @@ export function SyncBenchmark() {
           Completion requires the full list (when selected), live community engines and complete current/history plane coverage,
           stable for one second. Failed or incomplete reads never count as complete; a timeout is a partial result.
           Times are from the start of the run. Payload bytes include duplicate EVENT deliveries, not WebSocket overhead.
-          Retained routes are SDK processing counts, not unique visible messages. Event-loop delay is tab-wide, not isolated CPU time.
+          Retained routes are SDK processing counts, not unique visible messages. Event-loop delay measures the worker, not CPU time.
+          Backend initialization is measured separately and excluded from synchronization timings. Both outer-event and wrapped-seal
+          signatures use the selected verifier; encryption and protocol validation still run in all modes.
           For comparable timings, use a production build and keep this tab in the foreground. Measurements include instrumentation overhead.
         </p>
         {Object.keys(report.diagnostics).length > 0 && <div className="alert alert-warning text-sm">

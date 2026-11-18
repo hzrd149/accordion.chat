@@ -68,12 +68,6 @@ vi.mock("applesauce-loaders/loaders", () => ({
     return loader;
   },
 }));
-vi.mock("../src/nostr", () => ({
-  eventStore: { verifyEvent: () => true }, LOOKUP_RELAYS: ["wss://lookup.example"],
-}));
-vi.mock("../src/services/signature-verification", () => ({
-  signatureVerificationMode$: { value: "strict" },
-}));
 
 const material = { community_id: "community", name: "Test community" } as JoinMaterial;
 const signer = { getPublicKey: async () => "pubkey", signEvent: vi.fn() };
@@ -81,7 +75,10 @@ const plane = (state: ConcordPlaneSyncCoverage["state"], lane: "current" | "hist
   ({ author: lane, lane, state, relays: {}, retained: 5 });
 
 // Imported after mock registration; factories reference classes only when called.
-const { hasCompleteCoverage, startConcordBenchmark } = await import("../src/services/concord-benchmark");
+const { hasCompleteCoverage, startConcordBenchmark: startRuntime } = await import("../src/services/concord-benchmark-runtime");
+function startConcordBenchmark(...args: Parameters<typeof startRuntime> extends [...infer A, unknown] ? A : never) {
+  return startRuntime(...args, { verification: "javascript", verifyEvent: () => true, lookupRelays: ["wss://lookup.example"] });
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
