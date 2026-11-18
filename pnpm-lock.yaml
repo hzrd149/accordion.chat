@@ -6,6 +6,7 @@ settings:
 
 overrides:
   '@applesauce/concord': file:./concord.local/node_modules/concord
+  nostr-idb: link:../nostr-idb
   workbox-build>glob: 14.0.6
   workbox-build>source-map: 0.8.0
 
@@ -31,6 +32,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      '@tanstack/react-virtual':
+        specifier: 3.14.26
+        version: 3.14.26(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       applesauce-accounts:
         specifier: 7.1.0
         version: 7.1.0(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)
@@ -74,8 +78,8 @@ importers:
         specifier: ^1.74.0
         version: 1.74.0(@types/react@19.3.0)(react@19.3.1)
       nostr-idb:
-        specifier: ^6.0.0
-        version: 6.0.0
+        specifier: link:../nostr-idb
+        version: link:../nostr-idb
       nostr-tools:
         specifier: ^2.26.1
         version: 2.26.1(nostr-wasm@0.1.0)(typescript@6.0.3)
@@ -1438,6 +1442,15 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
+  '@tanstack/react-virtual@3.14.26':
+    resolution: {integrity: sha512-HUDlfsrYH6ko5xH56L62Mcl/uzT+AGVNMHFuDNqDJMdZWc1AQa2oeVKNUvZ/RWBZQ4TYtyQerFrNvLnp39h65A==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  '@tanstack/virtual-core@3.19.11':
+    resolution: {integrity: sha512-/5iHb0RHBvj8Di59FDs4ESNm45jls33aZAi4zccVXZjc/6ZvwQP6nzEYeT6weXjTf9E6/vrp2JhYWRyO+ZP13A==}
+
   '@trickfilm400/rollup-plugin-off-main-thread@3.0.0-pre1':
     resolution: {integrity: sha512-/67zpWDBLV+oYAEL682s1ktXL0HgqX76f6gaVGkGnVZlBbm1zd0v4Bz8MFF2GGhoX9rvfq3KSQHubFHwa6w6/Q==}
     engines: {node: '>=12'}
@@ -2180,9 +2193,6 @@ packages:
   idb@7.1.1:
     resolution: {integrity: sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ==}
 
-  idb@8.0.4:
-    resolution: {integrity: sha512-jd0ITCrN+Zah4J7R/Z2jnR3W7A4BXDAjmo62MwWuSjxCiueUAf7X5rbodEdidWzeknwXHmLpdZkoiiCppNi30Q==}
-
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
@@ -2631,9 +2641,6 @@ packages:
   node-releases@2.0.63:
     resolution: {integrity: sha512-6li2QanLsAXpIH2R6j77MzRyvOyrvdTqlKtO4CgBdHGNvN99ZZfyxszHc5o5+IZBWD5u6Hzwg83JoGXmqZNG9Q==}
     engines: {node: '>=18'}
-
-  nostr-idb@6.0.0:
-    resolution: {integrity: sha512-lSilbNebEUjmtzJk2xILFjZBVzn9/Owe6khSo0OWi/r0ZbY6yA6wYq6FtwjVRAkLDmhNFiRx6QAn6ZGAQfK7hQ==}
 
   nostr-tools@2.26.1:
     resolution: {integrity: sha512-PMsQ80lMeLhb9t6GiCWG0YkwaOy0GiLZI7Ag1BalG0SqU9g/sqxwvBrnZZpnCEVK7WDcc6rVYV5GmPDeg+g8yA==}
@@ -3386,7 +3393,7 @@ snapshots:
       applesauce-loaders: 7.2.0(nostr-wasm@0.1.0)(typescript@6.0.3)
       applesauce-relay: 7.1.1(nostr-wasm@0.1.0)(typescript@6.0.3)
       applesauce-signers: 7.1.0(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)
-      nostr-idb: 6.0.0
+      nostr-idb: link:../nostr-idb
       rxjs: 7.8.2
     transitivePeerDependencies:
       - '@capacitor/core'
@@ -4604,6 +4611,14 @@ snapshots:
       tailwindcss: 4.3.5
       vite: 8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.49.0)
 
+  '@tanstack/react-virtual@3.14.26(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      '@tanstack/virtual-core': 3.19.11
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+
+  '@tanstack/virtual-core@3.19.11': {}
+
   '@trickfilm400/rollup-plugin-off-main-thread@3.0.0-pre1':
     dependencies:
       ejs: 3.1.10
@@ -5543,8 +5558,6 @@ snapshots:
 
   idb@7.1.1: {}
 
-  idb@8.0.4: {}
-
   ignore@5.3.2: {}
 
   ignore@7.0.16: {}
@@ -6060,10 +6073,6 @@ snapshots:
   natural-compare@1.4.0: {}
 
   node-releases@2.0.63: {}
-
-  nostr-idb@6.0.0:
-    dependencies:
-      idb: 8.0.4
 
   nostr-tools@2.26.1(nostr-wasm@0.1.0)(typescript@6.0.3):
     dependencies:

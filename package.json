@@ -17,6 +17,7 @@
     "@livekit/components-styles": "^1.2.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "@tanstack/react-virtual": "3.14.26",
     "applesauce-accounts": "7.1.0",
     "applesauce-actions": "7.1.1",
     "applesauce-common": "7.1.1",

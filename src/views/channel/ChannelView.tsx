@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, Hash, Lock, MessageSquare, Plus, UserPlus, Users, Wrench } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
@@ -16,21 +16,18 @@ import type { ChannelMetadata } from "@applesauce/concord";
 import { PERM } from "@applesauce/concord";
 import { channelViewMode, getSubject, hasChannelKey } from "@applesauce/concord/helpers";
 import { ChannelCallButton, VoiceCallPanel } from "../../components/voice/ChannelCall";
-import { ChannelTimeline } from "./ChannelTimeline";
+import { ChannelTimeline, type ChannelTimelineHandle } from "./ChannelTimeline";
 import { ChannelComposer } from "./ChannelComposer";
 import { PrivateChannelDebugModal } from "./PrivateChannelDebugModal";
 import { ThreadView } from "./ThreadView";
 import type { ReplyTarget } from "./types";
 
-/** How close to the bottom still counts as "following the conversation" (px). */
-const BOTTOM_THRESHOLD_PX = 80;
-
 const NO_CHANNELS: ChannelMetadata[] = [];
 
 // The chat view is split into three independently-rendering pieces so a keystroke
 // in the composer never re-renders the (potentially long) message list:
-//   • ChannelView    — owns the message stream, scroll, and shared reply target.
-//   • ChannelTimeline — memoized; re-renders only when the messages/groups change.
+//   • ChannelView    — owns the message stream and shared reply target.
+//   • ChannelTimeline — owns virtual scrolling and channel-local row measurements.
 //   • ChannelComposer    — owns the draft text/files/sending/picker state locally.
 export function ChannelView({
   cid,
@@ -94,7 +91,7 @@ export function ChannelView({
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [directInviteOpen, setDirectInviteOpen] = useState(false);
   const [privateDebugOpen, setPrivateDebugOpen] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<ChannelTimelineHandle>(null);
   const devMode = useDevMode();
   const canCreateInvite = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
   const canManageChannels = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
@@ -121,38 +118,20 @@ export function ChannelView({
     [favorites],
   );
 
-  // Track whether the newest message is on screen. This gates both the
-  // follow-the-conversation scroll below and the mark-read effect above, so
-  // reading history is never interrupted by someone else posting.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // The list is column-reverse, so scrollTop is 0 at the newest message and
-    // grows negative going back through history.
-    const onScroll = () => setAtBottom(-el.scrollTop < BOTTOM_THRESHOLD_PX);
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [postId, showTimeline]);
-
-  // The list is column-reverse, so entering a channel already lands on the
-  // newest message and stays there as messages arrive — no effect needed. Only
-  // the unread divider (or a deep-linked `?msg=` target) has to be scrolled to.
+  // Virtualized targets may not be mounted yet; resolve IDs through the list,
+  // which scrolls by index and focuses the row once it mounts.
   const positionedFor = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || messages.length === 0) return;
+    const timeline = timelineRef.current;
+    if (!timeline || messages.length === 0) return;
     const targetId = pendingJump.current ?? jumpTargetId;
     const positionKey = targetId ?? "";
     if (!pendingJump.current && positionedFor.current === positionKey) return;
     if (targetId) {
-      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(targetId)}"]`);
-      if (!target) return;
-      target.scrollIntoView({ block: "center" });
-      target.focus({ preventScroll: true });
+      if (!timeline.scrollToMessage(targetId)) return;
       pendingJump.current = null;
     } else if (dividerId) {
-      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`);
-      if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
+      timeline.scrollToMessage(dividerId, "start");
     }
     positionedFor.current = jumpTargetId ?? "";
   }, [messages, dividerId, jumpTargetId, postId, showTimeline]);
@@ -164,12 +143,9 @@ export function ChannelView({
   const composingPost = isForum && !showTimeline && newPostOpen;
 
   const jumpToMessage = useCallback((id: string) => {
-    const scrollEl = scrollRef.current;
-    const target = scrollEl?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-    if (target) {
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
-      target.focus({ preventScroll: true });
-    } else if (!scrollEl) {
+    if (timelineRef.current) {
+      timelineRef.current.scrollToMessage(id);
+    } else {
       setViewChoice({ jumpTargetId, timeline: true });
       pendingJump.current = id;
     }
@@ -268,7 +244,9 @@ export function ChannelView({
         </>
       ) : (!isForum || !channelAccessible || showTimeline) && (
         <ChannelTimeline
-          ref={scrollRef}
+          key={`${pubkey}:${cid}:${channelId}`}
+          ref={timelineRef}
+          onAtBottomChange={setAtBottom}
           messages={messages}
           channelName={channel?.name}
           ownerPubkey={community?.material.owner ?? ""}

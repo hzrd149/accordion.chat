@@ -81,6 +81,7 @@ function AttachmentView({
   if (!src)
     return (
       <div
+        data-message-pending
         className={
           gallery
             ? `${TILE} animate-pulse`
@@ -397,7 +398,7 @@ function NostrEventEmbed({ pointer, encoded, depth = 0 }: { pointer: NostrPointe
   if (!event) {
     return (
       <EmbedShell encoded={encoded}>
-        <div className="flex items-center gap-2 text-sm text-base-content/60">
+        <div data-message-pending className="flex items-center gap-2 text-sm text-base-content/60">
           <span className="loading loading-spinner loading-xs" />
           <span>Loading Nostr event…</span>
         </div>
