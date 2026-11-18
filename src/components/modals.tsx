@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Subscription } from "rxjs";
-import { ArrowLeft, Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, KeyRound, Lock, Plus, Trash2, X } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
@@ -9,9 +9,11 @@ import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { useInvitePreview, type InvitePreview } from "../hooks/use-invite-preview";
 import { INVITE_HOST_PRESETS, inviteHost$, inviteHostBase, rehostInviteUrl, setInviteHost } from "../services/invite-host";
 import { UserAvatar, UserName } from "./User";
+import { toast, toastSuccess } from "../services/toasts";
+import { describeSignerRequest, nextSignerRequestId, signerApprovalHint, signerRequests$, type SignerRequest } from "../services/signer-activity";
 import { unixNow } from "applesauce-core/helpers";
-import { rumorMs } from "@applesauce/concord/helpers";
-import { PERM } from "@applesauce/concord";
+import { COMMUNITY_LIST_KIND, ENCRYPTED_SEAL_KIND, PLAINTEXT_SEAL_KIND, rumorMs } from "@applesauce/concord/helpers";
+import { CommunityRootUnverifiedError, PERM } from "@applesauce/concord";
 import type { ChannelView, ConcordInviteLink } from "@applesauce/concord";
 import type { ChatMessage } from "../chat/fold";
 
@@ -259,6 +261,26 @@ export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => vo
   );
 }
 
+const JOIN_STEPS = [
+  ["Verifying the invite and the community owner", "Invite and community owner verified"],
+  ["Saving your membership keys on this device", "Membership keys saved on this device"],
+  ["Announcing your membership to the community", "Membership announced"],
+  ["Syncing your community list to your other devices", "Joined"],
+] as const;
+
+/** Turn the SDK's protocol-level join errors into something a user can act on. */
+function describeJoinError(error: unknown, rejected: SignerRequest | undefined): string {
+  if (rejected) return `Your signer did not complete "${describeSignerRequest(rejected)}" (${rejected.error ?? "rejected"}). Joining needs that approval — try again and approve the request.`;
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof CommunityRootUnverifiedError)
+    return error.reason === "unreachable"
+      ? "Couldn't reach the community's relays to verify its owner. Check your connection and try again."
+      : "The community's owner could not be verified from its relays, so the invite can't be trusted yet. Try again later.";
+  if (/not found or revoked/.test(message)) return "This invite was not found or has been revoked.";
+  if (/expired/.test(message)) return "This invite has expired.";
+  return message;
+}
+
 export function JoinModal({
   initialLink = "",
   onClose,
@@ -269,52 +291,178 @@ export function JoinModal({
   onJoined: (id: string) => void;
 }) {
   const client = useConcord();
+  const account = useActiveAccount();
   const [link, setLink] = useState(initialLink);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [completed, setCompleted] = useState(0);
+  // Signer requests with an id at or after this one were made during this join attempt.
+  const [firstRequest, setFirstRequest] = useState<number | null>(null);
+  const allRequests = use$(signerRequests$);
+  const requests = firstRequest === null ? [] : (allRequests ?? []).filter((request) => request.id >= firstRequest);
+  const progressSubscription = useRef<Subscription | null>(null);
+  const closed = useRef(false);
+  useEffect(() => () => {
+    closed.current = true;
+    progressSubscription.current?.unsubscribe();
+  }, []);
   // Proactively fetch the invite bundle as the link is entered, so we can preview
   // the community before the user commits to joining.
   const preview = useInvitePreview(link);
   const ready = preview.status === "ready" && !preview.expired;
+  const communities = use$(client.communities$);
+  const alreadyMember = preview.status === "ready" &&
+    !!communities?.some(({ material }) => material.community_id === preview.bundle.community_id);
+  const started = busy || !!error || completed > 0;
 
   async function join() {
+    if (busy || preview.status !== "ready") return;
+    const cid = preview.bundle.community_id;
+    const name = preview.bundle.name;
     setBusy(true);
     setError("");
+    setCompleted(0);
+    const startId = nextSignerRequestId();
+    setFirstRequest(startId);
+    const subscriptions = new Subscription();
+    progressSubscription.current?.unsubscribe();
+    progressSubscription.current = subscriptions;
+    const advance = (step: number) => setCompleted((previous) => Math.max(previous, step));
+    // The SDK has no join-progress callback. Observe its real milestones — the
+    // engine being recorded, our signer being asked for the membership seal and
+    // the community list, our Join folding into the roster — never a timer.
+    const held = client.getCommunity(cid);
+    if (held) advance(2); // already recorded: only the Join and list save remain
+    else
+      subscriptions.add(client.communities$.subscribe((states) => {
+        if (!states.some(({ material }) => material.community_id === cid)) return;
+        advance(1);
+        const community = client.getCommunity(cid);
+        if (community)
+          subscriptions.add(community.members$.subscribe((members) => {
+            if (members.has(client.pubkey)) advance(3);
+          }));
+      }));
+    subscriptions.add(signerRequests$.subscribe((all) => {
+      for (const request of all) {
+        if (request.id < startId) continue;
+        if (request.method === "sign" && (request.kind === ENCRYPTED_SEAL_KIND || request.kind === PLAINTEXT_SEAL_KIND))
+          advance(2);
+        if ((request.method === "sign" && request.kind === COMMUNITY_LIST_KIND) || (request.method === "encrypt" && request.self))
+          advance(3);
+      }
+    }));
     try {
       const community = await client.joinByLink(link.trim());
-      onJoined(community.communityId);
+      advance(JOIN_STEPS.length);
+      // Hidden mid-join: report the outcome without yanking the user to another page.
+      if (closed.current) toastSuccess(`Joined ${name}`);
+      else onJoined(community.communityId);
     } catch (e) {
-      setError((e as Error).message);
+      const rejected = signerRequests$.value.find((request) => request.id >= startId && request.status === "failed");
+      const message = describeJoinError(e, rejected);
+      if (closed.current) toast(`Could not join ${name}: ${message}`, "error", 10_000);
+      setError(message);
       setBusy(false);
+    } finally {
+      subscriptions.unsubscribe();
     }
   }
 
+  const pending = requests.filter((request) => request.status === "pending");
+
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={() => { if (!busy) onClose(); }}>
       <h2 className="text-lg font-bold">Join a community</h2>
       <p className="text-sm opacity-60 mb-5">Paste an invite link. Only people with the link can join.</p>
-      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
-      <div className="mb-4">
-        <label className="label text-xs font-semibold uppercase opacity-70">Invite link</label>
-        <input
-          className="input input-bordered w-full"
-          value={link}
-          onChange={(e) => setLink(e.target.value)}
-          placeholder="https://…/invite/naddr…#…"
-          autoFocus
-        />
-      </div>
+      <fieldset disabled={busy}>
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Invite link</label>
+          <input
+            className="input input-bordered w-full"
+            value={link}
+            onChange={(e) => {
+              setLink(e.target.value);
+              setError("");
+              setCompleted(0);
+              setFirstRequest(null);
+            }}
+            placeholder="https://…/invite/naddr…#…"
+            autoFocus
+          />
+        </div>
+      </fieldset>
       <InvitePreviewCard preview={preview} />
+      {alreadyMember && !started && (
+        <p className="text-xs opacity-70 -mt-2 mb-4">You're already a member. Joining again re-sends your membership and adds any channels this invite grants.</p>
+      )}
+      {started && (
+        <div className="rounded-box bg-base-200 p-4 mb-4" aria-busy={busy}>
+          <progress
+            className={`progress w-full ${error ? "progress-error" : "progress-primary"}`}
+            value={completed}
+            max={JOIN_STEPS.length}
+            aria-label="Join progress"
+          />
+          <ol className="mt-3 space-y-2 text-sm" aria-live="polite" aria-relevant="additions text">
+            {JOIN_STEPS.slice(0, Math.min(completed + 1, JOIN_STEPS.length)).map(([step, done], index) => (
+              <li key={step} className="flex items-center gap-2">
+                {index < completed
+                  ? <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+                  : busy
+                    ? <span className="loading loading-spinner loading-xs shrink-0" aria-hidden="true" />
+                    : <X className="size-4 shrink-0 text-error" aria-hidden="true" />}
+                <span>{index < completed ? done : error ? `${step} — interrupted` : `${step}…`}</span>
+              </li>
+            ))}
+          </ol>
+          {requests.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-base-300">
+              <div className="text-xs font-semibold uppercase opacity-70 mb-2">Signer requests</div>
+              <ul className="space-y-1.5 text-sm" aria-live="polite">
+                {requests.map((request) => (
+                  <li key={request.id} className={`flex items-center gap-2 ${request.status === "pending" ? "font-medium" : "opacity-70"}`}>
+                    {request.status === "done"
+                      ? <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+                      : request.status === "failed"
+                        ? <X className="size-4 shrink-0 text-error" aria-hidden="true" />
+                        : <KeyRound className="size-4 shrink-0 text-warning animate-pulse" aria-hidden="true" />}
+                    <span>
+                      {describeSignerRequest(request)}
+                      {request.status === "pending" && " — waiting for approval"}
+                      {request.status === "failed" && " — declined"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {pending.length > 0 && (
+            <div role="status" className="alert alert-warning text-sm mt-3 py-2">
+              <KeyRound className="size-4 shrink-0" aria-hidden="true" />
+              <span>Your signer is waiting for you. {signerApprovalHint(account?.type)}</span>
+            </div>
+          )}
+          {busy && pending.length === 0 && (
+            <p className="mt-3 text-xs opacity-60">
+              Verifying and syncing with the community's relays can take a little while. If your signer asks for approval, it will show up here.
+            </p>
+          )}
+        </div>
+      )}
+      {error && <div role="alert" className="alert alert-error text-sm mb-3">{error}</div>}
       <div className="modal-action">
-        <button className="btn btn-ghost" onClick={onClose}>
-          Cancel
+        <button className="btn btn-ghost" onClick={onClose} title={busy ? "Joining continues in the background" : undefined}>
+          {busy ? "Hide" : "Cancel"}
         </button>
         <button className="btn btn-primary" onClick={join} disabled={!ready || busy}>
           {busy
             ? "Joining…"
-            : preview.status === "ready"
-              ? `Join ${preview.bundle.name}`
-              : "Join"}
+            : error
+              ? "Try again"
+              : preview.status === "ready"
+                ? `Join ${preview.bundle.name}`
+                : "Join"}
         </button>
       </div>
     </Modal>

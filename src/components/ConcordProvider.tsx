@@ -10,6 +10,7 @@ import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
 import { createConcordStorage } from "../services/concord-storage";
 import { activeConcordAutomation } from "../services/concord-automation";
+import { observeSigner } from "../services/signer-activity";
 import { ConcordDiagnostics } from "./ConcordDiagnostics";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
@@ -23,7 +24,8 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     const drafts = Drafts.createIndexedDBDraftStore();
     const storage = createConcordStorage(account.pubkey);
     const client = new ConcordClient({
-      signer: account,
+      // Observed so flows like joining can show requests awaiting signer approval.
+      signer: observeSigner(account, account.pubkey),
       pool,
       eventStore,
       uploader,
