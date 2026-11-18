@@ -114,14 +114,14 @@ export function ThreadView({
             </div>
           </div>
 
-          <h2 className={fullPage
-            ? "bg-base-300 px-4 py-2 text-lg font-semibold sm:px-8"
-            : "flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50"}>
-            <span className="shrink-0">
-              {comments.length === 0 ? "No replies yet" : `${comments.length} ${comments.length === 1 ? "reply" : "replies"}`}
-            </span>
-            {!fullPage && <span className="h-px flex-1 bg-base-300" />}
-          </h2>
+          {comments.length > 0 && (
+            <h2 className={fullPage
+              ? "bg-base-300 px-4 py-2 text-lg font-semibold sm:px-8"
+              : "flex items-center gap-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-base-content/50"}>
+              <span className="shrink-0">{comments.length} {comments.length === 1 ? "reply" : "replies"}</span>
+              {!fullPage && <span className="h-px flex-1 bg-base-300" />}
+            </h2>
+          )}
 
           {comments.map((comment) => {
             // Nested replies stay in one flat list; the chip names the parent so the
