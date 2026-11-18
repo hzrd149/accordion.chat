@@ -8,11 +8,12 @@ function stripScheme(url: string) {
 }
 
 /** Favicon with a globe fallback when the image is missing or fails to load. */
-function Favicon({ src }: { src?: string | null }) {
+function Favicon({ src, compact }: { src?: string | null; compact: boolean }) {
+  const size = compact ? "size-6" : "size-8";
   const [failed, setFailed] = useState<string | null>(null);
   if (!src || failed === src) {
     return (
-      <span className="size-8 shrink-0 rounded-md bg-base-300 grid place-items-center opacity-70">
+      <span className={`${size} shrink-0 rounded-md bg-base-300 grid place-items-center opacity-70`}>
         <Globe size={16} />
       </span>
     );
@@ -23,7 +24,7 @@ function Favicon({ src }: { src?: string | null }) {
       alt=""
       loading="lazy"
       referrerPolicy="no-referrer"
-      className="size-8 shrink-0 rounded-md bg-base-300 object-cover"
+      className={`${size} shrink-0 rounded-md bg-base-300 object-cover`}
       onError={() => setFailed(src)}
     />
   );
@@ -37,8 +38,8 @@ function ServerSummary({ icon, name, about, href, address }: {
   address?: string;
 }) {
   return (
-    <div className="flex flex-1 items-center gap-3 min-w-0" title={address}>
-      <Favicon src={icon} />
+    <div className={`flex flex-1 items-center min-w-0 ${address ? "gap-2" : "gap-3"}`} title={address}>
+      <Favicon src={icon} compact={!!address} />
       <div className="min-w-0 flex-1">
         {href ? (
           <a

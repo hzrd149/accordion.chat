@@ -1,7 +1,7 @@
 import type { ConcordCommunityStatus, ConcordDiagnostic, ConcordPrivateChannelStatus } from "@applesauce/concord";
 import { normalizeURL } from "applesauce-core/helpers/url";
 import { use$ } from "applesauce-react/hooks";
-import { Activity, Inbox, Loader2, Lock, Radio } from "lucide-react";
+import { Activity, CircleCheck, CircleMinus, Inbox, Loader2, Lock, Radio } from "lucide-react";
 import type { ReactNode } from "react";
 import { debounce, distinctUntilChanged, map, of, timer } from "rxjs";
 import type { Observable } from "rxjs";
@@ -63,7 +63,7 @@ function Issues({ issues }: { issues: readonly ConcordDiagnostic[] }) {
 function Relays({ urls }: { urls: string[] }) {
   const statuses = use$(pool.status$);
   return (
-    <ul className="space-y-2">
+    <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
       {urls.map((url) => {
         let connected = statuses?.[url]?.connected ?? false;
         try {
@@ -71,10 +71,13 @@ function Relays({ urls }: { urls: string[] }) {
         } catch {
           // Keep invalid relay targets visible as disconnected.
         }
-        return <li key={url} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        const StatusIcon = connected ? CircleCheck : CircleMinus;
+        const label = connected ? "Connected" : "Disconnected";
+        return <li key={url} className="flex min-w-0 items-center gap-2 rounded-md bg-base-200 px-2 py-1.5">
           <RelayInfo url={url} identityOnly />
-          <span className={`badge badge-soft h-auto shrink-0 py-1 text-base ${connected ? "badge-success" : "badge-ghost"}`}>
-            {connected ? "Connected" : "Disconnected"}
+          <span className={`shrink-0 ${connected ? "text-success" : "text-base-content/60"}`} title={label}>
+            <StatusIcon size={17} aria-hidden="true" />
+            <span className="sr-only">{label}</span>
           </span>
         </li>;
       })}
