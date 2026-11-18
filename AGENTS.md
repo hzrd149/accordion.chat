@@ -25,7 +25,7 @@ Direct Invites are exposed by `client.directInvites$` and dismissed with `dismis
 
 ## Git workflow
 
-Do not create or commit planning documents, investigation reports, handoffs, or other task write-ups in this application repository. Keep task plans and findings in the conversation instead.
+Write planning documents, working documents, investigation reports, handoffs, and other task write-ups only in the untracked `.planning/` folder. Never commit these documents.
 
 **Commit after every feature or self-contained change.** Once a feature works (app tests, build and lint pass), make a focused git commit before moving on. Keep commits small and scoped to one feature so history stays reviewable; don't batch unrelated changes into one commit. Do not push unless asked.
 
