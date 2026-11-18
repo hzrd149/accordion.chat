@@ -8,20 +8,25 @@ export const messagesError$ = new BehaviorSubject<string | null>(null);
 const restart$ = new BehaviorSubject(0);
 let subscription: Subscription | undefined;
 
-/** Direct messaging is opt-in: nothing connects or decrypts until the user enables it. */
-const ENABLED_KEY = "accordion:dm-enabled";
-function readEnabled(): boolean {
-  try { return localStorage.getItem(ENABLED_KEY) === "1"; } catch { return false; }
-}
-export const messagesEnabled$ = new BehaviorSubject<boolean>(readEnabled());
-
-export function setMessagesEnabled(enabled: boolean) {
+/** A boolean preference persisted in localStorage as "1"/"0", falling back to `fallback`. */
+function persistedFlag(key: string, fallback: boolean) {
+  let initial = fallback;
   try {
-    if (enabled) localStorage.setItem(ENABLED_KEY, "1");
-    else localStorage.removeItem(ENABLED_KEY);
-  } catch { /* Storage may be unavailable; the choice still applies to this session. */ }
-  if (messagesEnabled$.value !== enabled) messagesEnabled$.next(enabled);
+    const stored = localStorage.getItem(key);
+    if (stored !== null) initial = stored === "1";
+  } catch { /* Storage may be unavailable; use the default. */ }
+  const flag$ = new BehaviorSubject<boolean>(initial);
+  const set = (value: boolean) => {
+    try { localStorage.setItem(key, value ? "1" : "0"); } catch { /* The choice still applies to this session. */ }
+    if (flag$.value !== value) flag$.next(value);
+  };
+  return [flag$, set] as const;
 }
+
+/** Direct messaging is opt-in: nothing connects or decrypts until the user enables it. */
+export const [messagesEnabled$, setMessagesEnabled] = persistedFlag("accordion:dm-enabled", false);
+/** Automatic mode asks the signer to decrypt envelopes as they arrive; manual mode waits for an explicit unlock. */
+export const [messagesAutoDecrypt$, setMessagesAutoDecrypt] = persistedFlag("accordion:dm-auto-decrypt", true);
 
 export function dismissMessagesError() {
   messagesError$.next(null);
@@ -43,6 +48,7 @@ export function startMessages() {
       let client: WrappedMessagesClient | undefined;
       let storage: Awaited<ReturnType<typeof openMessageStorage>> | undefined;
       let errors: Subscription | undefined;
+      let autoDecrypt: Subscription | undefined;
       const report = (error: unknown) => {
         if (!cancelled) messagesError$.next(error instanceof Error ? error.message : String(error));
       };
@@ -53,12 +59,13 @@ export function startMessages() {
         if (cancelled) { await storage?.close(); return; }
         client = new WrappedMessagesClient({
           pubkey: account.pubkey, signer: account, eventStore, pool, cacheRequest,
-          ...storage, autoUnlock: true, historySpan: 30 * 86400,
+          ...storage, autoUnlock: messagesAutoDecrypt$.value, historySpan: 30 * 86400,
         });
         errors = client.errors$.subscribe(({ operation, error }) => {
           // Sends and failed envelopes expose their own retry UI.
           if (operation !== "send" && operation !== "decrypt") report(error);
         });
+        autoDecrypt = messagesAutoDecrypt$.pipe(distinctUntilChanged()).subscribe((enabled) => client?.setAutoUnlock(enabled));
         if (storageError) report(new Error(`Local storage unavailable; messages and drafts are temporary. ${String(storageError)}`));
         subscriber.next(client);
         await client.start();
@@ -67,6 +74,7 @@ export function startMessages() {
       return () => {
         cancelled = true;
         errors?.unsubscribe();
+        autoDecrypt?.unsubscribe();
         client?.dispose();
         void storage?.close().catch(console.error);
       };

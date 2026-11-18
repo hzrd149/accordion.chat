@@ -32,7 +32,8 @@ import {
 import { useOpenRankingProvider } from "../hooks/use-open-ranking-provider";
 import { toast, toastError, toastSuccess } from "../services/toasts";
 import { DmClientStatus } from "./dm/DmClientStatus";
-import { DmEnabledToggle } from "./dm/DmEnabledToggle";
+import { DmAutoDecryptToggle, DmEnabledToggle } from "./dm/DmEnabledToggle";
+import { ToggleCard } from "../components/ToggleCard";
 import { messagesEnabled$ } from "../services/messages";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
@@ -477,18 +478,12 @@ function AdvancedPage() {
         Adds a <strong>Developer tools</strong> button to the sidebar, plus raw message and community details for
         troubleshooting.
       </p>
-      <label className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer max-w-[440px]">
-        <input
-          type="checkbox"
-          className="toggle toggle-primary"
-          checked={devMode}
-          onChange={(e) => setDevMode(e.target.checked)}
-        />
-        <span className="flex flex-col gap-px">
-          <span className="font-semibold">Enable developer mode</span>
-          <span className="text-xs opacity-60">Show developer tools in the sidebar</span>
-        </span>
-      </label>
+      <ToggleCard
+        checked={devMode}
+        onChange={setDevMode}
+        label="Enable developer mode"
+        hint="Show developer tools in the sidebar"
+      />
       <fieldset className="mt-7 max-w-[520px]">
         <legend className="text-lg font-bold mb-1">Signature verification</legend>
         <p className="text-sm opacity-70 leading-relaxed mb-4">
@@ -773,9 +768,12 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
     <>
       <h2 className="text-2xl font-bold mb-1">Direct Messages</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-3">
-        When disabled, Accordion does not connect to DM relays or decrypt private messages. Saved in this browser.
+        Private, end-to-end encrypted messages. These choices are saved in this browser.
       </p>
-      <DmEnabledToggle />
+      <div className="flex flex-col gap-2">
+        <DmEnabledToggle />
+        <DmAutoDecryptToggle />
+      </div>
       <h3 className="text-lg font-bold mt-10 mb-1">DM relays</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
         Where people send your encrypted direct messages. List a couple of reliable relays so messages always reach

@@ -1,23 +1,31 @@
 import { use$ } from "applesauce-react/hooks";
-import { messagesEnabled$, setMessagesEnabled } from "../../services/messages";
+import { ToggleCard } from "../../components/ToggleCard";
+import { messagesAutoDecrypt$, messagesEnabled$, setMessagesAutoDecrypt, setMessagesEnabled } from "../../services/messages";
 
-/** Side-by-side Enabled / Disabled buttons for the opt-in NIP-17 inbox. */
+/** Card toggle for the opt-in NIP-17 inbox. */
 export function DmEnabledToggle() {
   const enabled = use$(messagesEnabled$);
-  const option = (value: boolean, label: string) => (
-    <button
-      type="button"
-      className={`btn btn-sm join-item ${enabled === value ? (value ? "btn-primary" : "btn-neutral") : ""}`}
-      aria-pressed={enabled === value}
-      onClick={() => setMessagesEnabled(value)}
-    >
-      {label}
-    </button>
-  );
   return (
-    <div className="join" role="group" aria-label="Direct messages">
-      {option(true, "Enabled")}
-      {option(false, "Disabled")}
-    </div>
+    <ToggleCard
+      checked={enabled}
+      onChange={setMessagesEnabled}
+      label="Enable direct messages"
+      hint={enabled ? "Connected to your DM relays" : "Accordion does not connect to DM relays or decrypt messages"}
+    />
+  );
+}
+
+/** Card toggle choosing automatic or manual decryption of incoming messages. */
+export function DmAutoDecryptToggle() {
+  const enabled = use$(messagesEnabled$);
+  const auto = use$(messagesAutoDecrypt$);
+  return (
+    <ToggleCard
+      checked={auto}
+      disabled={!enabled}
+      onChange={setMessagesAutoDecrypt}
+      label="Decrypt messages automatically"
+      hint={auto ? "Your signer decrypts new messages as they arrive" : "Manual: messages stay locked until you unlock them"}
+    />
   );
 }

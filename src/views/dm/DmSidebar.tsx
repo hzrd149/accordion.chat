@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import type { WrappedMessagesClient } from "applesauce-extra/messages";
 import { useNavigate } from "react-router";
-import { Loader2, MessageSquare, Settings } from "lucide-react";
+import { useState } from "react";
+import { Lock, Loader2, MessageSquare, Settings } from "lucide-react";
+import { messagesAutoDecrypt$ } from "../../services/messages";
 import { syncErrors } from "../../messages/status";
 import { DmConversationList } from "./DmConversationList";
 
@@ -24,6 +26,13 @@ export function DmSidebar({
   const status = use$(client.status$);
   const sync = use$(client.syncStatus$);
   const decryption = use$(client.decryptionState$);
+  const autoDecrypt = use$(messagesAutoDecrypt$);
+  const [unlocking, setUnlocking] = useState(false);
+  const locked = decryption?.locked ?? 0;
+  const unlockAll = async () => {
+    setUnlocking(true);
+    try { await client.unlock(); } catch (error) { console.error(error); } finally { setUnlocking(false); }
+  };
   // Diagnostics live on the settings page; only flag that something needs attention.
   const attention = !!syncErrors(sync) || !!decryption?.failed.length || !!decryption?.locked;
   const openSettings = () => {
@@ -48,6 +57,11 @@ export function DmSidebar({
           {attention && <span className="status status-warning absolute top-1 right-1" />}
         </button>
       </div>
+      {!autoDecrypt && locked > 0 && (
+        <button className="btn btn-primary btn-sm m-2 mb-0 gap-1" disabled={unlocking || !!decryption?.pending} onClick={() => void unlockAll()}>
+          <Lock size={14} /> {unlocking ? "Decrypting…" : `Decrypt ${locked} message${locked === 1 ? "" : "s"}`}
+        </button>
+      )}
       {relays && relays.length === 0 && (
         <button className="m-2 mb-0 alert alert-warning alert-soft text-xs py-2 text-left" onClick={openSettings}>
           Set up DM relays so people can message you.
