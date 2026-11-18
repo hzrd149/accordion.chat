@@ -87,6 +87,7 @@ function openSession(account: NonNullable<typeof accounts.active>) {
   let client: ConcordClient | undefined;
   let owner: Session | undefined;
   let close: (() => Promise<void>) | undefined;
+  let drains: Promise<void>[] = [];
   let disposed = false;
   const dispose = () => {
     if (disposed) return;
@@ -95,10 +96,18 @@ function openSession(account: NonNullable<typeof accounts.active>) {
       owner.retired = true;
       clearTimeout(owner.timer);
     }
+    // stop/dispose clears the client's community map. Capture handles first so
+    // admitted background writes can settle before external adapters are closed.
+    const communities = client?.communities$.value.flatMap(({ material }) =>
+      client?.getCommunity(material.community_id) ?? []) ?? [];
     try { detach.unsubscribe(); }
-    finally { client?.dispose(); }
+    finally {
+      try { client?.dispose(); }
+      finally { drains = communities.map((community) => community.drain()); }
+    }
   };
   const closeStores = async () => {
+    await Promise.all(drains);
     const results = await Promise.allSettled(stores.map((store) => Promise.resolve().then(() => store.close())));
     const failures = results.filter((result) => result.status === "rejected");
     if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Could not close community storage");

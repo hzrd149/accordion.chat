@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
     saveCommunityList: ReturnType<typeof vi.fn>;
     retryStorageCleanup: ReturnType<typeof vi.fn>;
     schedulePurge: ReturnType<typeof vi.fn>;
+    communities$: BehaviorSubject<Array<{ material: { community_id: string } }>>;
+    getCommunity: ReturnType<typeof vi.fn>;
   }>,
   stores: [] as Array<{ close: ReturnType<typeof vi.fn> }>,
   failDrafts: false,
@@ -23,7 +25,7 @@ vi.mock("../src/nostr", async () => {
   return { accounts: { active$, get active() { return active$.value; } }, eventStore: {}, pool: {} };
 });
 vi.mock("@applesauce/concord", async () => {
-  const { Subject } = await import("rxjs");
+  const { Subject, BehaviorSubject } = await import("rxjs");
   const store = () => {
     const value = { close: vi.fn(async () => { mocks.order.push("close"); }) };
     mocks.stores.push(value);
@@ -38,6 +40,8 @@ vi.mock("@applesauce/concord", async () => {
       saveCommunityList = vi.fn(async () => {});
       retryStorageCleanup = vi.fn(async () => {});
       schedulePurge = vi.fn(() => vi.fn());
+      communities$ = new BehaviorSubject<Array<{ material: { community_id: string } }>>([]);
+      getCommunity = vi.fn();
       constructor() { mocks.clients.push(this); }
     },
     Databases: { createIndexedDBDatabaseFactory: store },
@@ -185,6 +189,32 @@ describe("service-owned Concord lifecycle", () => {
     retryConcord();
     await vi.advanceTimersByTimeAsync(100);
     expect(latest.status).toBe("ready");
+  });
+
+  it("drains disposed communities before closing storage or completing logout", async () => {
+    const client = activate();
+    const pending = Promise.withResolvers<void>();
+    const drain = vi.fn(() => {
+      mocks.order.push("drain");
+      return pending.promise;
+    });
+    client.communities$.next([{ material: { community_id: "community" } }]);
+    client.getCommunity.mockReturnValue({ drain });
+    client.dispose.mockImplementationOnce(() => {
+      mocks.order.push("dispose");
+      client.communities$.next([]);
+      client.getCommunity.mockReturnValue(undefined);
+    });
+    let closed = false;
+    const retirement = retireAccountResources("a".repeat(64)).then(() => { closed = true; });
+    await flush();
+    expect(mocks.order).toEqual(["dispose", "drain"]);
+    expect(closed).toBe(false);
+    expect(mocks.stores.every((store) => store.close.mock.calls.length === 0)).toBe(true);
+    pending.resolve();
+    await retirement;
+    expect(mocks.order).toEqual(["dispose", "drain", "close", "close", "close", "close"]);
+    finishAccountErasure("a".repeat(64));
   });
 
   it("keeps key-sync operations single-flight and ignores retired completions", async () => {
