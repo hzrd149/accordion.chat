@@ -72,6 +72,30 @@ function Mono({ children, title }: { children: ReactNode; title?: string }) {
   );
 }
 
+/** A hex value shown shortened (or in full), copied whole on click. */
+function Hex({ value, full = false }: { value: string | undefined; full?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return <Mono>—</Mono>;
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 font-mono opacity-80 hover:opacity-100 hover:text-primary cursor-copy align-baseline break-all text-left"
+      title={`${value}\nClick to copy`}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        });
+      }}
+    >
+      <span>{full ? value : shortHex(value)}</span>
+      {copied ? <Check size={16} className="shrink-0 text-success" /> : <Copy size={16} className="shrink-0 opacity-50" />}
+    </button>
+  );
+}
+
 function UserList({ pubkeys, empty = "None." }: { pubkeys: Iterable<string>; empty?: string }) {
   const list = [...pubkeys];
   if (list.length === 0) return <p className="opacity-60">{empty}</p>;
@@ -80,7 +104,7 @@ function UserList({ pubkeys, empty = "None." }: { pubkeys: Iterable<string>; emp
       {list.map((p) => (
         <div key={p} className="flex items-center gap-2">
           <UserLabel pubkey={p} />
-          <Mono title={p}>{shortHex(p)}</Mono>
+          <Hex value={p} />
         </div>
       ))}
     </div>
@@ -116,7 +140,7 @@ function StatusCard({ cid }: { cid: string }) {
         <span className={`badge ${status?.connected ? "badge-success" : "badge-ghost"}`}>{status?.connected ? "connected" : "disconnected"}</span>
       </KV>
       {status?.error && <KV label="last error"><span className="text-error">{status.error}</span></KV>}
-      <KV label="community_id"><Mono>{cid}</Mono></KV>
+      <KV label="community_id"><Hex value={cid} full /></KV>
       <KV label="owner">
         <span className="inline-flex items-center gap-2">
           <UserLabel pubkey={material.owner} />
@@ -129,7 +153,7 @@ function StatusCard({ cid }: { cid: string }) {
       <KV label="control">
         {material.control_pk ? (
           <>
-            split · <Mono>{shortHex(material.control_pk)}</Mono>{" "}
+            split · <Hex value={material.control_pk} />{" "}
             {material.control_root ? <span className="badge badge-success">signing root held</span> : <span className="badge badge-ghost">read only</span>}
           </>
         ) : (
@@ -213,15 +237,15 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
                   {r.current && <span className="badge badge-primary ml-1">current</span>}
                   {r.gapBefore && <span className="badge badge-warning ml-1" title="The epoch before this one is not held">gap</span>}
                 </td>
-                <td><Mono>{r.rootFingerprint}</Mono></td>
+                <td><Hex value={r.rootFingerprint} /></td>
                 <td>{r.refounder ? <UserLabel pubkey={r.refounder} /> : <span className="opacity-60">{r.epoch === 0 ? "genesis" : "unknown"}</span>}</td>
                 <td className="whitespace-nowrap">{r.epoch === first && r.activeFrom === undefined ? "—" : dateTime(r.activeFrom && r.activeFrom * 1000)}</td>
                 <td className="whitespace-nowrap">
                   {r.current ? <span className="opacity-60">current</span> : r.retiredAt !== undefined ? dateTime(r.retiredAt * 1000) : <span className="text-warning">missing retired_at</span>}
                 </td>
-                <td><Mono title={keys[i]?.control.pk}>{shortHex(keys[i]?.control.pk)}</Mono></td>
-                <td><Mono title={keys[i]?.guestbook.pk}>{shortHex(keys[i]?.guestbook.pk)}</Mono></td>
-                <td><Mono title={keys[i]?.nextBaseRekey.key.pk}>{shortHex(keys[i]?.nextBaseRekey.key.pk)}</Mono></td>
+                <td><Hex value={keys[i]?.control.pk} /></td>
+                <td><Hex value={keys[i]?.guestbook.pk} /></td>
+                <td><Hex value={keys[i]?.nextBaseRekey.key.pk} /></td>
               </tr>
             ))}
           </tbody>
@@ -256,7 +280,7 @@ function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: stri
               <tr key={`${a.epoch}:${plane}`} className={a.epoch % 2 ? "bg-base-200/50" : undefined}>
                 <td>{pi === 0 ? a.epoch : ""}</td>
                 <td className="whitespace-nowrap">{plane === "rekey" ? `rekey → ${a.epoch + 1}` : PLANE_LABEL[plane]}</td>
-                <td><Mono title={a.addresses[plane]}>{shortHex(a.addresses[plane])}</Mono></td>
+                <td><Hex value={a.addresses[plane]} /></td>
                 {relays.map((r) => {
                   const res = a.relays.get(r);
                   if (!res) return <td key={r}>—</td>;
@@ -287,9 +311,19 @@ function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: Rotati
         {rotation.complete ? <span className="badge badge-success">complete</span> : <span className="badge badge-error">incomplete</span>}
         {rotation.consistent ? <span className="badge badge-success badge-outline">consistent</span> : <span className="badge badge-error">inconsistent: {rotation.inconsistencies.join(", ")}</span>}
         {isTip && <span className="badge badge-warning">not adopted by this device</span>}
-        <Mono title={rotation.candidateId}>{shortHex(rotation.candidateId)}</Mono>
+        <Hex value={rotation.candidateId} />
       </div>
-      <KV label="rotator"><UserLabel pubkey={rotation.rotator} />{rotation.vac ? <span className="opacity-60 ml-2">via grant {shortHex(rotation.vac[0])} v{rotation.vac[1]}</span> : <span className="opacity-60 ml-2">(owner, no vac)</span>}</KV>
+      <KV label="rotator">
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <UserLabel pubkey={rotation.rotator} />
+          <Hex value={rotation.rotator} />
+          {rotation.vac ? (
+            <span className="opacity-60 inline-flex items-center gap-1">via grant <Hex value={rotation.vac[0]} /> v{rotation.vac[1]}</span>
+          ) : (
+            <span className="opacity-60">(owner, no vac)</span>
+          )}
+        </span>
+      </KV>
       <KV label="published (relay)">
         {dateTime(rotation.firstMs)}
         {skew !== undefined && skew > DATE_SKEW_WARN_MS && <span className="badge badge-warning ml-2">local retired_at {dateTime(retiredAt! * 1000)}</span>}
@@ -454,7 +488,7 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
           )}
           {audits.flatMap((a) => a.malformed.map((m) => ({ ...m, epoch: a.epoch }))).map((m) => (
             <p key={m.wrapId} className="text-error">
-              Epoch {m.epoch}: malformed rekey <Mono>{shortHex(m.wrapId)}</Mono> ({m.reason})
+              Epoch {m.epoch}: malformed rekey <Hex value={m.wrapId} /> ({m.reason})
             </p>
           ))}
           {audits.length > 0 && audits.every((a) => a.rotations.length === 0) && audits.length === 1 && (
@@ -477,16 +511,16 @@ function MembershipCard({ cid }: { cid: string }) {
   const banlist = use$(() => community?.banlist$, [community]) ?? NO_SET;
   const grants = use$(() => community?.grants$, [community]) ?? NO_GRANTS;
   const roles = use$(() => community?.roles$, [community]);
-  const roleName = (id: string) => roles?.find((r) => r.role_id === id)?.name ?? shortHex(id);
+  const roleName = (id: string) => roles?.find((r) => r.role_id === id)?.name;
   return (
     <Card title="Current membership" summary={`${members.size} members · ${grants.size} grants · ${banlist.size} banned`}>
       <div className="flex flex-col gap-1">
         {[...members].map((m) => (
           <div key={m} className="flex flex-wrap items-center gap-2">
             <UserLabel pubkey={m} />
-            <Mono title={m}>{shortHex(m)}</Mono>
+            <Hex value={m} />
             {(grants.get(m) ?? []).map((id) => (
-              <span key={id} className="badge badge-outline">{roleName(id)}</span>
+              <span key={id} className="badge badge-outline">{roleName(id) ?? <Hex value={id} />}</span>
             ))}
           </div>
         ))}
@@ -533,10 +567,10 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
                 return (
                   <tr key={id}>
                     <td>#{view?.name ?? key?.name ?? "?"}{!view && <span className="badge badge-ghost ml-1">not folded</span>}</td>
-                    <td><Mono title={id}>{shortHex(id)}</Mono></td>
+                    <td><Hex value={id} /></td>
                     <td>{view?.accessible ? <span className="badge badge-success">accessible</span> : <span className="badge badge-ghost">no key</span>}</td>
                     <td>{key?.epoch ?? "—"}</td>
-                    <td><Mono>{key ? fingerprint(key.key) : "—"}</Mono></td>
+                    <td><Hex value={key ? fingerprint(key.key) : undefined} /></td>
                     <td>
                       {(key?.held ?? []).length === 0 ? (
                         <span className="opacity-60">none</span>
@@ -592,8 +626,8 @@ function DiagnosticsCard({ cid }: { cid: string }) {
                 <span className={`badge ${e.d.status === "rejected" ? "badge-error" : "badge-warning"}`}>{e.d.status}</span>
                 <span>{e.d.reason}</span>
                 {e.d.attempt !== undefined && <span className="opacity-60">attempt {e.d.attempt}</span>}
-                <span className="opacity-60">{e.d.scopeId === cid ? "root" : `channel ${shortHex(e.d.scopeId)}`}</span>
-                <Mono title={e.d.candidateId}>{shortHex(e.d.candidateId)}</Mono>
+                {e.d.scopeId === cid ? <span className="opacity-60">root</span> : <span className="opacity-60 inline-flex items-center gap-1">channel <Hex value={e.d.scopeId} /></span>}
+                <Hex value={e.d.candidateId} />
               </div>
             ) : (
               <div key={i} className="flex flex-wrap items-center gap-2">
