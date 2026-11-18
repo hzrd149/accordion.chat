@@ -21,6 +21,7 @@ import {
 import { useTheme } from "../hooks/use-theme";
 import { useDevMode } from "../hooks/use-dev-mode";
 import { setDevMode } from "../services/dev-mode";
+import { databaseLogging$, setDatabaseLogging } from "../services/database-logging";
 import { signatureVerificationMode$, setSignatureVerificationMode } from "../services/signature-verification";
 import { activeConcordAutomation, concordAutomation$, setConcordAutomation } from "../services/concord-automation";
 import { useAvailableProfileThemes } from "../hooks/use-profile-themes";
@@ -462,6 +463,7 @@ function DiscoveryPage() {
 
 function AdvancedPage() {
   const devMode = useDevMode();
+  const databaseLogging = use$(databaseLogging$) ?? false;
   const verificationMode = use$(signatureVerificationMode$);
   const automation = use$(concordAutomation$) ?? activeConcordAutomation;
   const automationChanged = (Object.keys(activeConcordAutomation) as (keyof typeof activeConcordAutomation)[])
@@ -470,32 +472,19 @@ function AdvancedPage() {
     <>
       <h2 className="text-2xl font-bold mb-1">Advanced</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Low-level options for power users. Most people won't need anything here.
+        Low-level options and troubleshooting.
       </p>
 
-      <h3 className="text-lg font-bold mb-1">Developer mode</h3>
-      <p className="text-sm opacity-70 leading-relaxed mb-4 max-w-[440px]">
-        Adds a <strong>Developer tools</strong> button to the sidebar, plus raw message and community details for
-        troubleshooting. Enables nostr-idb console logs and database query timings, including rumor stores.
-        Show Verbose messages in your browser console to see debug logs.
-      </p>
-      <ToggleCard
-        checked={devMode}
-        onChange={setDevMode}
-        label="Enable developer mode"
-        hint="Show developer tools in the sidebar"
-      />
-      <fieldset className="mt-7 max-w-[520px]">
+      <fieldset className="max-w-[520px]">
         <legend className="text-lg font-bold mb-1">Signature verification</legend>
         <p className="text-sm opacity-70 leading-relaxed mb-4">
-          Applies immediately to incoming events and is saved in this browser.
-          Previously loaded events are not rechecked.
+          Applies to new events immediately. Saved in this browser.
         </p>
         <div className="flex flex-col gap-2">
           {([
             { value: "full", label: "Full verification (WASM)", hint: "Verify every signature. This is the default." },
-            { value: "optimistic", label: "Optimistic verification (WASM)", hint: "Use Applesauce's relay trust to sample signatures, while always checking event hashes. Events without relay evidence are fully verified." },
-            { value: "none", label: "No signature verification", hint: "Skip signature checks for public events and wrapped events." },
+            { value: "optimistic", label: "Optimistic verification (WASM)", hint: "Sample trusted-relay signatures; fully verify other events. Always check event hashes." },
+            { value: "none", label: "No signature verification", hint: "Skip all signature checks. Unsafe." },
           ] as const).map((option) => (
             <label key={option.value} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
               <input
@@ -516,15 +505,15 @@ function AdvancedPage() {
       <fieldset className="mt-7 max-w-[520px]">
         <legend className="text-lg font-bold mb-1">Concord automation</legend>
         <p className="text-sm opacity-70 leading-relaxed mb-4">
-          Choose which automatic Concord features run. These settings apply to all accounts in this browser after a reload.
+          Applies to all accounts in this browser after reload.
         </p>
         <div className="flex flex-col gap-2">
           {([
-            { key: "autoUnlock", label: "Automatic unlocking", hint: "Use your signer to decrypt community lists, invite lists, and incoming direct invites. Community messages still decrypt with their group keys when this is off." },
-            { key: "autoSaveCommunityList", label: "Automatic community-list sync", hint: "Publish updated community keys after background sync and repair interrupted list repacks. Explicit joins, leaves, and community creation still publish when this is off." },
-            { key: "watchDirectInvites", label: "Watch direct invites", hint: "Watch your inbox for community and private-channel invites on startup." },
-            { key: "pinUpkeep", label: "Automatic pin upkeep", hint: "Update pin lists after message edits, author deletions, and private-channel key rotations when you have permission." },
-            { key: "historySync", label: "Historical synchronization", hint: "Synchronize older community history in the background. Turning this off disables historical backfill, not current-session synchronization." },
+            { key: "autoUnlock", label: "Automatic unlocking", hint: "Decrypt community and invite lists with your signer. Group-key message decryption is unaffected." },
+            { key: "autoSaveCommunityList", label: "Automatic community-list sync", hint: "Back up community-key updates automatically. Explicit membership changes still sync when off." },
+            { key: "watchDirectInvites", label: "Watch direct invites", hint: "Watch for community and private-channel invites on startup." },
+            { key: "pinUpkeep", label: "Automatic pin upkeep", hint: "Keep pins updated after edits, deletions, and key rotations." },
+            { key: "historySync", label: "Historical synchronization", hint: "Load older community history in the background. Live sync is unaffected." },
           ] as const).map((option) => (
             <label key={option.key} className="flex items-center gap-3 p-3.5 rounded-lg border border-base-300 bg-base-200 cursor-pointer">
               <input
@@ -556,6 +545,26 @@ function AdvancedPage() {
             <span role="status" className="text-xs opacity-70">Changes saved. Reloading ends any active call.</span>
           </div>
         )}
+      </fieldset>
+      <fieldset className="mt-7 max-w-[520px]">
+        <legend className="text-lg font-bold mb-1">Developer options</legend>
+        <p className="text-sm opacity-70 leading-relaxed mb-4">
+          Applies immediately. Saved in this browser.
+        </p>
+        <div className="flex flex-col gap-2">
+          <ToggleCard
+            checked={databaseLogging}
+            onChange={setDatabaseLogging}
+            label="Database and performance logging"
+            hint="Log cache and rumor database queries and timings. Enable Verbose in the browser console."
+          />
+          <ToggleCard
+            checked={devMode}
+            onChange={setDevMode}
+            label="Enable developer mode"
+            hint="Show developer tools and raw message details."
+          />
+        </div>
       </fieldset>
     </>
   );

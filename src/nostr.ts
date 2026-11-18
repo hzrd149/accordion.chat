@@ -5,7 +5,7 @@
 // before any list decrypt, so import it here where the app first loads nostr I/O.
 import "@applesauce/concord";
 // Restore database diagnostics before opening the public cache or rumor stores.
-import "./services/dev-mode";
+import "./services/database-logging";
 import { EventStore } from "applesauce-core";
 import { persistEventsToCache } from "applesauce-core/helpers";
 import { castUser } from "applesauce-common/casts";
