@@ -71,31 +71,30 @@ export const ChannelTimeline = memo(function ChannelTimeline({
           </div>
         ) : (
           <div>
-            {groups.map((group) => (
-              <div className="mt-3.5 first-of-type:mt-0" key={group[0].id}>
-                {group.map((m, i) => (
-                  <Fragment key={m.id}>
-                    {m.id === dividerId && <NewMessagesDivider />}
-                    <ChannelMessage
-                      m={m}
-                      showHeader={i === 0 || Boolean(m.replyTo)}
-                      replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
-                      ownerPubkey={ownerPubkey}
-                      myPubkey={myPubkey}
-                      canWrite={canWrite}
-                      community={community}
-                      channelId={channelId}
-                      favorites={favorites}
-                      quickReactions={quickReactions}
-                      onReply={onReply}
-                      onJumpToMessage={onJumpToMessage}
-                      onThread={onThread}
-                      devMode={devMode}
-                    />
-                  </Fragment>
-                ))}
-              </div>
-            ))}
+            {/* All rows share one keyed parent, even when history/authority
+              * updates change their visual author grouping. */}
+            {groups.flatMap((group) => group.map((m, i) => (
+              <Fragment key={m.id}>
+                {m.id === dividerId && <NewMessagesDivider />}
+                <ChannelMessage
+                  m={m}
+                  showHeader={i === 0 || Boolean(m.replyTo)}
+                  groupStart={i === 0 && m !== messages[0]}
+                  replyPreview={m.replyTo ? byId.get(m.replyTo.id)?.content ?? "message" : undefined}
+                  ownerPubkey={ownerPubkey}
+                  myPubkey={myPubkey}
+                  canWrite={canWrite}
+                  community={community}
+                  channelId={channelId}
+                  favorites={favorites}
+                  quickReactions={quickReactions}
+                  onReply={onReply}
+                  onJumpToMessage={onJumpToMessage}
+                  onThread={onThread}
+                  devMode={devMode}
+                />
+              </Fragment>
+            )))}
           </div>
         )}
       </div>

@@ -4,6 +4,7 @@ import { ArrowLeft, Hash, Lock, MessageSquare, Plus, UserPlus, Users, Wrench } f
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useCommunity } from "../../hooks/use-community";
 import { useMessages } from "../../chat/useMessages";
+import type { ChatMessage } from "../../chat/fold";
 import { useMarkRead, useNewMessagesDivider } from "../../chat/useUnread";
 import { useDevMode } from "../../hooks/use-dev-mode";
 import { ForumPosts } from "../../components/ForumPosts";
@@ -173,6 +174,9 @@ export function ChannelView({
       pendingJump.current = id;
     }
   }, [jumpTargetId]);
+  const openMessageThread = useCallback((message: ChatMessage) => {
+    onOpenThread(message.id);
+  }, [onOpenThread]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
@@ -277,7 +281,7 @@ export function ChannelView({
           quickReactions={quickReactions}
           onReply={setReplyTo}
           onJumpToMessage={jumpToMessage}
-          onThread={(m) => onOpenThread(m.id)}
+          onThread={openMessageThread}
         />
       )}
       {!postId && canWrite && (showTimeline || composingPost) && community?.getChannel(channelId) && (

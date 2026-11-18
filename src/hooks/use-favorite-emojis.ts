@@ -25,6 +25,7 @@ import type { HiddenContentSigner } from "applesauce-core/helpers";
 import { dedupeEmojis } from "../helpers/emoji";
 
 const FAVORITE_EMOJI_LIST_KIND = 10030;
+const NO_EMOJIS: Emoji[] = [];
 
 /**
  * The user's NIP-30 favorite custom emojis (kind 10030 + referenced 30030
@@ -82,5 +83,5 @@ export function useFavoriteEmojis(pubkey: string | undefined, signer?: HiddenCon
       }),
     );
   }, [pubkey, signer]);
-  return use$(emojis$) ?? [];
+  return use$(emojis$) ?? NO_EMOJIS;
 }

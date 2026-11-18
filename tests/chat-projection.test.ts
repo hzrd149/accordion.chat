@@ -49,6 +49,31 @@ describe("SDK channel presentation adapter", () => {
     expect(removed.messages[0].reactions).toEqual([]);
   });
 
+  it("preserves unchanged rows, attachment metadata, and thread arrays across updates", () => {
+    const message = row(rumor("message"));
+    const other = row(rumor("other"));
+    const comment = row(reply);
+    const initial = foldChannel([message, other, comment], []);
+    expect(foldChannel([message, other, comment], [], initial)).toBe(initial);
+
+    const reaction = rumor("react", 7, [["e", "message"]], "👍");
+    const reacted = foldChannel([message, other, comment], [reaction], initial);
+    expect(reacted.messages[0]).not.toBe(initial.messages[0]);
+    expect(reacted.messages[0].attachments).toBe(initial.messages[0].attachments);
+    expect(reacted.messages[1]).toBe(initial.messages[1]);
+    expect(reacted.threads).toBe(initial.threads);
+
+    const edit = rumor("edit", 3302, [], "edited");
+    const edited = foldChannel([message, other, { ...comment, edit, content: "edited" }], [reaction], reacted);
+    expect(edited.messages).toBe(reacted.messages);
+    expect(edited.threads.get("message")?.[0].content).toBe("edited");
+    expect(edited.threads.get("message")?.[0].attachments).toBe(initial.threads.get("message")?.[0].attachments);
+
+    const removed = foldChannel([other], [], edited);
+    expect(removed.messages).toEqual([initial.messages[1]]);
+    expect(removed.threads.size).toBe(0);
+  });
+
   it("publishes and projects an encrypted attachment in a nested, media-only reply", async () => {
     const attachment = {
       url: "https://example.com/blob",
@@ -106,7 +131,8 @@ describe("SDK channel presentation adapter", () => {
     expect(views).toEqual([1, 0, 1]);
     for (let i = 0; i < 100; i++) messages$.next([...messages$.value]);
     await vi.runAllTimersAsync();
-    expect(views).toEqual([1, 0, 1, 1]);
+    // Equivalent SDK emissions are coalesced without notifying React again.
+    expect(views).toEqual([1, 0, 1]);
     a.unsubscribe(); b.unsubscribe();
     expect(active).toBe(0);
   });

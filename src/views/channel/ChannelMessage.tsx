@@ -26,12 +26,11 @@ function reactionLabel(r: string | Emoji) {
 
 // One message row. Memoized and holding its own edit / reaction-picker state, so
 // editing or opening a picker on one message never re-renders its siblings.
-// (The client rebuilds ChatMessage objects on every stream update, so memo can't
-// yet skip rows on genuine data changes — but it does isolate them from parent
-// re-renders driven by the reply bar or another row's picker.)
+// The shared projection preserves unchanged row objects across stream updates.
 export const ChannelMessage = memo(function ChannelMessage({
   m,
   showHeader,
+  groupStart = false,
   replyPreview,
   ownerPubkey,
   myPubkey,
@@ -47,6 +46,7 @@ export const ChannelMessage = memo(function ChannelMessage({
 }: {
   m: ChatMessage;
   showHeader: boolean;
+  groupStart?: boolean;
   replyPreview: string | undefined;
   ownerPubkey: string;
   myPubkey: string;
@@ -129,7 +129,7 @@ export const ChannelMessage = memo(function ChannelMessage({
   return (
     <div
       data-msg-id={m.id}
-      className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 max-sm:gap-2.5 max-sm:px-3 ${showHeader ? "py-0.5" : "py-px"}`}
+      className={`group relative flex gap-3.5 px-4 hover:bg-base-200 focus-within:bg-base-200 max-sm:gap-2.5 max-sm:px-3 ${groupStart ? "mt-3.5" : ""} ${showHeader ? "py-0.5" : "py-px"}`}
       tabIndex={-1}
       onPointerDown={startLongPress}
       onPointerUp={closeLongPressTimer}

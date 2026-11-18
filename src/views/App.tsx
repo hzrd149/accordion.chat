@@ -186,10 +186,10 @@ function Shell() {
     setPanelMode((prev) => (prev === "threads" ? null : "threads"));
     setThreadRootId(null);
   };
-  const openThread = (id: string) => {
+  const openThread = useCallback((id: string) => {
     setThreadRootId(id);
     setPanelMode("threads");
-  };
+  }, [setThreadRootId, setPanelMode]);
 
   // Reset the active thread when the channel (or community) changes — a root
   // id from the old channel won't resolve in the new one. Keep the panel itself

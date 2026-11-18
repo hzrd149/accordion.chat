@@ -1,4 +1,4 @@
-import { auditTime, combineLatest, distinctUntilChanged, map, of, shareReplay, switchMap, type Observable } from "rxjs";
+import { auditTime, combineLatest, distinctUntilChanged, map, of, scan, shareReplay, switchMap, type Observable } from "rxjs";
 import type { ConcordCommunity } from "@applesauce/concord";
 import { foldChannel, type ChannelProjection } from "./fold";
 
@@ -25,7 +25,9 @@ export function channelProjection(community: ConcordCommunity, channelId: string
       // Hydration and authority updates can emit synchronously many times.
       // Fold the settled snapshot once per task, including both ban and authority changes.
       auditTime(0),
-      map(([messages, effects]) => foldChannel(messages, effects)),
+      scan((previous: ChannelProjection, [messages, effects]) => foldChannel(messages, effects, previous),
+        { messages: [], threads: new Map() }),
+      distinctUntilChanged(),
       shareReplay({ bufferSize: 1, refCount: true }),
     );
     channels.set(channelId, projection);

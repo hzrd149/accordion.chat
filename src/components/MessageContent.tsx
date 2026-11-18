@@ -64,6 +64,13 @@ function AttachmentView({
   unavailable?: string;
 }) {
   const kind = att.type?.split("/")[0];
+  const dimensions = att.dimensions?.match(/^([1-9]\d*)x([1-9]\d*)$/);
+  const aspectRatio = dimensions && Number.isSafeInteger(Number(dimensions[1])) && Number.isSafeInteger(Number(dimensions[2]))
+    ? `${dimensions[1]} / ${dimensions[2]}` : "16 / 9";
+  // Keep the same frame while loading and after decoding, including legacy
+  // attachments without dimensions. Media uses contain rather than cropping.
+  const frame = gallery ? TILE : "relative block mt-1.5 w-full max-w-[400px] max-h-[340px] overflow-hidden rounded-lg bg-base-200";
+  const frameStyle = gallery ? undefined : { aspectRatio };
 
   if (!src && unavailable) return (
     <div role="status" className="mt-1.5 rounded-lg bg-base-200 p-3 text-xs text-base-content/60">
@@ -77,8 +84,11 @@ function AttachmentView({
         className={
           gallery
             ? `${TILE} animate-pulse`
-            : "block mt-1.5 rounded-lg w-full max-w-[240px] h-[160px] bg-base-200 animate-pulse"
+            : kind === "audio"
+              ? "block mt-1.5 rounded-lg w-full max-w-[320px] h-[40px] bg-base-200 animate-pulse"
+              : `${frame} animate-pulse`
         }
+        style={kind === "audio" ? undefined : frameStyle}
       />
     );
   if (kind === "video") {
@@ -89,11 +99,9 @@ function AttachmentView({
         </div>
       );
     return (
-      <video
-        className="block mt-1.5 rounded-lg max-w-[min(400px,100%)] max-h-[340px]"
-        src={src}
-        controls
-      />
+      <div className={frame} style={frameStyle}>
+        <video className="block w-full h-full object-contain" src={src} controls playsInline />
+      </div>
     );
   }
   if (kind === "audio")
@@ -102,7 +110,8 @@ function AttachmentView({
     return (
       <button
         type="button"
-        className={gallery ? `${TILE} appearance-none p-0 border-0` : "block appearance-none p-0 border-0 bg-transparent"}
+        className={`${frame} appearance-none p-0 border-0`}
+        style={frameStyle}
         aria-label="Open image"
         onClick={() => onImageOpen?.(src)}
       >
@@ -110,7 +119,7 @@ function AttachmentView({
           className={
             gallery
               ? TILE_MEDIA
-              : "block mt-1.5 rounded-lg max-w-[min(400px,100%)] max-h-[340px] object-contain cursor-zoom-in"
+              : "block w-full h-full object-contain cursor-zoom-in"
           }
           src={src}
           alt=""

@@ -1,7 +1,7 @@
 // Shared ban- and authority-aware channel projections for chat and NIP-22 threads.
 
 import { useMemo } from "react";
-import { map } from "rxjs";
+import { distinctUntilChanged, map } from "rxjs";
 import { use$ } from "applesauce-react/hooks";
 import type { ConcordCommunity } from "@applesauce/concord";
 import type { ChatMessage, ThreadComment } from "./fold";
@@ -15,7 +15,7 @@ export function useMessages(community: ConcordCommunity | undefined, channelId: 
   const messages$ = useMemo(
     () =>
       community
-        ? channelProjection(community, channelId).pipe(map((view) => view.messages))
+        ? channelProjection(community, channelId).pipe(map((view) => view.messages), distinctUntilChanged())
         : undefined,
     [community, channelId],
   );
@@ -31,7 +31,7 @@ export function useThread(
   const thread$ = useMemo(
     () =>
       community
-        ? channelProjection(community, channelId).pipe(map((view) => view.threads.get(rootId) ?? NO_COMMENTS))
+        ? channelProjection(community, channelId).pipe(map((view) => view.threads.get(rootId) ?? NO_COMMENTS), distinctUntilChanged())
         : undefined,
     [community, channelId, rootId],
   );
