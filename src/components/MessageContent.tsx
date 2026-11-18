@@ -355,14 +355,12 @@ function GenericEventEmbed({ event, encoded }: { event: NostrEvent; encoded: str
 
 function EmbedShell({ encoded, children }: { encoded: string; children: React.ReactNode }) {
   return (
-    <a
-      href={externalNostrUrl(encoded)}
-      target="_blank"
-      rel="noreferrer"
-      className="block mt-2 max-w-[min(520px,100%)] rounded-xl border border-base-300 bg-base-200/70 px-3 py-2.5 text-base-content no-underline hover:border-primary/50 hover:bg-base-200"
-    >
+    <div className="mt-2 max-w-[min(520px,100%)] rounded-xl border border-base-300 bg-base-200/70 px-3 py-2.5 text-base-content">
       {children}
-    </a>
+      <a href={externalNostrUrl(encoded)} target="_blank" rel="noreferrer" className={`mt-2 inline-block text-xs ${LINK_CLASS}`}>
+        Open on Nostr ↗
+      </a>
+    </div>
   );
 }
 
