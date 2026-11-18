@@ -2,6 +2,7 @@ import { WrappedMessagesClient } from "applesauce-extra/messages";
 import { BehaviorSubject, combineLatest, distinctUntilChanged, Observable, Subscription, switchMap } from "rxjs";
 import { accounts, cacheRequest, eventStore, pool } from "../nostr";
 import { openMessageStorage } from "../messages/storage";
+import { HISTORY_SPAN } from "../messages/history";
 
 export const messagesClient$ = new BehaviorSubject<WrappedMessagesClient | null>(null);
 export const messagesError$ = new BehaviorSubject<string | null>(null);
@@ -59,7 +60,7 @@ export function startMessages() {
         if (cancelled) { await storage?.close(); return; }
         client = new WrappedMessagesClient({
           pubkey: account.pubkey, signer: account, eventStore, pool, cacheRequest,
-          ...storage, autoUnlock: messagesAutoDecrypt$.value, historySpan: 30 * 86400,
+          ...storage, autoUnlock: messagesAutoDecrypt$.value, historySpan: HISTORY_SPAN,
         });
         errors = client.errors$.subscribe(({ operation, error }) => {
           // Sends and failed envelopes expose their own retry UI.

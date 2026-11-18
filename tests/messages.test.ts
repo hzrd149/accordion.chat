@@ -19,6 +19,9 @@ function client() {
   cleanups.push(() => { client.dispose(); store.dispose(); });
   return client;
 }
+function hexKey() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 function rumor(content: string, created_at = unixNow()): Rumor {
   const template = { kind: 14, content, created_at, pubkey: self, tags: [["p", peer]] };
   return { ...template, id: getEventHash(template) };
@@ -124,17 +127,30 @@ describe("DM conversation list integration", () => {
 
 describe("DM storage adapters", () => {
   it("restores encrypted drafts and decryption caches without crossing accounts or namespaces", async () => {
-    const id = crypto.randomUUID();
+    const id = hexKey();
     const first = await openMessageStorage(id);
     await first.draftStorage.setItem("same", "private draft");
     await first.decryptionCache.setItem("same", "private rumor");
     await first.close();
     const restored = await openMessageStorage(id);
-    const other = await openMessageStorage(`${id}-other`);
+    const other = await openMessageStorage(hexKey());
     cleanups.push(() => restored.close(), () => other.close());
     expect(await restored.draftStorage.getItem("same")).toBe("private draft");
     expect(await restored.decryptionCache.getItem("same")).toBe("private rumor");
     expect(await other.draftStorage.getItem("same")).toBeNull();
     expect(await other.decryptionCache.getItem("same")).toBeNull();
+  });
+
+  it("persists decrypted rumors so conversations page from the store after reload", async () => {
+    const id = hexKey();
+    const first = await openMessageStorage(id);
+    const message = rumor("kept across reloads", unixNow() - 100);
+    await first.rumorStore.add(message);
+    await first.close();
+    const restored = await openMessageStorage(id);
+    const other = await openMessageStorage(hexKey());
+    cleanups.push(() => restored.close(), () => other.close());
+    expect((await restored.rumorStore.getTimeline({ kinds: [14], limit: 10 })).map((item) => item.id)).toEqual([message.id]);
+    expect(await other.rumorStore.getTimeline({ kinds: [14] })).toEqual([]);
   });
 });

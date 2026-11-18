@@ -4,7 +4,6 @@ import { unixNow } from "applesauce-core/helpers";
 import type { WrappedMessagesClient, WrappedMessagePublicationResult } from "applesauce-extra/messages";
 import { catchError, defer, of } from "rxjs";
 import { pendingPublication, publishConversationDraft } from "../../messages/publication";
-import { syncErrors } from "../../messages/status";
 import { DmComposer } from "./DmComposer";
 import { DmHeader } from "./DmHeader";
 import { DmMessageList } from "./DmMessageList";
@@ -13,9 +12,7 @@ import { EXPIRATIONS, DEFAULT_EXPIRATION, readStoredExpiration, type ExpirationV
 
 export function DmConversation({ client, peer, mobileListButton }: { client: WrappedMessagesClient; peer: string; mobileListButton: ReactNode }) {
   const conversation = useMemo(() => client.conversation(peer), [client, peer]);
-  const [since, setSince] = useState(() => unixNow() - 30 * 86400);
   const [sending, setSending] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lastPublish, setLastPublish] = useState<readonly WrappedMessagePublicationResult[]>([]);
@@ -45,24 +42,11 @@ export function DmConversation({ client, peer, mobileListButton }: { client: Wra
     } finally { setSending(false); }
   }
 
-  async function loadOlder() {
-    const next = Math.max(0, since - 30 * 86400);
-    setLoadingHistory(true);
-    setError("");
-    try {
-      const status = await client.loadHistory({ since: next, until: since });
-      setSince(next);
-      if (syncErrors(status)) setError(syncErrors(status)!);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setLoadingHistory(false); }
-  }
-
   return (
     <div className="flex-1 flex min-w-0 min-h-0 relative">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <DmHeader peer={peer} mobileListButton={mobileListButton} onToggleSettings={() => setSettingsOpen((open) => !open)} />
-        <DmMessageList conversation={conversation} since={since} peer={peer}
-          loadingOlder={loadingHistory} canLoadOlder={since > 0} onLoadOlder={() => void loadOlder()} />
+        <DmMessageList key={conversation.id} conversation={conversation} peer={peer} />
         {discoveryError && <div role="alert" className="px-3 text-warning text-xs">{discoveryError} <button className="btn btn-ghost btn-xs" onClick={() => setDiscoveryAttempt((value) => value + 1)}>Check again</button></div>}
         <DmComposer conversation={conversation} peer={peer} sending={sending}
           retry={!!prepared} unavailable={!prepared && (!(availability && !(availability instanceof Error) && availability.canSend))}

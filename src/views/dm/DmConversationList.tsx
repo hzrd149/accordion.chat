@@ -6,6 +6,9 @@ import { catchError, of } from "rxjs";
 import { conversationEntries } from "../../messages/conversations";
 import { DmUserSearch } from "./DmUserSearch";
 
+/** Candidates before exact participant matching, which drops group and self-note rumors. */
+const PREVIEW_CANDIDATES = 20;
+
 export function DmConversationList({
   client,
   onClose,
@@ -44,7 +47,8 @@ function DmConversationRow({ conversation, selectedPeer, onSelect }: {
   selectedPeer: string | null;
   onSelect: (peer: string) => void;
 }) {
-  const timeline = use$(() => conversation.timeline$({}).pipe(
+  // Bounded: the preview needs only the newest message, not the whole stored history.
+  const timeline = use$(() => conversation.timeline$({ limit: PREVIEW_CANDIDATES }).pipe(
     catchError((error: unknown) => of(error instanceof Error ? error : new Error(String(error)))),
   ), [conversation]);
   const conversationPeer = conversation.participants.find((key) => key !== conversation.client.pubkey)!;
