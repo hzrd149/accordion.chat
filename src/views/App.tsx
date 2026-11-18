@@ -69,7 +69,8 @@ import { MessageContent } from "../components/MessageContent";
 import { ChannelPins } from "../components/ChannelPins";
 import { pinMessage } from "../helpers/pins";
 import { DirectInviteModal } from "../components/DirectInviteModal";
-import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
+import { detectMention, type MentionCandidate } from "../hooks/mentions";
+import { useCommunityUserSearch } from "../hooks/use-user-search";
 import { EmojiPicker } from "../components/EmojiPicker";
 import { DEFAULT_REACTIONS, type Emoji } from "../helpers/emoji";
 import { useFavoriteEmojis } from "../hooks/use-favorite-emojis";
@@ -1006,7 +1007,6 @@ function ChatView({
   const pubkey = account?.pubkey ?? "";
   const metadata = use$(community?.metadata$);
   const channels = use$(community?.channelViews$) ?? NO_CHANNELS;
-  const membersState = use$(community?.members$) ?? NO_MEMBERS;
   const dissolved = use$(community?.dissolved$) ?? false;
   const messages = useMessages(community, channelId);
   const channel = channels.find((c) => c.channel_id === channelId);
@@ -1097,10 +1097,6 @@ function ChatView({
   // decrypt, so offering the composer there would only produce a failed send.
   const canWrite = !dissolved && channelAccessible;
 
-  // Roster of pubkeys the composer's @-mention menu searches. Memoized on the
-  // Set reference so the composer's memo isn't defeated by unrelated re-renders.
-  const members = useMemo(() => [...membersState], [membersState]);
-
   const jumpToMessage = useCallback((id: string) => {
     const scrollEl = scrollRef.current;
     const target = scrollEl?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
@@ -1186,7 +1182,7 @@ function ChatView({
           channelPrivate={Boolean(channel?.private)}
           forum={channel?.view === "forum"}
           favorites={favorites}
-          members={members}
+          community={community}
           replyTo={replyTo}
           onClearReply={() => setReplyTo(null)}
         />
@@ -2195,7 +2191,7 @@ const Composer = memo(function Composer({
   channelPrivate,
   forum,
   favorites,
-  members,
+  community,
   replyTo,
   onClearReply,
 }: {
@@ -2204,7 +2200,7 @@ const Composer = memo(function Composer({
   channelPrivate: boolean;
   forum: boolean;
   favorites: Emoji[];
-  members: string[];
+  community: ConcordCommunity;
   replyTo: ReplyTarget | null;
   onClearReply: () => void;
 }) {
@@ -2241,8 +2237,8 @@ const Composer = memo(function Composer({
 
   // @-mention menu: `mention` holds the active `@token` (query + `@` index);
   // `mentionIndex` is the keyboard-highlighted candidate.
-  const candidates = useMentionCandidates(members);
-  const searchMentions = useMentionSearch(candidates);
+  // Local-only: the community's shared member index, never the network.
+  const { search: searchMentions } = useCommunityUserSearch(community);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const mentionResults = mention ? searchMentions(mention.query) : [];

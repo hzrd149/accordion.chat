@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, Globe2, Loader2, Lock, Search, Users } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { nip19 } from "nostr-tools";
 import type { ChannelMetadata, ConcordCommunity } from "@applesauce/concord";
 import { hasChannelKey } from "@applesauce/concord/helpers";
-import { useMentionCandidates, useMentionSearch, type MentionCandidate } from "../hooks/mentions";
-import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../services/open-ranking";
+import { useCommunityUserSearch } from "../hooks/use-user-search";
+import { useOpenRankingSearch } from "../hooks/use-open-ranking-search";
+import { getOpenRankingProvider } from "../services/open-ranking";
+import { parsePubkey, type UserSearchEntry } from "../helpers/user-search";
 import { sendDirectInvite } from "../helpers/direct-invites";
 import { shortNpub } from "../helpers/util";
 import { Modal } from "./modals";
@@ -19,19 +20,6 @@ interface UserResult {
   source: Scope;
   rank?: number;
   member: boolean;
-}
-
-function parsePubkey(input: string): string | null {
-  const q = input.trim();
-  if (/^[0-9a-f]{64}$/i.test(q)) return q.toLowerCase();
-  try {
-    const decoded = nip19.decode(q);
-    if (decoded.type === "npub") return decoded.data;
-    if (decoded.type === "nprofile") return decoded.data.pubkey;
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 function dedupeResults(results: UserResult[]): UserResult[] {
@@ -59,8 +47,6 @@ export function DirectInviteModal({
   const privateChannel = Boolean(channel?.private);
   const [scope, setScope] = useState<Scope>(privateChannel ? "members" : "global");
   const [query, setQuery] = useState("");
-  const [globalResults, setGlobalResults] = useState<OpenRankingPubkeyResult[]>([]);
-  const [searchingQuery, setSearchingQuery] = useState<string | null>(null);
   const [selected, setSelected] = useState<UserResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -68,66 +54,44 @@ export function DirectInviteModal({
   const [sent, setSent] = useState("");
 
   const memberSet = use$(community.members$) ?? EMPTY_MEMBERS;
-  const members = useMemo(() => [...memberSet], [memberSet]);
-  const candidates = useMentionCandidates(members);
-  const searchMembers = useMentionSearch(candidates);
+  // Members come from the community's local index; Open Ranking is only the
+  // network fallback for reaching people outside the community (global scope).
+  const { search: searchMembers } = useCommunityUserSearch(community);
+  const global = useOpenRankingSearch(query, { enabled: scope === "global" });
   const provider = getOpenRankingProvider();
 
   // The package's own key-presence check against material — a private channel we
   // hold no key for cannot be granted, since we have no key to hand over.
   const heldChannel = channel?.private ? hasChannelKey(community.material, channel.channel_id) : false;
 
-  useEffect(() => {
-    if (scope !== "global") return;
-    const exact = parsePubkey(query);
-    const q = query.trim();
-    if (!q || exact) return;
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setSearchingQuery(q);
-      searchOpenRankingPubkeys(q, { limit: 12 })
-        .then((res) => {
-          if (!cancelled) {
-            setGlobalResults(res.results);
-            setError("");
-          }
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setGlobalResults([]);
-            setError(e instanceof Error ? e.message : "Global search failed");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setSearchingQuery((current) => (current === q ? null : current));
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [query, scope]);
-
-  const results = useMemo(() => {
+  const { results, localMatches } = useMemo(() => {
     const exact = parsePubkey(query);
     const q = query.trim();
     const exactResult = exact
       ? [{ pubkey: exact, source: scope, member: memberSet.has(exact), rank: 1 } satisfies UserResult]
       : [];
+    const local = searchMembers(query, { exclude: myPubkey ? [myPubkey] : undefined });
+    const localMatches = new Map(local.map((c) => [c.pubkey, c] as const));
+    const memberResults = local.map((c): UserResult => ({ pubkey: c.pubkey, source: "members", member: true }));
     if (scope === "members") {
-      const memberResults = searchMembers(query)
-        .filter((c) => c.pubkey !== myPubkey)
-        .map((c): UserResult => ({ pubkey: c.pubkey, source: "members", member: true }));
-      return dedupeResults([...exactResult.filter((r) => r.member && r.pubkey !== myPubkey), ...memberResults]);
+      return {
+        results: dedupeResults([...exactResult.filter((r) => r.member && r.pubkey !== myPubkey), ...memberResults]),
+        localMatches,
+      };
     }
-    return dedupeResults([
-      ...exactResult.filter((r) => r.pubkey !== myPubkey),
-      ...(q && !exact ? globalResults : [])
-        .filter((r) => r.pubkey !== myPubkey)
-        .map((r): UserResult => ({ pubkey: r.pubkey, source: "global", rank: r.rank, member: memberSet.has(r.pubkey) })),
-    ]);
-  }, [globalResults, memberSet, myPubkey, query, scope, searchMembers]);
+    // Global: local member hits first (instant, no network), then Open Ranking
+    // results for everyone else.
+    return {
+      results: dedupeResults([
+        ...exactResult.filter((r) => r.pubkey !== myPubkey),
+        ...(q && !exact ? memberResults : []),
+        ...(q && !exact ? global.results : [])
+          .filter((r) => r.pubkey !== myPubkey)
+          .map((r): UserResult => ({ pubkey: r.pubkey, source: "global", rank: r.rank, member: memberSet.has(r.pubkey) })),
+      ]),
+      localMatches,
+    };
+  }, [global.results, memberSet, myPubkey, query, scope, searchMembers]);
 
   const selectedIsNonMember = selected ? !memberSet.has(selected.pubkey) : false;
   const privateGlobalInvite = privateChannel && selectedIsNonMember;
@@ -145,7 +109,6 @@ export function DirectInviteModal({
       setSent(selected.pubkey);
       setSelected(null);
       setQuery("");
-      setGlobalResults([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send invite");
     } finally {
@@ -172,7 +135,7 @@ export function DirectInviteModal({
       {privateChannel && !heldChannel && (
         <div className="alert alert-error text-sm mb-4">You do not hold this private channel key, so you cannot grant it.</div>
       )}
-      {error && <div className="alert alert-error text-sm mb-4">{error}</div>}
+      {(error || global.error) && <div className="alert alert-error text-sm mb-4">{error || global.error}</div>}
       {sent && <div className="alert alert-success text-sm mb-4"><span>Invite sent to <UserName pubkey={sent} /></span></div>}
 
       {privateChannel && (
@@ -199,7 +162,7 @@ export function DirectInviteModal({
             setSent("");
           }}
         />
-        {searchingQuery === query.trim() && <Loader2 size={16} className="animate-spin opacity-60" />}
+        {global.searching && <Loader2 size={16} className="animate-spin opacity-60" />}
       </label>
       {scope === "global" && <p className="text-xs opacity-60 mb-3">Global search by Open Ranking provider: {provider}</p>}
 
@@ -213,7 +176,7 @@ export function DirectInviteModal({
             <InviteUserRow
               key={result.pubkey}
               result={result}
-              candidate={candidates.find((c) => c.pubkey === result.pubkey)}
+              candidate={localMatches.get(result.pubkey)}
               selected={selected?.pubkey === result.pubkey}
               onClick={() => setSelected(result)}
             />
@@ -249,7 +212,7 @@ function InviteUserRow({
   onClick,
 }: {
   result: UserResult;
-  candidate?: MentionCandidate;
+  candidate?: UserSearchEntry;
   selected: boolean;
   onClick: () => void;
 }) {

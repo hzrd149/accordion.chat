@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
 import { Bug, DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
@@ -10,7 +10,7 @@ import { useDevMode } from "../hooks/use-dev-mode";
 import { clearCommunityReadState } from "../services/read-state";
 import { UserAvatar, UserName } from "../components/User";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
-import { useMentionCandidates, useMentionSearch } from "../hooks/mentions";
+import { useCommunityUserNames, useCommunityUserSearch } from "../hooks/use-user-search";
 import { PERM } from "@applesauce/concord";
 import { MessageExpiration } from "../components/MessageExpiration";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
@@ -476,9 +476,9 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
 
   const canManage = canManageRole && !dissolved;
   const holders = [...members].filter((m) => (grants.get(m) ?? []).includes(role.role_id)).sort();
-  const candidates = useMentionCandidates([...members].filter((m) => m !== community?.material.owner && !holders.includes(m)).sort());
-  const search = useMentionSearch(candidates);
-  const results = search(memberQuery);
+  const { search } = useCommunityUserSearch(community);
+  const owner = community?.material.owner;
+  const results = search(memberQuery, { exclude: owner ? [owner, ...holders] : holders });
 
   function toggle(p: PermName) {
     const next = new Set(perms);
@@ -846,8 +846,7 @@ function ChannelsPage({ cid }: { cid: string }) {
   const canManage = use$(() => community?.can$(PERM.MANAGE_CHANNELS), [community]) ?? false;
   const owner = community?.material.owner ?? "";
   // Display names for the "Add a member…" <select>, whose <option>s can't host <UserName>.
-  const memberCandidates = useMentionCandidates(useMemo(() => [...members].sort(), [members]));
-  const memberNames = useMemo(() => new Map(memberCandidates.map((c) => [c.pubkey, c.name])), [memberCandidates]);
+  const memberNames = useCommunityUserNames(community);
   // `channels$` is already live-only, so a deleted channel never reaches here.
   const privateChannels = channels.filter((c) => c.private);
   const [busy, setBusy] = useState(false);

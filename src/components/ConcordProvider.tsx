@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { debounceTime } from "rxjs";
 import { eventStore, pool } from "../nostr";
 import { attachVoiceGc } from "../voice/registry";
+import { attachUserIndexGc } from "../services/user-search";
 import { ClientContext } from "../hooks/use-concord";
 import { createConcordUploader } from "../helpers/concord-uploader";
 import { createConcordStorage } from "../services/concord-storage";
@@ -64,10 +65,12 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
   useEffect(() => {
     if (!session) return;
     const detachVoice = attachVoiceGc(session.client);
+    const detachUserIndex = attachUserIndexGc(session.client);
     const stopPurge = session.client.schedulePurge();
     return () => {
       stopPurge();
       detachVoice();
+      detachUserIndex();
       session.client.dispose();
       void session.databases.close().catch((error: unknown) => console.warn("Could not close community cache", error));
       void session.drafts.close();

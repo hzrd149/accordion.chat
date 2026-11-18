@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Loader2, Search, X } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
-import { getOpenRankingProvider, searchOpenRankingPubkeys, type OpenRankingPubkeyResult } from "../../services/open-ranking";
+import { getOpenRankingProvider } from "../../services/open-ranking";
+import { useOpenRankingSearch } from "../../hooks/use-open-ranking-search";
 import { shortNpub } from "../../helpers/util";
 import type { UserSearchResult } from "./types";
 import { dedupeSearchResults, normalizePubkey } from "./utils";
@@ -10,42 +11,9 @@ import { dedupeSearchResults, normalizePubkey } from "./utils";
 export function DmUserSearch({ self, existingPeers, onPick }: { self: string; existingPeers: string[]; onPick: () => void }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [globalResults, setGlobalResults] = useState<OpenRankingPubkeyResult[]>([]);
-  const [searchingQuery, setSearchingQuery] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const { results: globalResults, searching, error } = useOpenRankingSearch(query);
   const provider = getOpenRankingProvider();
   const existing = useMemo(() => new Set(existingPeers), [existingPeers]);
-
-  useEffect(() => {
-    const exact = normalizePubkey(query);
-    const q = query.trim();
-    if (!q || exact) return;
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      setSearchingQuery(q);
-      searchOpenRankingPubkeys(q, { limit: 12 })
-        .then((res) => {
-          if (!cancelled) {
-            setGlobalResults(res.results);
-            setError("");
-          }
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setGlobalResults([]);
-            setError(e instanceof Error ? e.message : "Global search failed");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setSearchingQuery((current) => (current === q ? null : current));
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [query]);
 
   const results = useMemo(() => {
     const exact = normalizePubkey(query);
@@ -58,7 +26,6 @@ export function DmUserSearch({ self, existingPeers, onPick }: { self: string; ex
     return dedupeSearchResults([...exactResult, ...openRankingResults]);
   }, [existing, globalResults, query, self]);
 
-  const searching = searchingQuery === query.trim();
 
   return (
     <div className="p-2 border-b border-base-300 shrink-0">
