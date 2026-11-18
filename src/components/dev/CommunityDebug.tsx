@@ -46,11 +46,11 @@ function Card({ title, summary, open, children }: { title: string; summary?: Rea
   return (
     <details className="group" open={open}>
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 py-2 flex items-center gap-3 select-none bg-base-200 hover:bg-base-300">
-        <ChevronRight size={14} className="shrink-0 opacity-60 transition-transform group-open:rotate-90" />
-        <span className="font-bold uppercase tracking-wide text-sm opacity-70">{title}</span>
-        {summary && <span className="text-sm opacity-70 truncate">{summary}</span>}
+        <ChevronRight size={16} className="shrink-0 opacity-60 transition-transform group-open:rotate-90" />
+        <span className="font-bold uppercase tracking-wide opacity-70">{title}</span>
+        {summary && <span className="opacity-70 truncate">{summary}</span>}
       </summary>
-      <div className="px-4 py-3 flex flex-col gap-3 text-sm">{children}</div>
+      <div className="px-4 py-3 flex flex-col gap-3">{children}</div>
     </details>
   );
 }
@@ -66,7 +66,7 @@ function KV({ label, children }: { label: string; children: ReactNode }) {
 
 function Mono({ children, title }: { children: ReactNode; title?: string }) {
   return (
-    <code className="font-mono text-xs opacity-80" title={title}>
+    <code className="font-mono opacity-80" title={title}>
       {children}
     </code>
   );
@@ -107,20 +107,20 @@ function StatusCard({ cid }: { cid: string }) {
       open
       summary={
         <>
-          <span className={`badge badge-sm ${phaseBadge}`}>{status?.phase ?? "…"}</span> epoch {status?.epoch ?? material.root_epoch}
+          <span className={`badge ${phaseBadge}`}>{status?.phase ?? "…"}</span> epoch {status?.epoch ?? material.root_epoch}
         </>
       }
     >
       <KV label="phase">
-        <span className={`badge badge-sm ${phaseBadge}`}>{status?.phase ?? "…"}</span>{" "}
-        <span className={`badge badge-sm ${status?.connected ? "badge-success" : "badge-ghost"}`}>{status?.connected ? "connected" : "disconnected"}</span>
+        <span className={`badge ${phaseBadge}`}>{status?.phase ?? "…"}</span>{" "}
+        <span className={`badge ${status?.connected ? "badge-success" : "badge-ghost"}`}>{status?.connected ? "connected" : "disconnected"}</span>
       </KV>
       {status?.error && <KV label="last error"><span className="text-error">{status.error}</span></KV>}
       <KV label="community_id"><Mono>{cid}</Mono></KV>
       <KV label="owner">
         <span className="inline-flex items-center gap-2">
           <UserLabel pubkey={material.owner} />
-          {verifyOwner(material) ? <span className="badge badge-sm badge-success">proof ok</span> : <span className="badge badge-sm badge-error">proof failed</span>}
+          {verifyOwner(material) ? <span className="badge badge-success">proof ok</span> : <span className="badge badge-error">proof failed</span>}
         </span>
       </KV>
       <KV label="root epoch">{material.root_epoch}</KV>
@@ -130,7 +130,7 @@ function StatusCard({ cid }: { cid: string }) {
         {material.control_pk ? (
           <>
             split · <Mono>{shortHex(material.control_pk)}</Mono>{" "}
-            {material.control_root ? <span className="badge badge-sm badge-success">signing root held</span> : <span className="badge badge-sm badge-ghost">read only</span>}
+            {material.control_root ? <span className="badge badge-success">signing root held</span> : <span className="badge badge-ghost">read only</span>}
           </>
         ) : (
           "legacy (derived from root)"
@@ -139,9 +139,9 @@ function StatusCard({ cid }: { cid: string }) {
       <KV label="relays">
         <div className="flex flex-col">
           {relays.map((r) => (
-            <span key={r} className="font-mono text-xs">
+            <span key={r} className="font-mono">
               {r}
-              {!material.relays.includes(r) && <span className="badge badge-xs badge-ghost ml-2">metadata only</span>}
+              {!material.relays.includes(r) && <span className="badge badge-ghost ml-2">metadata only</span>}
             </span>
           ))}
         </div>
@@ -153,7 +153,7 @@ function StatusCard({ cid }: { cid: string }) {
             <KV label="seed epoch">{entry.seed.root_epoch}</KV>
             <KV label="listed current epoch">
               {entry.current.root_epoch}
-              {entry.current.root_epoch !== material.root_epoch && <span className="badge badge-sm badge-warning ml-2">differs from engine ({material.root_epoch})</span>}
+              {entry.current.root_epoch !== material.root_epoch && <span className="badge badge-warning ml-2">differs from engine ({material.root_epoch})</span>}
             </KV>
             <KV label="added">{dateTime(entry.added_at)}</KV>
           </>
@@ -162,8 +162,8 @@ function StatusCard({ cid }: { cid: string }) {
         )}
         <KV label="list state">
           {memberships?.knowledge ?? "…"}
-          {memberships?.pending && <span className="badge badge-sm badge-warning ml-2">save pending</span>}
-          {memberships?.locked && <span className="badge badge-sm badge-warning ml-2">fragment locked</span>}
+          {memberships?.pending && <span className="badge badge-warning ml-2">save pending</span>}
+          {memberships?.locked && <span className="badge badge-warning ml-2">fragment locked</span>}
         </KV>
       </div>
     </Card>
@@ -183,7 +183,7 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
       summary={
         <>
           {rows.length} held (epoch {first} → {material.root_epoch})
-          {problems > 0 && <span className="badge badge-sm badge-warning ml-2">{problems} flagged</span>}
+          {problems > 0 && <span className="badge badge-warning ml-2">{problems} flagged</span>}
         </>
       }
     >
@@ -192,7 +192,7 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
         fingerprints so devices can be compared without exposing them.
       </p>
       <div className="-mx-4 overflow-x-auto">
-        <table className="table table-sm">
+        <table className="table text-base">
           <thead>
             <tr>
               <th>Epoch</th>
@@ -210,8 +210,8 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
               <tr key={r.epoch} className={r.current ? "bg-base-200" : undefined}>
                 <td className="whitespace-nowrap">
                   {r.epoch}
-                  {r.current && <span className="badge badge-xs badge-primary ml-1">current</span>}
-                  {r.gapBefore && <span className="badge badge-xs badge-warning ml-1" title="The epoch before this one is not held">gap</span>}
+                  {r.current && <span className="badge badge-primary ml-1">current</span>}
+                  {r.gapBefore && <span className="badge badge-warning ml-1" title="The epoch before this one is not held">gap</span>}
                 </td>
                 <td><Mono>{r.rootFingerprint}</Mono></td>
                 <td>{r.refounder ? <UserLabel pubkey={r.refounder} /> : <span className="opacity-60">{r.epoch === 0 ? "genesis" : "unknown"}</span>}</td>
@@ -238,7 +238,7 @@ const PLANE_LABEL: Record<AuditPlane, string> = { control: "control", guestbook:
 function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: string[] }) {
   return (
     <div className="-mx-4 overflow-x-auto">
-      <table className="table table-xs">
+      <table className="table text-base">
         <thead>
           <tr>
             <th>Epoch</th>
@@ -284,15 +284,15 @@ function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: Rotati
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`font-semibold ${rotation.complete && rotation.consistent ? "" : "text-error"}`}>Epoch {rotation.prevEpoch} → {rotation.newEpoch}</span>
-        {rotation.complete ? <span className="badge badge-sm badge-success">complete</span> : <span className="badge badge-sm badge-error">incomplete</span>}
-        {rotation.consistent ? <span className="badge badge-sm badge-success badge-outline">consistent</span> : <span className="badge badge-sm badge-error">inconsistent: {rotation.inconsistencies.join(", ")}</span>}
-        {isTip && <span className="badge badge-sm badge-warning">not adopted by this device</span>}
+        {rotation.complete ? <span className="badge badge-success">complete</span> : <span className="badge badge-error">incomplete</span>}
+        {rotation.consistent ? <span className="badge badge-success badge-outline">consistent</span> : <span className="badge badge-error">inconsistent: {rotation.inconsistencies.join(", ")}</span>}
+        {isTip && <span className="badge badge-warning">not adopted by this device</span>}
         <Mono title={rotation.candidateId}>{shortHex(rotation.candidateId)}</Mono>
       </div>
       <KV label="rotator"><UserLabel pubkey={rotation.rotator} />{rotation.vac ? <span className="opacity-60 ml-2">via grant {shortHex(rotation.vac[0])} v{rotation.vac[1]}</span> : <span className="opacity-60 ml-2">(owner, no vac)</span>}</KV>
       <KV label="published (relay)">
         {dateTime(rotation.firstMs)}
-        {skew !== undefined && skew > DATE_SKEW_WARN_MS && <span className="badge badge-sm badge-warning ml-2">local retired_at {dateTime(retiredAt! * 1000)}</span>}
+        {skew !== undefined && skew > DATE_SKEW_WARN_MS && <span className="badge badge-warning ml-2">local retired_at {dateTime(retiredAt! * 1000)}</span>}
       </KV>
       <KV label="chunks">
         {rotation.chunksHeld.length} / {rotation.chunkCount}
@@ -304,7 +304,7 @@ function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: Rotati
             const held = rotation.chunksByRelay.get(r) ?? [];
             const full = held.length === rotation.chunkCount;
             return (
-              <span key={r} className="font-mono text-xs">
+              <span key={r} className="font-mono">
                 <span className={full ? "text-success" : held.length ? "text-warning" : "text-error"}>{held.length}/{rotation.chunkCount}</span> {r}
               </span>
             );
@@ -332,12 +332,12 @@ function MembersByEpoch({ audits }: { audits: EpochAudit[] }) {
         return (
           <details key={a.epoch} className="group/epoch">
             <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden flex flex-wrap items-center gap-2 py-1 hover:bg-base-200">
-              <ChevronRight size={12} className="opacity-60 transition-transform group-open/epoch:rotate-90" />
+              <ChevronRight size={16} className="opacity-60 transition-transform group-open/epoch:rotate-90" />
               <span className="font-semibold">Epoch {a.epoch}</span>
-              <span className="badge badge-sm badge-ghost">{a.state.members.size} members</span>
-              {added.length > 0 && <span className="badge badge-sm badge-success badge-outline">+{added.length}</span>}
-              {removed.length > 0 && <span className="badge badge-sm badge-error badge-outline">−{removed.length}</span>}
-              {a.state.banlist.size > 0 && <span className="badge badge-sm badge-ghost">{a.state.banlist.size} banned</span>}
+              <span className="badge badge-ghost">{a.state.members.size} members</span>
+              {added.length > 0 && <span className="badge badge-success badge-outline">+{added.length}</span>}
+              {removed.length > 0 && <span className="badge badge-error badge-outline">−{removed.length}</span>}
+              {a.state.banlist.size > 0 && <span className="badge badge-ghost">{a.state.banlist.size} banned</span>}
             </summary>
             <div className="pt-2 grid gap-3 md:grid-cols-2">
               <div>
@@ -410,8 +410,8 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
         control authors only (channel activity is not fetched).
       </p>
       <div className="flex items-center gap-3">
-        <button className="btn btn-primary btn-sm gap-1.5" disabled={busy} onClick={() => void run()}>
-          {busy ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={14} />}
+        <button className="btn btn-primary gap-1.5" disabled={busy} onClick={() => void run()}>
+          {busy ? <span className="loading loading-spinner loading-sm" /> : <RefreshCw size={16} />}
           {audits.length ? "Re-check relays" : "Check relays"}
         </button>
         {progress && <span className="opacity-70">{progress}</span>}
@@ -486,7 +486,7 @@ function MembershipCard({ cid }: { cid: string }) {
             <UserLabel pubkey={m} />
             <Mono title={m}>{shortHex(m)}</Mono>
             {(grants.get(m) ?? []).map((id) => (
-              <span key={id} className="badge badge-sm badge-outline">{roleName(id)}</span>
+              <span key={id} className="badge badge-outline">{roleName(id)}</span>
             ))}
           </div>
         ))}
@@ -515,7 +515,7 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
         <p className="opacity-60">No private channels.</p>
       ) : (
         <div className="-mx-4 overflow-x-auto">
-          <table className="table table-sm">
+          <table className="table text-base">
             <thead>
               <tr>
                 <th>Channel</th>
@@ -532,9 +532,9 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
                 const key = keyed.get(id);
                 return (
                   <tr key={id}>
-                    <td>#{view?.name ?? key?.name ?? "?"}{!view && <span className="badge badge-xs badge-ghost ml-1">not folded</span>}</td>
+                    <td>#{view?.name ?? key?.name ?? "?"}{!view && <span className="badge badge-ghost ml-1">not folded</span>}</td>
                     <td><Mono title={id}>{shortHex(id)}</Mono></td>
-                    <td>{view?.accessible ? <span className="badge badge-sm badge-success">accessible</span> : <span className="badge badge-sm badge-ghost">no key</span>}</td>
+                    <td>{view?.accessible ? <span className="badge badge-success">accessible</span> : <span className="badge badge-ghost">no key</span>}</td>
                     <td>{key?.epoch ?? "—"}</td>
                     <td><Mono>{key ? fingerprint(key.key) : "—"}</Mono></td>
                     <td>
@@ -589,7 +589,7 @@ function DiagnosticsCard({ cid }: { cid: string }) {
             e.kind === "rotation" ? (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <span className="opacity-50 whitespace-nowrap">{new Date(e.at).toLocaleTimeString()}</span>
-                <span className={`badge badge-sm ${e.d.status === "rejected" ? "badge-error" : "badge-warning"}`}>{e.d.status}</span>
+                <span className={`badge ${e.d.status === "rejected" ? "badge-error" : "badge-warning"}`}>{e.d.status}</span>
                 <span>{e.d.reason}</span>
                 {e.d.attempt !== undefined && <span className="opacity-60">attempt {e.d.attempt}</span>}
                 <span className="opacity-60">{e.d.scopeId === cid ? "root" : `channel ${shortHex(e.d.scopeId)}`}</span>
@@ -598,7 +598,7 @@ function DiagnosticsCard({ cid }: { cid: string }) {
             ) : (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <span className="opacity-50 whitespace-nowrap">{new Date(e.at).toLocaleTimeString()}</span>
-                <span className="badge badge-sm badge-ghost">{e.d.stage}</span>
+                <span className="badge badge-ghost">{e.d.stage}</span>
                 <span className="break-all">{e.d.error instanceof Error ? e.d.error.message : String(e.d.error)}</span>
               </div>
             ),
@@ -618,7 +618,7 @@ function RawCard({ material }: { material: JoinMaterial }) {
     <Card title="Raw material" summary="secrets replaced by fingerprints">
       <div>
         <button
-          className="btn btn-ghost btn-xs gap-1"
+          className="btn btn-ghost gap-1"
           onClick={() => {
             void navigator.clipboard.writeText(json).then(() => {
               setCopied(true);
@@ -626,10 +626,10 @@ function RawCard({ material }: { material: JoinMaterial }) {
             });
           }}
         >
-          {copied ? <Check size={12} /> : <Copy size={12} />} Copy
+          {copied ? <Check size={16} /> : <Copy size={16} />} Copy
         </button>
       </div>
-      <pre className="-mx-4 max-h-[50vh] overflow-auto bg-base-200 px-4 py-2 font-mono text-xs whitespace-pre select-text">{json}</pre>
+      <pre className="-mx-4 max-h-[50vh] overflow-auto bg-base-200 px-4 py-2 font-mono whitespace-pre select-text">{json}</pre>
     </Card>
   );
 }
@@ -661,7 +661,7 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
   return (
     <>
       <h2 className="text-2xl font-bold px-4 pt-6 mb-1">Debug</h2>
-      <p className="text-sm opacity-70 leading-relaxed px-4 mb-4">
+      <p className="opacity-70 leading-relaxed px-4 mb-4">
         Technical state of this community: key generations, rotations and their presence on relays. Read-only.
       </p>
       <StatusCard cid={cid} />
