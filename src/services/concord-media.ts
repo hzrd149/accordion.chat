@@ -1,12 +1,59 @@
-import { Media, type ConcordClient } from "@applesauce/concord";
-import { DEFAULT_BLOSSOM_SERVERS } from "../helpers/blossom";
+import type { ConcordClient, ConcordMediaTransport } from "@applesauce/concord";
 
-/** Only app-configured origins are trusted, never URLs supplied by messages or metadata.
- * Custom Blossom deployments must explicitly opt in via this comma-separated setting. */
-export function createMediaTransport(extraOrigins = "") {
-  const origins = [...DEFAULT_BLOSSOM_SERVERS.map((value) => new URL(value).origin),
-    ...extraOrigins.split(",").map((value) => value.trim()).filter(Boolean)];
-  return Media.createFetchMediaTransport({ allowedOrigins: origins });
+/** Download ciphertext from any HTTPS origin; Concord verifies and decrypts it.
+ * Requests carry no credentials/referrer and remain bounded and cancellable. */
+export function createMediaTransport(): ConcordMediaTransport {
+  return async (value, { signal, maxBytes }) => {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) throw new Error("Expected a credential-free HTTPS media URL");
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error("Invalid media byte limit");
+    signal.throwIfAborted();
+    const response = await fetch(url.href, {
+      signal, credentials: "omit", referrerPolicy: "no-referrer", redirect: "error",
+    });
+    const reader = response.body?.getReader();
+    const cancel = () => { void reader?.cancel().catch(() => {}); };
+    let complete = false;
+    const tooLarge = () => {
+      const error = new Error("Media byte limit exceeded");
+      error.name = "ConcordMediaTooLarge";
+      return error;
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      signal.throwIfAborted();
+      if (!response.ok || response.redirected) throw new Error("Media download failed");
+      const length = response.headers.get("content-length");
+      if (length !== null) {
+        if (!/^\d+$/.test(length)) throw new Error("Invalid media content length");
+        if (Number(length) > maxBytes) throw tooLarge();
+      }
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      if (reader) {
+        while (true) {
+          const { done, value: chunk } = await reader.read();
+          signal.throwIfAborted();
+          if (done) break;
+          total += chunk.byteLength;
+          if (total > maxBytes) throw tooLarge();
+          chunks.push(chunk);
+        }
+      }
+      const bytes = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      complete = true;
+      return bytes;
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      if (!complete) await reader?.cancel().catch(() => {});
+      reader?.releaseLock();
+    }
+  };
 }
 
 type URLScope = ReturnType<typeof createMediaURLScope>;

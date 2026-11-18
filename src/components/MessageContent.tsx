@@ -68,7 +68,7 @@ function AttachmentView({
   if (!src && unavailable) return (
     <div role="status" className="mt-1.5 rounded-lg bg-base-200 p-3 text-xs text-base-content/60">
       Attachment unavailable ({unavailable}).
-      {unavailable === "download-failed" && " Check the server connection and this deployment's VITE_CONCORD_MEDIA_ORIGINS allowlist."}
+      {unavailable === "download-failed" && " Check the media server connection."}
     </div>
   );
   if (!src)

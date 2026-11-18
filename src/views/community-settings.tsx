@@ -345,7 +345,7 @@ function ImageField({
       />
       {busy && <span className="text-xs opacity-60">Encrypting & uploading…</span>}
       {reason === "unsupported-type" && <span className="text-xs text-warning">Unsupported image (including legacy SVG). Replace with PNG, JPEG, GIF or WebP.</span>}
-      {reason === "download-failed" && <span className="text-xs text-warning">Image unavailable. Check the server connection and deployment's VITE_CONCORD_MEDIA_ORIGINS allowlist.</span>}
+      {reason === "download-failed" && <span className="text-xs text-warning">Image unavailable. Check the media server connection.</span>}
       {reason && reason !== "absent" && reason !== "unsupported-type" && reason !== "download-failed" &&
         <span className="text-xs text-warning">Image unavailable ({reason}).</span>}
     </div>

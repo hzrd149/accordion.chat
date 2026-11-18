@@ -41,7 +41,7 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
       // the account's device-encrypted adapter, never plaintext localStorage.
       decryptionCache: createConcordDecryptionCache(storage, "lists"),
       mediaFactory,
-      mediaTransport: createMediaTransport(import.meta.env.VITE_CONCORD_MEDIA_ORIGINS),
+      mediaTransport: createMediaTransport(),
       // Persist both Direct Invite gift-wrap layers so a reload restores them
       // from device-encrypted storage instead of prompting the signer again.
       giftWrapReceiverOptions: {

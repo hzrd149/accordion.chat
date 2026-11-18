@@ -94,7 +94,7 @@ describe("community settings visibility", () => {
     expect(render("overview")).toContain("including legacy SVG");
     expect(render("overview")).toContain('accept="image/png,image/jpeg,image/gif,image/webp"');
     context.imageReason = "download-failed";
-    expect(render("overview")).toContain("VITE_CONCORD_MEDIA_ORIGINS");
+    expect(render("overview")).toContain("Check the media server connection");
   });
 
   it("renders overview metadata and expiration read-only without metadata permission", () => {

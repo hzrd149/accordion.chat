@@ -81,31 +81,65 @@ describe("app-owned Concord media rendering lifecycle", () => {
 });
 
 describe("explicit media transport policy", () => {
-  it("rejects untrusted origins, plaintext URLs and private destinations before fetching", async () => {
+  it("rejects plaintext URLs and embedded credentials before fetching", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     const transport = createMediaTransport();
     const options = { signal: new AbortController().signal, maxBytes: 1024 };
-    for (const url of ["https://untrusted.example/file", "http://blossom.band/file", "https://127.0.0.1/file",
-      "https://user:pass@blossom.band/file", "https://localhost/file"]) {
+    for (const url of ["http://blossom.band/file", "https://user:pass@blossom.band/file", "file:///cipher", "not a URL"]) {
       await expect(transport(url, options)).rejects.toThrow();
     }
     expect(fetcher).not.toHaveBeenCalled();
-    expect(() => createMediaTransport("https://localhost")).toThrow();
-    expect(() => createMediaTransport("https://custom.example/path")).toThrow();
   });
 
-  it("permits explicitly configured custom Blossom origins with SDK bounded, private fetch options", async () => {
+  it("permits any HTTPS origin without configuration using bounded, private fetch options", async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(new Uint8Array([1, 2, 3]))));
     vi.stubGlobal("fetch", fetcher);
     const signal = new AbortController().signal;
-    expect(await createMediaTransport(" https://custom.example ")("https://custom.example/cipher", { signal, maxBytes: 3 }))
-      .toEqual(new Uint8Array([1, 2, 3]));
+    const transport = createMediaTransport();
+    for (const url of ["https://custom.example/cipher", "https://another.example/media", "https://localhost/cipher"]) {
+      expect(await transport(url, { signal, maxBytes: 3 })).toEqual(new Uint8Array([1, 2, 3]));
+    }
     expect(fetcher).toHaveBeenCalledWith("https://custom.example/cipher", {
       signal, credentials: "omit", referrerPolicy: "no-referrer", redirect: "error",
     });
-    await expect(createMediaTransport("https://custom.example")("https://custom.example/cipher", { signal, maxBytes: 2 }))
-      .rejects.toThrow();
+    await expect(transport("https://custom.example/cipher", { signal, maxBytes: 2 }))
+      .rejects.toMatchObject({ name: "ConcordMediaTooLarge" });
+  });
+
+  it("enforces declared lengths and cancels oversized streamed responses", async () => {
+    const cancel = vi.fn();
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(new Uint8Array([1]), { headers: { "content-length": "4" } }))
+      .mockResolvedValueOnce(new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new Uint8Array([1, 2, 3, 4])); },
+        cancel,
+      })));
+    vi.stubGlobal("fetch", fetcher);
+    const options = { signal: new AbortController().signal, maxBytes: 3 };
+    const transport = createMediaTransport();
+    await expect(transport("https://any.example/media", options)).rejects.toMatchObject({ name: "ConcordMediaTooLarge" });
+    await expect(transport("https://any.example/media", options)).rejects.toMatchObject({ name: "ConcordMediaTooLarge" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an in-flight stream and rejects aborted or invalid-limit requests", async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const fetcher = vi.fn().mockResolvedValue(new Response(new ReadableStream({ cancel })));
+    vi.stubGlobal("fetch", fetcher);
+    const transport = createMediaTransport();
+    const pending = transport("https://any.example/media", { signal: controller.signal, maxBytes: 3 });
+    // Let the fetch resolve and install the reader's abort handler.
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    fetcher.mockClear();
+    await expect(transport("https://any.example/media", { signal: controller.signal, maxBytes: 3 })).rejects.toThrow();
+    for (const maxBytes of [0, -1, Infinity, NaN]) {
+      await expect(transport("https://any.example/media", { signal: new AbortController().signal, maxBytes })).rejects.toThrow();
+    }
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
