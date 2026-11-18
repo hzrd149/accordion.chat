@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Subscription } from "rxjs";
 import { ArrowLeft, Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
@@ -136,6 +137,14 @@ export function RawEventModal({ message, onClose }: { message: ChatMessage; onCl
   );
 }
 
+const CREATION_STEPS = [
+  ["Generating community keys", "Community keys generated"],
+  ["Signing community metadata", "Community metadata signed"],
+  ["Setting up pins and #general", "Default channel initialized"],
+  ["Signing your membership", "Owner membership initialized"],
+  ["Saving and syncing your community keys", "Creation finished"],
+] as const;
+
 export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const client = useConcord();
   const [name, setName] = useState("");
@@ -143,44 +152,108 @@ export function CreateCommunityModal({ onClose, onCreated }: { onClose: () => vo
   const [relays, setRelays] = useState("wss://relay.damus.io\nwss://nos.lol");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [completed, setCompleted] = useState(0);
+  const [createdId, setCreatedId] = useState<string>();
+  const progressSubscription = useRef<Subscription | null>(null);
+  useEffect(() => () => progressSubscription.current?.unsubscribe(), []);
 
   async function create() {
+    if (busy) return;
     setBusy(true);
     setError("");
+    setCompleted(0);
+    const subscriptions = new Subscription();
+    progressSubscription.current = subscriptions;
     try {
       const relayList = relays.split("\n").map((r) => r.trim()).filter(Boolean);
+      const existing = new Set(client.communities$.value.map((state) => state.material.community_id));
+      let observed = false;
+      const advance = (step: number) => setCompleted((previous) => Math.max(previous, step));
+      // The SDK has no creation-progress callback. Discover the new local engine,
+      // then observe its actual milestones; never infer progress from a timer.
+      subscriptions.add(client.communities$.subscribe((states) => {
+        if (observed) return;
+        const state = states.find(({ material }) =>
+          !existing.has(material.community_id) && material.owner === client.pubkey && material.name === name.trim(),
+        );
+        if (!state) return;
+        const community = client.getCommunity(state.material.community_id);
+        if (!community) return;
+        observed = true;
+        setCreatedId(community.communityId);
+        advance(1);
+        subscriptions.add(community.metadata$.subscribe((metadata) => {
+          if (metadata) advance(2);
+        }));
+        subscriptions.add(community.channelViews$.subscribe((channels) => {
+          if (channels.length) advance(3);
+        }));
+        subscriptions.add(community.members$.subscribe((members) => {
+          if (members.has(client.pubkey)) advance(4);
+        }));
+      }));
       const community = await client.createNewCommunity(name.trim(), description.trim(), relayList);
+      advance(CREATION_STEPS.length);
       onCreated(community.communityId);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
+    } finally {
+      subscriptions.unsubscribe();
     }
   }
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={() => { if (!busy) onClose(); }}>
       <h2 className="text-lg font-bold">Create a community</h2>
       <p className="text-sm opacity-60 mb-5">Your community, your rules. It's yours forever — you're the owner.</p>
       {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
-      <div className="mb-4">
-        <label className="label text-xs font-semibold uppercase opacity-70">Community name</label>
-        <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="My Community" maxLength={64} autoFocus />
-      </div>
-      <div className="mb-4">
-        <label className="label text-xs font-semibold uppercase opacity-70">Description (optional)</label>
-        <input className="input input-bordered w-full" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's it about?" />
-      </div>
-      <div className="mb-4">
-        <label className="label text-xs font-semibold uppercase opacity-70">Relays (one per line)</label>
-        <textarea className="textarea textarea-bordered w-full" value={relays} onChange={(e) => setRelays(e.target.value)} rows={3} />
-      </div>
+      {(busy || error || completed > 0) && (
+        <div className="rounded-box bg-base-200 p-4 mb-4" aria-busy={busy}>
+          <progress
+            className={`progress w-full ${error ? "progress-error" : "progress-primary"}`}
+            value={completed}
+            max={CREATION_STEPS.length}
+            aria-label="Community creation progress"
+          />
+          <ol className="mt-3 space-y-2 text-sm" aria-live="polite" aria-relevant="additions text">
+            {CREATION_STEPS.slice(0, Math.min(completed + 1, CREATION_STEPS.length)).map(([pending, done], index) => (
+              <li key={pending} className="flex items-center gap-2">
+                {index < completed
+                  ? <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+                  : busy
+                    ? <span className="loading loading-spinner loading-xs shrink-0" aria-hidden="true" />
+                    : <span className="size-4 shrink-0 text-error" aria-hidden="true">!</span>}
+                <span>{index < completed ? done : error ? `${pending} — interrupted` : `${pending}…`}</span>
+              </li>
+            ))}
+          </ol>
+          {busy && <p className="mt-3 text-xs opacity-60">Signing and relay synchronization can take a little while. Check your signer for approval requests.</p>}
+        </div>
+      )}
+      <fieldset disabled={busy || !!createdId}>
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Community name</label>
+          <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="My Community" maxLength={64} autoFocus />
+        </div>
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Description (optional)</label>
+          <input className="input input-bordered w-full" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What's it about?" />
+        </div>
+        <div className="mb-4">
+          <label className="label text-xs font-semibold uppercase opacity-70">Relays (one per line)</label>
+          <textarea className="textarea textarea-bordered w-full" value={relays} onChange={(e) => setRelays(e.target.value)} rows={3} />
+        </div>
+      </fieldset>
       <div className="modal-action">
-        <button className="btn btn-ghost" onClick={onClose}>
+        <button className="btn btn-ghost" onClick={onClose} disabled={busy}>
           Cancel
         </button>
-        <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
+        {error && createdId ? (
+          <button className="btn btn-primary" onClick={() => onCreated(createdId)}>Open community</button>
+        ) : <button className="btn btn-primary" onClick={create} disabled={!name.trim() || busy}>
           {busy ? "Creating…" : "Create"}
-        </button>
+        </button>}
       </div>
     </Modal>
   );
