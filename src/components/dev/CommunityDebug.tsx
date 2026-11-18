@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import type { ConcordDiagnostic, JoinMaterial, RotationDiagnostic } from "@applesauce/concord";
-import { deriveConcordKeys, verifyOwner, type ConcordKeys } from "@applesauce/concord/helpers";
+import { verifyOwner } from "@applesauce/concord/helpers";
 import { Check, ChevronRight, Copy, RefreshCw } from "lucide-react";
 import { pool } from "../../nostr";
 import { useConcord } from "../../hooks/use-concord";
@@ -21,6 +21,7 @@ import {
   auditEpoch,
   buildChain,
   diffMembers,
+  deriveGenerationKeys,
   fingerprint,
   generationRows,
   relaysFor,
@@ -28,6 +29,7 @@ import {
   stringify,
   type AuditPlane,
   type EpochAudit,
+  type GenerationKeys,
   type RotationAudit,
 } from "../../helpers/concord-history";
 
@@ -196,7 +198,7 @@ function StatusCard({ cid }: { cid: string }) {
 
 // ---- generations -----------------------------------------------------------
 
-function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: ConcordKeys[] }) {
+function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: GenerationKeys[] }) {
   const rows = useMemo(() => generationRows(material), [material]);
   const first = rows[0]?.epoch ?? material.root_epoch;
   const problems = rows.filter((r) => r.gapBefore || (!r.current && r.retiredAt === undefined)).length;
@@ -243,9 +245,11 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Con
                 <td className="whitespace-nowrap">
                   {r.current ? <span className="opacity-60">current</span> : r.retiredAt !== undefined ? dateTime(r.retiredAt * 1000) : <span className="text-warning">missing retired_at</span>}
                 </td>
-                <td><Hex value={keys[i]?.control.pk} /></td>
-                <td><Hex value={keys[i]?.guestbook.pk} /></td>
-                <td><Hex value={keys[i]?.nextBaseRekey.key.pk} /></td>
+                <td>
+                  {keys[i]?.error ? <span className="text-error">Derivation failed: {keys[i].error}</span> : <Hex value={keys[i]?.keys?.control.pk} />}
+                </td>
+                <td><Hex value={keys[i]?.keys?.guestbook.pk} /></td>
+                <td><Hex value={keys[i]?.keys?.nextBaseRekey.key.pk} /></td>
               </tr>
             ))}
           </tbody>
@@ -678,16 +682,7 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
   const metadata = use$(() => community?.metadata$, [community]);
   const material = community?.material;
 
-  const keys = useMemo(() => {
-    if (!material) return [];
-    const out: ConcordKeys[] = [];
-    try {
-      for (const m of buildChain(material)) out.push(deriveConcordKeys(m, [], out[out.length - 1]));
-    } catch (e) {
-      console.warn("[debug] key derivation failed", e);
-    }
-    return out;
-  }, [material]);
+  const keys = useMemo(() => material ? deriveGenerationKeys(material) : [], [material]);
 
   if (!community || !material) return null;
   const relays = [...new Set([...relaysFor(material), ...(metadata?.relays ?? [])])];

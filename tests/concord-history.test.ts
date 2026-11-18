@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { getPublicKey } from "applesauce-core/helpers/keys";
 import type { DecodedEvent, JoinMaterial } from "@applesauce/concord";
-import { buildRekeyRumors, bytesToBase64, rekeyLocator, ROOT_SCOPE_HEX } from "@applesauce/concord/helpers";
-import { analyzeRotations, buildChain, diffMembers, generationRows, stringify } from "../src/helpers/concord-history";
+import { buildRekeyRumors, bytesToBase64, controlSignerGroupKey, deriveConcordKeys, rekeyLocator, ROOT_SCOPE_HEX } from "@applesauce/concord/helpers";
+import { hexToBytes } from "@noble/hashes/utils.js";
+import { analyzeRotations, buildChain, deriveGenerationKeys, diffMembers, generationRows, stringify } from "../src/helpers/concord-history";
 
 const hex32 = () => bytesToHex(randomBytes(32));
 const pubkey = () => getPublicKey(randomBytes(32));
@@ -44,6 +45,72 @@ describe("buildChain", () => {
     const chain = buildChain(m);
     expect(chain.map((x) => x.root_epoch)).toEqual([1, 2]);
     expect(chain[1].community_root).toBe("c2".repeat(32));
+  });
+
+  function splitMaterial(): JoinMaterial {
+    return material({
+      root_epoch: 3,
+      refounder: pubkey(),
+      control_pk: pubkey(),
+      prev_root: hex32(),
+      held_roots: [{ epoch: 1, key: hex32() }],
+    });
+  }
+
+  it("derives a legacy held epoch and a read-only split tip despite gaps", () => {
+    const m = splitMaterial();
+    const before = structuredClone(m);
+    const chain = buildChain(m);
+    expect(chain.map((r) => r.root_epoch)).toEqual([1, 3]);
+    for (const field of ["control_pk", "control_root", "prev_root", "refounder"]) {
+      expect(field in chain[0]).toBe(false);
+      expect(field in chain[1].held_roots![0]).toBe(false);
+    }
+    expect(chain[1].control_pk).toBe(m.control_pk);
+    expect("control_root" in chain[1]).toBe(false);
+    expect(chain[1].prev_root).toBe(m.prev_root);
+    const results = deriveGenerationKeys(m);
+    expect(results.every((r) => r.keys)).toBe(true);
+    expect(results[0].keys?.control.signing).toBeDefined();
+    expect(results[1].keys?.control.signing).toBeUndefined();
+    expect(generationRows(m).map((r) => r.gapBefore)).toEqual([true, true]);
+    expect(m).toEqual(before);
+  });
+
+  it("preserves staff capabilities and each historical predecessor", () => {
+    const m = splitMaterial();
+    const root = hex32();
+    const pk = controlSignerGroupKey(hexToBytes(root), hexToBytes(m.community_id), 1).pk;
+    const held = { epoch: 1, key: hex32(), control_root: root, control_pk: pk, prev_root: hex32(), refounder: pubkey(), retired_at: 0 };
+    m.held_roots = [held];
+    const chain = buildChain(m);
+    expect(chain[0]).toMatchObject({ control_root: root, control_pk: pk, prev_root: held.prev_root, refounder: held.refounder });
+    expect(chain[1].held_roots).toEqual([held]);
+    expect(deriveConcordKeys(chain[0], []).control.signing?.pk).toBe(pk);
+    expect("control_root" in chain[1]).toBe(false);
+  });
+
+  it("omits undefined optional fields for current legacy material too", () => {
+    const m = material({ control_pk: undefined, control_root: undefined, refounder: undefined, prev_root: undefined, held_roots: [] });
+    const [legacy] = buildChain(m);
+    for (const field of ["control_pk", "control_root", "prev_root", "refounder"]) expect(field in legacy).toBe(false);
+    expect(() => deriveConcordKeys(legacy, [])).not.toThrow();
+  });
+
+  it.each([
+    { control_pk: "invalid" },
+    { control_root: "invalid" },
+    { control_pk: "" },
+    { control_root: hex32() },
+  ])("keeps malformed supplied coordinates subject to strict validation: %o", (fields) => {
+    const m = splitMaterial();
+    Object.assign(m.held_roots![0], { control_pk: pubkey(), ...fields });
+    const chain = buildChain(m);
+    expect(() => deriveConcordKeys(chain[0], [])).toThrow();
+    const results = deriveGenerationKeys(m);
+    expect(results[0].error).toBeTruthy();
+    expect(results[1].error).toBeUndefined();
+    expect(results[1].keys?.control.pk).toBe(m.control_pk);
   });
 });
 

@@ -4,9 +4,20 @@ Date: 2026-11-18
 
 ## Summary
 
-Accordion reports a restored community as `syncing` and does not display recent messages. A separate, confirmed bug in its debug history builder prevents inspection of legacy and read-only split-control epochs. Fix the debug builder first, then use it to investigate the original sync failure; do not assume the two failures share a cause.
+Accordion reports a restored community as `syncing` and does not display recent messages. A separate, confirmed bug in its debug history builder prevented inspection of legacy and read-only split-control epochs. The debug builder is now repaired and covered by application regression tests. The original sync failure remains unresolved; do not assume the two failures share a cause.
 
-This report changes no application behavior. No relay events were published during the investigation. The full invite URL is intentionally omitted because its fragment grants access to private community content.
+The original investigation changed no application behavior and reported no relay publications. This repair changes developer diagnostics only, not sync, membership material, storage, or library validation. No relay probes or publications were performed during this repair. The full invite URL is intentionally omitted because its fragment grants access to private community content.
+
+## Repair status (2026-11-18)
+
+- `buildChain()` strips the tip's epoch-specific optional fields before reconstructing each generation. It adds only defined coordinates, including historical `refounder` and `prev_root`, and preserves optional-field absence in generated `held_roots`.
+- Generation key derivation now returns an aligned success/error result for every epoch. The debug table displays each failure instead of silently hiding later generations. After a failure, later derivations start without prior keys; they do not imply validated continuity.
+- The relay audit uses the repaired builder. It still stops on the first audit failure and displays that error; it does not claim to have audited later epochs.
+- Regression tests exercise legacy, read-only split and staff coordinates, held epochs 1 and 3, absence versus `undefined`, predecessor preservation, malformed split values, and recovery of later derivations.
+- Installed dependencies verified during repair: `@applesauce/concord` JSR `0.1.0`, `applesauce-loaders` `7.2.0`, `applesauce-core` `7.1.3`, `applesauce-relay` `7.1.1`. This does not identify the user's running browser bundle or establish equivalence with the earlier sibling-checkout probes.
+- The earlier probe and E2E results below are retained as handoff evidence, not independently rerun results.
+
+The user's saved material and running browser state are not available in this repair. A restored-state sync reproduction and browser verification of the debug page remain outstanding. Do not clear storage or replace membership material to obtain them.
 
 ## User-observed state
 
@@ -39,7 +50,7 @@ The underlying saved material has not been collected. Do not infer missing or co
 
 ## Confirmed application bug: absent fields become present-but-undefined
 
-### Relevant application code
+### Application code before the repair
 
 `src/helpers/concord-history.ts`:
 
@@ -65,7 +76,7 @@ if (!("control_pk" in material) && !("control_root" in material)) {
 // A present control_root must also be canonical and match control_pk.
 ```
 
-The implementation inspected is in the sibling library at `src/helpers/crypto.ts`, around `controlKeyFor()` (lines 154–170 at investigation time).
+The original investigation inspected the sibling library's `src/helpers/crypto.ts`, around `controlKeyFor()` (lines 154–170). The same property-presence checks were verified in Accordion's installed JSR `0.1.0` package during this repair.
 
 Consequently:
 
@@ -75,20 +86,20 @@ Consequently:
 
 This construction bug is confirmed by source inspection. The exact values and property presence in the user's saved material remain unverified.
 
-### Suggested repair scope
+### Repair scope (implemented)
 
 1. Strip current epoch-specific optional fields from the shared spread base before constructing historical generations.
 2. Add each historical generation's optional control fields only when actually defined.
 3. Preserve absence in synthesized `held_roots` records as well.
 4. Review `refounder` and `prev_root` handling for the same historical-field leakage problem.
 5. Keep strict library validation: do not weaken it to accept malformed supplied split fields.
-6. Consider reporting a per-generation derivation error rather than allowing one failed historical generation to hide every later generation.
+6. Report a per-generation derivation error rather than allowing one failed historical generation to hide every later generation.
 
 Do not blindly substitute the library's internal chain builder: Accordion uses public entrypoints, and an audit's inventory of held roots need not have identical selection semantics to the authoritative sync walk.
 
 ### Regression tests and acceptance criteria
 
-Add application helper tests following the existing test layout:
+Application helper coverage is in `tests/concord-history.test.ts`:
 
 - Legacy material with no split fields remains free of those properties after `buildChain()`.
 - A legacy held epoch followed by a read-only split current epoch derives successfully.
@@ -153,6 +164,8 @@ In the local epoch-sync probe, Cyberguy failed in both core and channel history 
 
 A stalled relay holding the epoch barrier is a hypothesis, not a diagnosed root cause. Do not clear the user's local storage or replace their membership material as a diagnostic shortcut; doing so may destroy the reproduction.
 
-## Verification for the eventual application fix
+## Repair verification
 
-Follow `AGENTS.md`: run focused helper tests, `pnpm test`, `pnpm build`, and `pnpm lint`. Verify that the debug page derives legacy and read-only split generations without publishing anything. Keep the original sync failure open until the user's restored-state scenario is reproduced or explained.
+Passed: focused history helper tests (14 tests), the full application suite (73 tests), `pnpm build`, and `pnpm lint`. The production build retains its large-chunk warning. Tests use synthetic material and the installed public Concord helpers; no relay access is needed.
+
+Browser verification with the user's restored material has not been performed. Keep the original sync failure open until that scenario is reproduced or explained.

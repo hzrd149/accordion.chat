@@ -76,27 +76,31 @@ type ChainEntry = {
   retired_at?: number;
 };
 
+/** Omit undefined coordinates, but retain malformed supplied values for strict validation. */
+function epochFields(r: Pick<ChainEntry, "refounder" | "control_pk" | "control_root" | "prev_root">) {
+  return {
+    ...(r.refounder !== undefined ? { refounder: r.refounder } : {}),
+    ...(r.control_pk !== undefined ? { control_pk: r.control_pk } : {}),
+    ...(r.control_root !== undefined ? { control_root: r.control_root } : {}),
+    ...(r.prev_root !== undefined ? { prev_root: r.prev_root } : {}),
+  };
+}
+
 function chainEntries(material: JoinMaterial): ChainEntry[] {
   const byEpoch = new Map<number, ChainEntry>();
   for (const r of material.held_roots ?? []) {
     byEpoch.set(r.epoch, {
       epoch: r.epoch,
       key: r.key,
-      refounder: r.refounder,
-      control_pk: r.control_pk,
-      control_root: r.control_root,
-      prev_root: r.prev_root,
-      retired_at: r.retired_at,
+      ...epochFields(r),
+      ...(r.retired_at !== undefined ? { retired_at: r.retired_at } : {}),
     });
   }
   // The current epoch wins over a stale held duplicate.
   byEpoch.set(material.root_epoch, {
     epoch: material.root_epoch,
     key: material.community_root,
-    refounder: material.refounder,
-    control_pk: material.control_pk,
-    control_root: material.control_root,
-    prev_root: material.prev_root,
+    ...epochFields(material),
   });
   return [...byEpoch.values()].sort((a, b) => a.epoch - b.epoch);
 }
@@ -109,19 +113,43 @@ function chainEntries(material: JoinMaterial): ChainEntry[] {
  */
 export function buildChain(material: JoinMaterial): JoinMaterial[] {
   const entries = chainEntries(material);
+  const base = { ...material };
+  delete base.refounder;
+  delete base.control_pk;
+  delete base.control_root;
+  delete base.prev_root;
   return entries.map((r) => ({
-    ...material,
+    ...base,
     community_root: r.key,
     root_epoch: r.epoch,
-    refounder: r.refounder,
-    control_pk: r.control_pk,
-    control_root: r.control_root,
-    prev_root: r.prev_root,
+    ...epochFields(r),
     held_roots: entries
       .filter((o) => o.epoch < r.epoch)
-      .map((o) => ({ epoch: o.epoch, key: o.key, refounder: o.refounder, retired_at: o.retired_at, control_pk: o.control_pk, control_root: o.control_root }))
+      .map((o) => ({
+        epoch: o.epoch,
+        key: o.key,
+        ...epochFields(o),
+        ...(o.retired_at !== undefined ? { retired_at: o.retired_at } : {}),
+      }))
       .reverse(),
   }));
+}
+
+export type GenerationKeys = { keys: ConcordKeys; error?: never } | { keys?: never; error: string };
+
+/** Keep results aligned with held generations when a coordinate is invalid. */
+export function deriveGenerationKeys(material: JoinMaterial): GenerationKeys[] {
+  let prior: ConcordKeys | undefined;
+  return buildChain(material).map((m) => {
+    try {
+      const keys = deriveConcordKeys(m, [], prior);
+      prior = keys;
+      return { keys };
+    } catch (e) {
+      prior = undefined;
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  });
 }
 
 /** One held generation, as shown in the debug table (no secrets). */
