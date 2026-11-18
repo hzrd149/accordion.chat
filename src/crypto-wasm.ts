@@ -15,11 +15,33 @@
 
 import { initNostrWasm } from "nostr-wasm";
 import { setNostrWasm, verifyEvent as wasmVerifyEvent } from "nostr-tools/wasm";
-import { setVerifyWrappedEventMethod, type VerifyEventMethod } from "applesauce-core/helpers";
+import { setVerifyWrappedEventMethod, verifiedSymbol, type VerifyEventMethod } from "applesauce-core/helpers";
 import type { EventStore } from "applesauce-core";
 import { OptimisticEventVerifier } from "applesauce-core/event-store";
 import { verifyEvent as jsVerifyEvent } from "nostr-tools/pure";
 import { signatureVerificationMode$ } from "./services/signature-verification";
+
+type Verifier = NonNullable<EventStore["verifyEvent"]>;
+type MemoEvent = Parameters<Verifier>[0] & { [verifiedSymbol]?: boolean };
+
+/**
+ * nostr-wasm's verifier, memoized like nostr-tools' pure verifier.
+ *
+ * `nostr-tools/wasm` never reads a cached result and marks events with its own
+ * private symbol, so without this every repeated check of the same object (e.g.
+ * applesauce-common's "cheap to repeat" seal verification) re-runs the Schnorr
+ * check. Reading/writing applesauce-core's `verifiedSymbol` restores the cache
+ * the default verifier provides. The optimistic verifier passes a fresh object,
+ * so a cached mark can never bypass one of its sampled checks.
+ */
+export function verifyEventWasm(event: Parameters<Verifier>[0]): boolean {
+  const memo = event as MemoEvent;
+  const cached = memo[verifiedSymbol];
+  if (typeof cached === "boolean") return cached;
+  const valid = wasmVerifyEvent(event);
+  memo[verifiedSymbol] = valid;
+  return valid;
+}
 
 /**
  * Apply the persisted verification mode and initialize its WASM backend:
@@ -32,7 +54,10 @@ import { signatureVerificationMode$ } from "./services/signature-verification";
  * RumorStores are untouched (they verify by re-hashing the id, not a signature).
  */
 export async function enableWasmVerification(eventStore: EventStore): Promise<void> {
-  let verify: NonNullable<EventStore["verifyEvent"]> = jsVerifyEvent;
+  // The base signature check for every verifying mode. Starts on pure JS and is
+  // swapped to WASM once initialized; the optimistic verifier reads it through a
+  // closure so its sampled checks pick up the swap without being rebuilt.
+  let verify: Verifier = jsVerifyEvent;
   const optimistic = new OptimisticEventVerifier({
     verifyEvent: (event) => verify(event),
     storage: {
@@ -56,7 +81,7 @@ export async function enableWasmVerification(eventStore: EventStore): Promise<vo
   try {
     const wasm = await initNostrWasm();
     setNostrWasm(wasm);
-    verify = wasmVerifyEvent;
+    verify = verifyEventWasm;
     // Read the latest preference: it may have changed during initialization.
     apply();
     console.info("[concord] nostr-wasm signature verifier ready");
