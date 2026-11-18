@@ -62,11 +62,20 @@ export interface ChannelProjection {
 export function foldChannel(visible: readonly ConcordChannelMessage[], effects: readonly Rumor[], previous?: ChannelProjection): ChannelProjection {
   const messages = new Map<string, ChatMessage>();
   const threads = new Map<string, ThreadComment[]>();
-  const previousMessages = new Map(previous?.messages.map((message) => [message.id, message]));
-  const previousComments = new Map([...(previous?.threads.values() ?? [])].flat().map((comment) => [comment.id, comment]));
+  const previousMessages = new Map<string, ChatMessage>();
+  const previousComments = new Map<string, ThreadComment>();
+  if (previous) {
+    for (const message of previous.messages) previousMessages.set(message.id, message);
+    for (const comments of previous.threads.values()) {
+      for (const comment of comments) previousComments.set(comment.id, comment);
+    }
+  }
   const reactions = new Map<string, Map<string, { url?: string; authors: Set<string> }>>();
-  const authorDeleted = new Set(effects.filter((effect) => effect.kind === 5).flatMap((deletion) =>
-    deletion.tags.filter((tag) => tag[0] === "e").map((tag) => `${deletion.pubkey}:${tag[1]}`)));
+  const authorDeleted = new Set<string>();
+  for (const effect of effects) {
+    if (effect.kind !== 5) continue;
+    for (const tag of effect.tags) if (tag[0] === "e") authorDeleted.add(`${effect.pubkey}:${tag[1]}`);
+  }
 
   for (const { rumor: r, edit, content } of visible) {
     const old = previousMessages.get(r.id) ?? previousComments.get(r.id);
@@ -74,6 +83,12 @@ export function foldChannel(visible: readonly ConcordChannelMessage[], effects: 
     const emojiTags = (edit ?? r).tags.filter((t) => t[0] === "emoji");
     const stableEmojiTags = old && sameItems(old.emojiTags, emojiTags) ? old.emojiTags : emojiTags;
     if (r.kind === MESSAGE) {
+      const prior = previousMessages.get(r.id);
+      if (prior && prior.raw === r && prior.edited === (edit ? content : undefined) &&
+        prior.emojiTags === stableEmojiTags) {
+        messages.set(r.id, prior);
+        continue;
+      }
       const q = r.tags.find((t) => t[0] === "q");
       messages.set(r.id, {
         id: r.id, author: r.pubkey, content: r.content, ms: rumorMs(r),
@@ -83,6 +98,13 @@ export function foldChannel(visible: readonly ConcordChannelMessage[], effects: 
         emojiTags: stableEmojiTags, raw: r,
       });
     } else if (r.kind === COMMENT) {
+      const prior = previousComments.get(r.id);
+      if (prior && prior.raw === r && prior.content === content && prior.emojiTags === stableEmojiTags) {
+        const comments = threads.get(prior.root.id) ?? [];
+        comments.push(prior);
+        threads.set(prior.root.id, comments);
+        continue;
+      }
       const event = r as unknown as NostrEvent;
       const root = eventPointer(getCommentRootPointer(event));
       const parent = eventPointer(getCommentReplyPointer(event));
@@ -109,32 +131,30 @@ export function foldChannel(visible: readonly ConcordChannelMessage[], effects: 
   }
   for (const root of threads.keys()) if (!messages.has(root)) threads.delete(root);
   for (const msg of messages.values()) {
-    msg.reactions = [...(reactions.get(msg.id) ?? [])].map(([emoji, { url, authors }]) => ({
-      emoji, url, count: authors.size, authors: [...authors],
-    }));
-    msg.threadReplyCount = threads.get(msg.id)?.length ?? 0;
-  }
-  // Keep identity for unchanged rows, not just for the stream itself. Reaction
-  // updates must not invalidate every sibling's memo or media-loading effect.
-  for (const [id, message] of messages) {
-    const old = previousMessages.get(id);
-    if (old && old.raw === message.raw && old.edited === message.edited &&
-      old.emojiTags === message.emojiTags && old.threadReplyCount === message.threadReplyCount &&
-      old.reactions.length === message.reactions.length && old.reactions.every((reaction, index) => {
-        const next = message.reactions[index];
-        return reaction.emoji === next.emoji && reaction.url === next.url &&
-          reaction.count === next.count && sameItems(reaction.authors, next.authors);
-      })) messages.set(id, old);
+    const grouped = reactions.get(msg.id);
+    const count = threads.get(msg.id)?.length ?? 0;
+    // Compare before materializing arrays: unchanged siblings keep their rows,
+    // reaction arrays and authors arrays, rather than allocating then discarding.
+    let same = msg.reactions.length === (grouped?.size ?? 0);
+    let index = 0;
+    if (same && grouped) for (const [emoji, { url, authors }] of grouped) {
+      const old = msg.reactions[index++];
+      if (old.emoji !== emoji || old.url !== url || old.count !== authors.size) { same = false; break; }
+      let authorIndex = 0;
+      for (const author of authors) if (old.authors[authorIndex++] !== author) { same = false; break; }
+      if (!same) break;
+    }
+    if (!same || msg.threadReplyCount !== count) {
+      const nextReactions = same ? msg.reactions : [...(grouped ?? [])].map(([emoji, { url, authors }]) => ({
+        emoji, url, count: authors.size, authors: [...authors],
+      }));
+      messages.set(msg.id, { ...msg, reactions: nextReactions, threadReplyCount: count });
+    }
   }
   for (const [rootId, comments] of threads) {
     comments.sort(compareRows);
-    const stable = comments.map((comment) => {
-      const old = previousComments.get(comment.id);
-      return old && old.raw === comment.raw && old.content === comment.content &&
-        old.emojiTags === comment.emojiTags ? old : comment;
-    });
     const old = previous?.threads.get(rootId);
-    threads.set(rootId, old && sameItems(old, stable) ? old : stable);
+    threads.set(rootId, old && sameItems(old, comments) ? old : comments);
   }
   const rows = [...messages.values()].sort(compareRows);
   const stableMessages = previous && sameItems(previous.messages, rows) ? previous.messages : rows;

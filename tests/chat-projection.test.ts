@@ -74,6 +74,64 @@ describe("SDK channel presentation adapter", () => {
     expect(removed.threads.size).toBe(0);
   });
 
+  it("updates aggregates without mutating previous snapshots or replacing unchanged reaction arrays", () => {
+    const message = row(rumor("message"));
+    const reaction = rumor("reaction", 7, [["e", "message"]], "👍");
+    const initial = foldChannel([message], [reaction]);
+    const withReply = foldChannel([message, row(reply)], [reaction], initial);
+    expect(initial.messages[0].threadReplyCount).toBe(0);
+    expect(withReply.messages[0].threadReplyCount).toBe(1);
+    expect(withReply.messages[0].reactions).toBe(initial.messages[0].reactions);
+
+    const otherAuthor = { ...reaction, id: "second", pubkey: "other" };
+    const reacted = foldChannel([message, row(reply)], [reaction, otherAuthor], withReply);
+    expect(withReply.messages[0].reactions[0].authors).toEqual(["author"]);
+    expect(reacted.messages[0].reactions[0].authors).toEqual(["author", "other"]);
+    expect(reacted.threads).toBe(withReply.threads);
+
+    const removed = foldChannel([message], [], reacted);
+    expect(removed.messages[0].reactions).toEqual([]);
+    expect(removed.messages[0].threadReplyCount).toBe(0);
+    expect(reacted.messages[0].threadReplyCount).toBe(1);
+  });
+
+  it("skips folding 5000 equivalent SDK rows across tasks but observes edits, effects and removals", async () => {
+    vi.useFakeTimers();
+    const visible = Array.from({ length: 5000 }, (_, index) => row(rumor(`message-${index}`)));
+    // Tag parsing is part of the fold, not the input equality check.
+    const parseTags = vi.spyOn(visible[0].rumor.tags, "filter");
+    const messages$ = new BehaviorSubject(visible);
+    const effects$ = new BehaviorSubject<Rumor[]>([]);
+    const channel = { id: "channel", messages$, timeline$: () => effects$ };
+    const community = { channels$: new BehaviorSubject([channel]) } as unknown as ConcordCommunity;
+    const views: ReturnType<typeof foldChannel>[] = [];
+    const sub = channelProjection(community, "channel").subscribe((view) => views.push(view));
+    await vi.runAllTimersAsync();
+    parseTags.mockClear();
+    for (let i = 0; i < 5; i++) {
+      messages$.next(visible.map((message) => ({ ...message })));
+      effects$.next([]);
+      await vi.runAllTimersAsync();
+    }
+    expect(views).toHaveLength(1);
+    expect(parseTags).not.toHaveBeenCalled();
+
+    const edit = rumor("edit", 3302, [["emoji", "party", "https://example.com/party.png"]], "edited");
+    messages$.next([{ ...visible[0], edit, content: edit.content }, ...visible.slice(1)]);
+    await vi.runAllTimersAsync();
+    expect(views.at(-1)?.messages[0].edited).toBe("edited");
+    expect(views.at(-1)?.messages[0].emojiTags).toEqual(edit.tags);
+    effects$.next([rumor("react", 7, [["e", "message-0"]], "👍")]);
+    await vi.runAllTimersAsync();
+    expect(views.at(-1)?.messages[0].reactions[0].count).toBe(1);
+    expect(views.at(-1)?.messages[1]).toBe(views[0].messages[1]);
+    messages$.next([]);
+    await vi.runAllTimersAsync();
+    expect(views.at(-1)?.messages).toEqual([]);
+    sub.unsubscribe();
+    parseTags.mockRestore();
+  });
+
   it("publishes and projects an encrypted attachment in a nested, media-only reply", async () => {
     const attachment = {
       url: "https://example.com/blob",
