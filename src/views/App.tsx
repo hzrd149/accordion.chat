@@ -13,6 +13,7 @@ import {
   Menu,
   MessageSquare,
   MoreVertical,
+  Pin,
   Paperclip,
   Pencil,
   Phone,
@@ -65,7 +66,8 @@ import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/Cli
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
-import { ChannelPins, PinMessageButton } from "../components/ChannelPins";
+import { ChannelPins } from "../components/ChannelPins";
+import { pinMessage } from "../helpers/pins";
 import { DirectInviteModal } from "../components/DirectInviteModal";
 import { useMentionCandidates, useMentionSearch, detectMention, type MentionCandidate } from "../hooks/mentions";
 import { EmojiPicker } from "../components/EmojiPicker";
@@ -1455,12 +1457,21 @@ const Message = memo(function Message({
   const [actionError, setActionError] = useState("");
   const canModerate = use$(() => community?.canModerate$(m.author, PERM.MANAGE_MESSAGES), [community, m.author]) ?? false;
   const canDelete = !m.deleted && (m.author === myPubkey || canModerate);
+  const canPinMessages = use$(() => community?.can$(PERM.PIN_MESSAGES), [community]) ?? false;
+  const canPin = canWrite && canPinMessages && !m.deleted;
+  const showMenu = canPin || devMode;
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const react = (reaction: string | Emoji) => community?.react(channelId, m.raw, reaction);
   async function deleteMessage() {
     setActionError("");
     try { await community?.deleteMessage(channelId, m.raw); }
+    catch (error) { setActionError(String(error)); }
+  }
+  async function pin() {
+    if (!community) return;
+    setActionError("");
+    try { await pinMessage(community, channelId, m.id); }
     catch (error) { setActionError(String(error)); }
   }
 
@@ -1567,7 +1578,6 @@ const Message = memo(function Message({
             )}
             <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
             {m.edited && <span className="text-[11px] text-base-content/60"> (edited)</span>}
-            {canWrite && community && <PinMessageButton community={community} channelId={channelId} messageId={m.id} />}
           </>
         )}
         {m.reactions.length > 0 && (
@@ -1646,7 +1656,7 @@ const Message = memo(function Message({
             </button>}
           </>
         )}
-        {devMode && (
+        {showMenu && (
         <span className="relative inline-flex">
           <button className="btn btn-ghost btn-sm btn-circle" title="More" onClick={() => setMenuOpen((v) => !v)}>
             <MoreVertical size={16} />
@@ -1654,10 +1664,14 @@ const Message = memo(function Message({
           {menuOpen && (
             <MessageMenu
               onClose={() => setMenuOpen(false)}
-              onViewRaw={() => {
+              onPin={canPin ? () => {
+                setMenuOpen(false);
+                void pin();
+              } : undefined}
+              onViewRaw={devMode ? () => {
                 setMenuOpen(false);
                 setRawOpen(true);
-              }}
+              } : undefined}
             />
           )}
         </span>
@@ -1727,6 +1741,9 @@ const Message = memo(function Message({
                       </button>
                     </>
                   )}
+                  {canPin && <button className="btn btn-ghost justify-start" onClick={() => actionAndClose(() => void pin())}>
+                    <Pin size={18} /> Pin message
+                  </button>}
                   {canDelete && <button className="btn btn-ghost justify-start text-error" onClick={() => actionAndClose(() => void deleteMessage())}>
                     <Trash2 size={18} /> Delete
                   </button>}
@@ -1749,7 +1766,8 @@ const Message = memo(function Message({
 });
 
 // The per-message "more options" dropdown. Closes on outside-click or Escape.
-function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: () => void }) {
+// Each action renders only when its handler is supplied.
+function MessageMenu({ onClose, onPin, onViewRaw }: { onClose: () => void; onPin?: () => void; onViewRaw?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -1771,9 +1789,16 @@ function MessageMenu({ onClose, onViewRaw }: { onClose: () => void; onViewRaw: (
       className="absolute top-full mt-1.5 right-0 z-50 min-w-[140px] flex flex-col p-1 bg-base-200 border border-base-300 rounded-box shadow-lg"
       ref={ref}
     >
-      <button className="w-full text-left px-2.5 py-1.5 rounded text-sm hover:bg-base-300" onClick={onViewRaw}>
-        View raw
-      </button>
+      {onPin && (
+        <button className="w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded text-sm hover:bg-base-300" onClick={onPin}>
+          <Pin size={14} /> Pin message
+        </button>
+      )}
+      {onViewRaw && (
+        <button className="w-full text-left px-2.5 py-1.5 rounded text-sm hover:bg-base-300" onClick={onViewRaw}>
+          View raw
+        </button>
+      )}
     </div>
   );
 }

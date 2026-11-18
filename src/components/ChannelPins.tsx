@@ -2,7 +2,6 @@ import type { ConcordCommunity } from "@applesauce/concord";
 import { PERM } from "@applesauce/concord";
 import { use$ } from "applesauce-react/hooks";
 import { useState } from "react";
-import { pinMessage } from "../helpers/pins";
 
 export function ChannelPins({ community, channelId, onJump }: {
   community: ConcordCommunity; channelId: string; onJump: (id: string) => void;
@@ -28,22 +27,4 @@ export function ChannelPins({ community, channelId, onJump }: {
       {error && <p role="alert" className="text-error text-sm">{error}</p>}
     </div>
   </details>;
-}
-
-export function PinMessageButton({ community, channelId, messageId }: {
-  community: ConcordCommunity; channelId: string; messageId: string;
-}) {
-  const allowed = use$(() => community.can$(PERM.PIN_MESSAGES), [community]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  if (!allowed) return null;
-  return <span>
-    <button className="btn btn-ghost btn-xs" disabled={busy} onClick={() => {
-      setBusy(true);
-      setError("");
-      void pinMessage(community, channelId, messageId)
-        .catch((reason: unknown) => setError(String(reason))).finally(() => setBusy(false));
-    }}>Pin</button>
-    {error && <span role="alert" className="text-error text-xs">{error}</span>}
-  </span>;
 }
