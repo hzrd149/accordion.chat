@@ -244,7 +244,7 @@ export function ChannelView({
         </>
       ) : (!isForum || !channelAccessible || showTimeline) && (
         <ChannelTimeline
-          key={`${pubkey}:${cid}:${channelId}`}
+          key={`timeline:${pubkey}:${cid}:${channelId}`}
           ref={timelineRef}
           onAtBottomChange={setAtBottom}
           messages={messages}
@@ -264,7 +264,7 @@ export function ChannelView({
       )}
       {!postId && canWrite && (showTimeline || composingPost) && community?.getChannel(channelId) && (
         <ChannelComposer
-          key={`${pubkey}:${cid}:${channelId}`}
+          key={`composer:${pubkey}:${cid}:${channelId}`}
           draft={community.getChannel(channelId)!.draft()}
           channelName={channel?.name}
           channelPrivate={Boolean(channel?.private)}
