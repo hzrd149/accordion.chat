@@ -1017,6 +1017,12 @@ function ChatView({
   const [searchParams] = useSearchParams();
   const jumpTargetId = searchParams.get("msg");
   const isForum = channelViewMode(channel) === "forum";
+  const [newPostOpen, setNewPostOpen] = useState(false);
+  const newPostButton = useRef<HTMLButtonElement>(null);
+  const closeNewPost = () => {
+    setNewPostOpen(false);
+    newPostButton.current?.focus();
+  };
   const [viewChoice, setViewChoice] = useState<{ jumpTargetId: string | null; timeline: boolean }>();
   const showTimeline = !isForum || (viewChoice?.jumpTargetId === jumpTargetId ? viewChoice.timeline : Boolean(jumpTargetId));
   const pendingJump = useRef<string | null>(null);
@@ -1090,6 +1096,7 @@ function ChatView({
   // write path now throws MissingChannelKeyError for a private channel we can't
   // decrypt, so offering the composer there would only produce a failed send.
   const canWrite = !dissolved && channelAccessible;
+  const composingPost = isForum && !showTimeline && newPostOpen;
 
   const jumpToMessage = useCallback((id: string) => {
     const scrollEl = scrollRef.current;
@@ -1158,15 +1165,24 @@ function ChatView({
       {channel && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
       {community && <ChannelPins key={channelId} community={community} channelId={channelId} onJump={jumpToMessage} />}
       {isForum && channelAccessible && (
-        <div role="group" aria-label="Channel view" className="flex gap-1 border-b border-base-300 px-4 py-2">
-          <button type="button" className={`btn btn-sm ${!showTimeline ? "btn-active" : "btn-ghost"}`}
+        <div role="group" aria-label="Channel view" className="flex flex-wrap items-center gap-2 border-b border-base-300 px-4 py-2">
+          <button type="button" className={`btn min-h-11 text-base ${!showTimeline ? "btn-active" : "btn-ghost"}`}
             aria-pressed={!showTimeline} onClick={() => setViewChoice({ jumpTargetId, timeline: false })}>Posts</button>
-          <button type="button" className={`btn btn-sm ${showTimeline ? "btn-active" : "btn-ghost"}`}
-            aria-pressed={showTimeline} onClick={() => setViewChoice({ jumpTargetId, timeline: true })}>Timeline</button>
+          <button type="button" className={`btn min-h-11 text-base ${showTimeline ? "btn-active" : "btn-ghost"}`}
+            aria-pressed={showTimeline} onClick={() => {
+              setNewPostOpen(false);
+              setViewChoice({ jumpTargetId, timeline: true });
+            }}>Timeline</button>
+          {canWrite && !showTimeline && (
+            <button ref={newPostButton} type="button" className="btn btn-primary ml-auto min-h-11 text-base"
+              aria-expanded={composingPost} onClick={() => setNewPostOpen(true)}>
+              <Plus size={20} aria-hidden="true" /> New post
+            </button>
+          )}
         </div>
       )}
       {isForum && channelAccessible && !showTimeline ? (
-        <ForumPosts messages={messages} onOpenThread={onOpenThread} />
+        <ForumPosts messages={messages} onOpenThread={onOpenThread} hidden={composingPost && canWrite} />
       ) : (
         <MessageList
           ref={scrollRef}
@@ -1185,14 +1201,13 @@ function ChatView({
           onThread={(m) => onOpenThread(m.id)}
         />
       )}
-      {canWrite && community?.getChannel(channelId) && (
+      {canWrite && (showTimeline || composingPost) && community?.getChannel(channelId) && (
         <Composer
           key={`${pubkey}:${cid}:${channelId}`}
           draft={community.getChannel(channelId)!.draft()}
           channelName={channel?.name}
           channelPrivate={Boolean(channel?.private)}
-          forum={isForum}
-          requireTitle={isForum && !showTimeline}
+          onClosePost={composingPost ? closeNewPost : undefined}
           favorites={favorites}
           community={community}
           replyTo={replyTo}
@@ -2204,8 +2219,7 @@ const Composer = memo(function Composer({
   draft,
   channelName,
   channelPrivate,
-  forum,
-  requireTitle,
+  onClosePost,
   favorites,
   community,
   replyTo,
@@ -2214,8 +2228,7 @@ const Composer = memo(function Composer({
   draft: ConcordChannelDraft;
   channelName: string | undefined;
   channelPrivate: boolean;
-  forum: boolean;
-  requireTitle: boolean;
+  onClosePost?: () => void;
   favorites: Emoji[];
   community: ConcordCommunity;
   replyTo: ReplyTarget | null;
@@ -2224,12 +2237,17 @@ const Composer = memo(function Composer({
   const saved = useChannelDraft(draft);
   const text = saved.value.text;
   const files = saved.value.files ?? [];
-  const activeReply = replyTo ?? saved.value.replyTo;
-  const missingTitle = requireTitle && !saved.value.subject?.trim();
+  const isPost = Boolean(onClosePost);
+  const activeReply = isPost ? undefined : replyTo ?? saved.value.replyTo;
+  const missingTitle = isPost && !saved.value.subject?.trim();
+  const titleRef = useRef<HTMLInputElement>(null);
   const { ready: draftReady, update: updateDraft } = saved;
   useEffect(() => {
-    if (draftReady && replyTo) updateDraft({ replyTo });
-  }, [draftReady, replyTo, updateDraft]);
+    if (draftReady && replyTo && !isPost) updateDraft({ replyTo });
+  }, [draftReady, isPost, replyTo, updateDraft]);
+  useEffect(() => {
+    if (isPost && draftReady) titleRef.current?.focus();
+  }, [draftReady, isPost]);
   function setText(value: string | ((previous: string) => string)) {
     saved.update({ text: typeof value === "function" ? value(text) : value, emojis: favorites,
       replyTo: activeReply });
@@ -2317,8 +2335,12 @@ const Composer = memo(function Composer({
     setSendError("");
     try {
       saved.update({ replyTo: activeReply, emojis: favorites });
-      await saved.send({ onUploadProgress: setUpload });
+      await saved.send({
+        onUploadProgress: setUpload,
+        ...(!isPost && { subject: undefined }),
+      });
       onClearReply();
+      onClosePost?.();
     } catch (err) {
       console.error("send failed", err);
       // A key can be rotated out from under an open composer, so name that case
@@ -2335,22 +2357,62 @@ const Composer = memo(function Composer({
     }
   }
 
+  const tools = (
+    <>
+    <input
+      ref={fileInputRef}
+      type="file"
+      multiple
+      hidden
+      onChange={(e) => {
+        setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
+        e.target.value = "";
+      }}
+    />
+    <button type="button" className={isPost ? "btn btn-ghost min-h-11" : "btn btn-ghost btn-sm btn-circle"} title="Attach files" disabled={!saved.ready || (isPost && sending)} onClick={() => fileInputRef.current?.click()}>
+      <Paperclip size={20} /> {isPost && "Attach files"}
+    </button>
+    <span className="relative inline-flex">
+      <button type="button" className={isPost ? "btn btn-ghost min-h-11" : "btn btn-ghost btn-sm btn-circle"} title="Emoji" disabled={!saved.ready || (isPost && sending)} onClick={() => setPickerOpen((v) => !v)}>
+        <SmilePlus size={20} /> {isPost && "Emoji"}
+      </button>
+      {pickerOpen && (
+        <EmojiPicker
+          favorites={favorites}
+          align={isPost ? "left" : "right"}
+          direction="up"
+          onPick={(e) => insertEmoji(e)}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </span>
+    </>
+  );
+
   return (
-    <div className="px-4 pb-5 safe-bottombar shrink-0 max-sm:px-2">
-      {saved.error && <div role="alert" className="text-error text-sm">{saved.error}</div>}
-      {forum && <input
-        className="input input-bordered w-full mb-2"
-        aria-label="Post title"
-        placeholder={requireTitle ? "Post title (required)" : "Post title (optional)"}
-        required={requireTitle}
-        disabled={!saved.ready}
-        value={saved.value.subject ?? ""}
-        onChange={(event) => saved.update({ subject: event.target.value })}
-      />}
+    <form
+      className={isPost ? "flex-1 min-h-0 overflow-y-auto space-y-4 p-4 sm:p-6" : "px-4 pb-5 safe-bottombar shrink-0 max-sm:px-2"}
+      aria-label={isPost ? "New post" : "Send message"}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      {isPost && <h2 className="text-2xl font-semibold">New post</h2>}
+      {saved.error && <div role="alert" className="text-error">{saved.error}</div>}
+      {isPost && (
+        <label className="block space-y-2 font-medium">
+          <span>Title</span>
+          <input ref={titleRef} className="input w-full min-h-11 text-base"
+            required disabled={!saved.ready || sending}
+            value={saved.value.subject ?? ""}
+            onChange={(event) => saved.update({ subject: event.target.value })} />
+        </label>
+      )}
       {sendError && (
         <div className="flex justify-between items-center gap-2 bg-error/10 text-error rounded-t-lg px-4 py-1.5 text-[13px] -mb-1 max-sm:px-2">
           <span>{sendError}</span>
-          <button className="btn btn-ghost btn-xs btn-circle" onClick={() => setSendError("")}>
+          <button type="button" className="btn btn-ghost btn-xs btn-circle" onClick={() => setSendError("")}>
             <X size={14} />
           </button>
         </div>
@@ -2360,7 +2422,7 @@ const Composer = memo(function Composer({
           <span>
             Replying to <UserName pubkey={activeReply.author} />
           </span>
-          <button className="btn btn-ghost btn-sm btn-circle" onClick={() => {
+          <button type="button" className="btn btn-ghost btn-sm btn-circle" onClick={() => {
             saved.update({ replyTo: undefined });
             onClearReply();
           }}>
@@ -2377,7 +2439,9 @@ const Composer = memo(function Composer({
               title={f.name}
             >
               📎 {f.name}
-              <button className="text-base-content/60 hover:text-error inline-flex" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
+              <button type="button" className={isPost ? "btn btn-ghost min-h-11 min-w-11" : "text-base-content/60 hover:text-error inline-flex"}
+                aria-label={`Remove ${f.name}`} disabled={isPost && sending}
+                onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}>
                 <X size={12} />
               </button>
             </span>
@@ -2390,34 +2454,11 @@ const Composer = memo(function Composer({
           {status}
         </div>
       )}
-      <div className="relative flex items-center gap-1 bg-base-200 rounded-lg px-4 max-sm:px-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]);
-            e.target.value = "";
-          }}
-        />
-        <button className="btn btn-ghost btn-sm btn-circle" title="Attach files" disabled={!saved.ready} onClick={() => fileInputRef.current?.click()}>
-          <Paperclip size={20} />
-        </button>
-        <span className="relative inline-flex">
-          <button className="btn btn-ghost btn-sm btn-circle" title="Emoji" disabled={!saved.ready} onClick={() => setPickerOpen((v) => !v)}>
-            <SmilePlus size={20} />
-          </button>
-          {pickerOpen && (
-            <EmojiPicker
-              favorites={favorites}
-              align="right"
-              direction="up"
-              onPick={(e) => insertEmoji(e)}
-              onClose={() => setPickerOpen(false)}
-            />
-          )}
-        </span>
+      {isPost && <label htmlFor="forum-post-body" className="block font-medium">Body</label>}
+      <div className={isPost
+        ? "relative flex flex-wrap items-center gap-2 rounded-box border border-base-300 p-2"
+        : "relative flex items-center gap-1 bg-base-200 rounded-lg px-4 max-sm:px-2"}>
+        {!isPost && tools}
         {mentionOpen && (
           <ul
             className="absolute left-0 right-0 bottom-full mb-1.5 z-50 max-h-65 overflow-y-auto p-1.5 list-none bg-base-200 border border-base-300 rounded-box shadow-lg"
@@ -2453,10 +2494,11 @@ const Composer = memo(function Composer({
         )}
         <textarea
           ref={textareaRef}
-          disabled={!saved.ready}
-          rows={1}
-          className="composer-textarea flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"
-          placeholder={`Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
+          id={isPost ? "forum-post-body" : undefined}
+          disabled={!saved.ready || (isPost && sending)}
+          rows={isPost ? 8 : 1}
+          className={isPost ? "textarea w-full resize-y text-base" : "composer-textarea flex-1 min-w-0 bg-transparent border-0 outline-none resize-none py-3 max-h-50 leading-snug text-base-content"}
+          placeholder={isPost ? undefined : `Message ${channelPrivate ? "🔒" : "#"}${channelName ?? ""}`}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -2492,15 +2534,15 @@ const Composer = memo(function Composer({
                 return;
               }
             }
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (!isPost && e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
             }
           }}
         />
-        <button
+        {isPost && tools}
+        {!isPost && <button type="submit"
           className="btn btn-primary btn-sm max-[380px]:btn-square"
-          onClick={send}
           disabled={sending || missingTitle || (!text.trim() && files.length === 0)}
         >
           {sending ? (
@@ -2516,9 +2558,20 @@ const Composer = memo(function Composer({
               <span className="hidden max-[380px]:inline">Go</span>
             </>
           )}
-        </button>
+        </button>}
       </div>
-    </div>
+      {isPost && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn btn-ghost min-h-11 text-base" disabled={sending} onClick={onClosePost}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary min-h-11 text-base"
+            disabled={!saved.ready || sending || missingTitle || (!text.trim() && files.length === 0)}>
+            {sending ? "Publishing…" : "Publish post"}
+          </button>
+        </div>
+      )}
+    </form>
   );
 });
 

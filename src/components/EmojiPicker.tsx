@@ -52,6 +52,7 @@ export function EmojiPicker({
       <div className="grid grid-cols-6 gap-0.5">
         {DEFAULT_REACTIONS.map((e) => (
           <button
+            type="button"
             key={e}
             className="btn btn-ghost btn-sm p-0 h-auto min-h-0 aspect-square text-xl leading-none"
             onClick={() => pick(e)}
@@ -67,6 +68,7 @@ export function EmojiPicker({
           <div className="grid grid-cols-6 gap-0.5">
             {favorites.map((e) => (
               <button
+                type="button"
                 key={e.shortcode}
                 className="btn btn-ghost btn-sm p-0 h-auto min-h-0 aspect-square text-xl leading-none"
                 onClick={() => pick(e)}
