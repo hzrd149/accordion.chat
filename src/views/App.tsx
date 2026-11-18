@@ -23,6 +23,7 @@ import { messagesEnabled$ } from "../services/messages";
 import { InvitesView } from "./invites";
 import { DmView } from "./dm";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { SynchronizationView } from "./synchronization";
 import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/ClientStatus";
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
@@ -54,6 +55,7 @@ export function App() {
             <Route path="/invite/:naddr" element={<Shell />} />
             <Route path="/dm" element={<Shell />} />
             <Route path="/dm/:peerPubkey" element={<Shell />} />
+            <Route path="/sync" element={<Shell />} />
             <Route path="/invites" element={<Shell />} />
             <Route path="/settings" element={<Shell />} />
             <Route path="/settings/:page" element={<Shell />} />
@@ -110,6 +112,7 @@ function Shell() {
   // routes rendered in the main area (the community rail stays put), not
   // full-screen overlays.
   const { pathname } = useLocation();
+  const onSync = pathname === "/sync";
   const onInvites = pathname === "/invites";
   const dmRootMatch = useMatch("/dm");
   const dmPeerMatch = useMatch("/dm/:peerPubkey");
@@ -240,7 +243,10 @@ function Shell() {
           <Plus size={24} />
         </button>
         <div className="mt-auto shrink-0">
-          <ClientStatusRailIndicator />
+          <ClientStatusRailIndicator active={onSync} onClick={() => {
+            navigate("/sync");
+            setNavOpen(false);
+          }} />
         </div>
         {dmEnabled && <button
           className={`w-12 h-12 shrink-0 bg-base-200 flex items-center justify-center overflow-hidden transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
@@ -308,6 +314,8 @@ function Shell() {
           onOpenMobileNav={() => setNavOpen(true)}
           onCloseMobileNav={() => setNavOpen(false)}
         />
+      ) : onSync ? (
+        <SynchronizationView mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />} />
       ) : onInvites ? (
         <InvitesView mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />} />
       ) : onSettings ? (

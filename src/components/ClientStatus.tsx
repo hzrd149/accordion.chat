@@ -6,7 +6,7 @@
 //     rail icon.
 import { use$ } from "applesauce-react/hooks";
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import type { ConcordClientStatus, ConcordCommunityStatus } from "@applesauce/concord";
 import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
@@ -57,19 +57,26 @@ function StatusDot({ tone, spin, className = "" }: { tone: Tone; spin: boolean; 
   return <span className={`inline-block rounded-full ${DOT_BG[tone]} ${className}`} aria-hidden="true" />;
 }
 
-/** The whole-client status, as an always-visible dot with a hover tooltip. */
-export function ClientStatusRailIndicator() {
+/** Open the synchronization view from the community rail. */
+export function ClientStatusRailIndicator({ active, onClick }: { active: boolean; onClick: () => void }) {
   const client = useConcord();
   const status = use$(client.status$);
-  if (!status) return null;
-  const d = deriveClient(status);
+  const derived = status && deriveClient(status);
+
   return (
-    <div
-      className="w-12 h-6 shrink-0 flex items-center justify-center gap-1 text-base-content/60"
-      title={`${d.label} — ${d.detail}`}
+    <button
+      type="button"
+      className={`relative flex size-12 items-center justify-center transition-all hover:rounded-2xl hover:bg-primary hover:text-primary-content ${
+        active ? "rounded-2xl bg-primary text-primary-content" : "rounded-3xl bg-base-200 text-base-content/60"
+      }`}
+      aria-label="Synchronization"
+      aria-current={active ? "page" : undefined}
+      title={derived ? `Synchronization · ${derived.label} · ${derived.detail}` : "Synchronization"}
+      onClick={onClick}
     >
-      <StatusDot tone={d.tone} spin={d.spin} className="w-2.5 h-2.5" />
-    </div>
+      <RefreshCw size={20} className={derived?.spin ? "animate-spin" : undefined} aria-hidden="true" />
+      {derived && !derived.spin && <StatusDot tone={derived.tone} spin={false} className="absolute bottom-1.5 right-1.5 size-2 ring-2 ring-base-300" />}
+    </button>
   );
 }
 

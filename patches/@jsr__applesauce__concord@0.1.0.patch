@@ -1,0 +1,117 @@
+diff --git a/_dist/src/client/community.d.ts b/_dist/src/client/community.d.ts
+index 7c4d95b8923df29b3145d13a7469d340f51fc911..a43723a575e7f056aec4cd3b2ddeaf73940ff46c 100644
+--- a/_dist/src/client/community.d.ts
++++ b/_dist/src/client/community.d.ts
+@@ -1,3 +1,4 @@
++import type { ConcordPrivateChannelStatus } from "../types.js";
+ import { BehaviorSubject, type Observable } from "rxjs";
+ import { type Debugger, EventStore } from "applesauce-core";
+ import { type EventTemplate } from "applesauce-core/helpers/event";
+@@ -121,6 +122,10 @@ export type { ChannelView } from "./channels/channel-view.js";
+    *  community relay is down; UI reading "live" may be reading the local cache —
+    *  an accepted, documented consequence (D-07), not a defect. */ readonly connected$: Observable<boolean>;
+   /** A flat snapshot of the community's status, for UI to react to as one value. */ readonly status$: Observable<ConcordCommunityStatus>;
++  /** Status snapshots for the active private-channel engines, keyed by channel id. */
++  readonly privateChannelStatus$: Observable<ReadonlyMap<string, ConcordPrivateChannelStatus>>;
++  /** Relay URLs targeted by the community transport, including extra relays. */
++  readonly relays$: Observable<string[]>;
+   /** Every action that requires authority — metadata, channels, roles, members,
+    *  invites, refounding, dissolution — as one intent-shaped surface. This is the
+    *  community-management API; prefer it over the flat aliases the community keeps
+diff --git a/src/client/community.js b/src/client/community.js
+index 5e8d5ae7b84a992e1de4ed4a2f1699715e8c12bf..90c6c538ce9fef74231ac430b2492f4e02c4506f 100644
+--- a/src/client/community.js
++++ b/src/client/community.js
+@@ -7,7 +7,7 @@ var _computedKey;
+ // every piece of derived state comes from a model over a RumorStore. The engine
+ // only derives keys, routes decoded wraps into the right plane store, runs the
+ // epoch-atomic sync, and publishes.
+-import { BehaviorSubject, combineLatest, distinctUntilChanged, lastValueFrom, map, ReplaySubject, shareReplay, startWith, Subject, switchMap, takeUntil, timeout } from "rxjs";
++import { BehaviorSubject, combineLatest, distinctUntilChanged, lastValueFrom, map, of, ReplaySubject, shareReplay, startWith, Subject, switchMap, takeUntil, timeout } from "rxjs";
+ import { AsyncRumorStore, EventStore, mapEventsToTimeline, RumorStore } from "applesauce-core";
+ import { TimelineModel } from "applesauce-core/models";
+ import { finalizeEvent, getEventHash, verifyWrappedEvent } from "applesauce-core/helpers/event";
+@@ -200,6 +200,9 @@ _computedKey = Symbol.dispose;
+   /** Expired-Chat purge and the CORD-08 §4 timer change (CORD-08 §3). */ expiry;
+   /** planeKey ("control"|"guestbook"|"dissolved"|"rekey"|`channel:<id>`) → store. */ stores = new Map();
+   /** channelId → the sub-community engine for each private channel we hold a key for. */ privateChannels = new Map();
++  privateChannelsChanged$ = new BehaviorSubject(undefined);
++  privateChannelStatus$;
++  relays$;
+   stateSub;
+   authorityNotificationQueued = false;
+   liveSub;
+@@ -299,12 +302,27 @@ _computedKey = Symbol.dispose;
+       this.inviteLinks$ = slice((s)=>s.inviteLinks);
+       // `members` is rebuilt by every guestbook/presence fold, so compare by content.
+       this.members$ = this.state$.pipe(map((s)=>s.members), distinctUntilChanged(sameSet));
+-      // Reactive (D-08): switchMap over the extras holder's relays$ so a later
+-      // extraRelays emission re-derives connected$, rather than freezing at a
+-      // construction-time snapshot. Routes its merge through transport() (not
+-      // the switchMap's own emitted value) so it stays the class's one literal
+-      // merge point (D-04).
+-      this.connected$ = this.extras.relays$.pipe(switchMap(()=>connectedRelays$(this.pool, this.transport())));
++      this.privateChannelStatus$ = this.privateChannelsChanged$.pipe(
++        switchMap(() => {
++          const engines = [...this.privateChannels];
++          if (engines.length === 0) return of(new Map());
++          return combineLatest(engines.map(([id, engine]) => engine.status$.pipe(map((status) => [id, status]))))
++            .pipe(map((entries) => new Map(entries)));
++        }),
++        takeUntil(this.disposed$),
++        shareReplay({ bufferSize: 1, refCount: true }),
++      );
++      this.relays$ = combineLatest([
++        this.extras.relays$,
++        this.epoch$,
++        this.materialChanged$.pipe(startWith(undefined)),
++      ]).pipe(
++        map(() => this.transport()),
++        distinctUntilChanged((a, b) => a.length === b.length && a.every((relay, index) => relay === b[index])),
++        takeUntil(this.disposed$),
++        shareReplay({ bufferSize: 1, refCount: true }),
++      );
++      this.connected$ = this.relays$.pipe(switchMap((relays) => connectedRelays$(this.pool, relays)), takeUntil(this.disposed$));
+       this.status$ = combineLatest({
+         phase: this.phase$,
+         epoch: this.epoch$,
+@@ -704,6 +722,7 @@ _computedKey = Symbol.dispose;
+     this.rotation?.dispose();
+     for (const engine of this.privateChannels.values())engine.dispose();
+     this.privateChannels.clear();
++    this.privateChannelsChanged$.next();
+     this.state$.next({
+       ...this.state$.value,
+       dissolved: true
+@@ -730,6 +749,7 @@ _computedKey = Symbol.dispose;
+     this.diagnostics.complete();
+     for (const engine of this.privateChannels.values())engine.dispose();
+     this.privateChannels.clear();
++    this.privateChannelsChanged$.complete();
+     for (const store of this.stores.values())store.dispose();
+     this.stores.clear();
+   }
+@@ -1197,6 +1217,7 @@ _computedKey = Symbol.dispose;
+       if (live.has(id)) continue;
+       engine.dispose();
+       this.privateChannels.delete(id);
++      this.privateChannelsChanged$.next();
+     }
+   }
+   /**
+@@ -1282,6 +1303,7 @@ _computedKey = Symbol.dispose;
+       onChannelInput: (info, decoded)=>this.pinning.noteChannelInput(info, decoded)
+     });
+     this.privateChannels.set(channelKey.id, engine);
++    this.privateChannelsChanged$.next();
+     void engine.start();
+   }
+   /** Persist a rolled-forward channel key into `material.channels` (a channel Rekey). */ async persistChannelKey(channelKey) {
+@@ -1556,6 +1578,7 @@ _computedKey = Symbol.dispose;
+     if (engine) {
+       engine.dispose();
+       this.privateChannels.delete(channelId);
++      this.privateChannelsChanged$.next();
+     }
+     if (!hasChannelKey(this.material, channelId)) return;
+     const channels = this.material.channels.filter((c)=>c.id !== channelId);

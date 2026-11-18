@@ -15,13 +15,16 @@ overrides:
   applesauce-relay: 7.1.1
   applesauce-signers: 7.1.0
 
+patchedDependencies:
+  '@jsr/applesauce__concord@0.1.0': d9ac35837450ee841264da1ce143091fcdc70d531b3db3cf4589591c6664fe13
+
 importers:
 
   .:
     dependencies:
       '@applesauce/concord':
         specifier: jsr:0.1.0
-        version: '@jsr/applesauce__concord@0.1.0(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)'
+        version: '@jsr/applesauce__concord@0.1.0(patch_hash=d9ac35837450ee841264da1ce143091fcdc70d531b3db3cf4589591c6664fe13)(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)'
       '@libs/qrcode':
         specifier: jsr:^3.1.0
         version: '@jsr/libs__qrcode@3.1.0'
@@ -4177,7 +4180,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@jsr/applesauce__concord@0.1.0(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)':
+  '@jsr/applesauce__concord@0.1.0(patch_hash=d9ac35837450ee841264da1ce143091fcdc70d531b3db3cf4589591c6664fe13)(@capacitor/core@8.5.3)(nostr-wasm@0.1.0)(typescript@6.0.3)':
     dependencies:
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0

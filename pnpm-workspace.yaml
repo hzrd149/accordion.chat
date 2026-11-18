@@ -16,3 +16,6 @@ overrides:
   applesauce-react: 7.1.0
   applesauce-relay: 7.1.1
   applesauce-signers: 7.1.0
+
+patchedDependencies:
+  '@jsr/applesauce__concord@0.1.0': patches/@jsr__applesauce__concord@0.1.0.patch

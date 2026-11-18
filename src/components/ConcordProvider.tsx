@@ -11,6 +11,7 @@ import { createConcordUploader } from "../helpers/concord-uploader";
 import { createConcordStorage } from "../services/concord-storage";
 import { activeConcordAutomation } from "../services/concord-automation";
 import { observeSigner } from "../services/signer-activity";
+import { observeConcordSync } from "../services/concord-sync-activity";
 import { ConcordDiagnostics } from "./ConcordDiagnostics";
 
 export function ConcordProvider({ children }: { children: (client: ConcordClient) => ReactNode }) {
@@ -76,9 +77,11 @@ export function ConcordProvider({ children }: { children: (client: ConcordClient
     if (!session) return;
     const detachVoice = attachVoiceGc(session.client);
     const detachUserIndex = attachUserIndexGc(session.client);
+    const detachSyncActivity = observeConcordSync(session.client);
     const stopPurge = session.client.schedulePurge();
     return () => {
       stopPurge();
+      detachSyncActivity();
       detachVoice();
       detachUserIndex();
       session.client.dispose();
