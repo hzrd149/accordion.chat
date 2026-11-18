@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useMatch, useNavigate, useParams,
 import { AtSign, Hash, Inbox, Lock, LogOut, Menu, MessageSquare, Plus, Settings, UserPlus, Volume2, Wrench, X } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { logoutAccount, logouts$ } from "../services/logout";
-import { ConcordProvider } from "../components/ConcordProvider";
+import { ConcordBoundary } from "../components/ConcordBoundary";
 import { CallProvider } from "../components/voice/CallProvider";
 import { useCall } from "../components/voice/call-context";
 import { useConcord } from "../hooks/use-concord";
@@ -60,8 +60,7 @@ export function App() {
   );
   if (!account) return <Login />;
   return (
-    <ConcordProvider>
-      {() => (
+    <ConcordBoundary>
         <CallProvider>
           <Routes>
             <Route path="/" element={<Shell />} />
@@ -85,8 +84,7 @@ export function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </CallProvider>
-      )}
-    </ConcordProvider>
+    </ConcordBoundary>
   );
 }
 

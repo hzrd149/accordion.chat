@@ -1,13 +1,9 @@
-import { createContext, useContext } from "react";
+import { use$ } from "applesauce-react/hooks";
 import type { ConcordClient } from "@applesauce/concord";
-
-// The context + hook live in their own (component-free) module so `ConcordProvider.tsx`
-// can export only the `<ConcordProvider>` component — keeping React Fast Refresh
-// happy (react-refresh/only-export-components).
-export const ClientContext = createContext<ConcordClient | null>(null);
+import { concordClient$ } from "../services/concord";
 
 export function useConcord(): ConcordClient {
-  const c = useContext(ClientContext);
+  const c = use$(concordClient$);
   if (!c) throw new Error("ConcordClient not available");
   return c;
 }
