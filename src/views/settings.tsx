@@ -476,7 +476,8 @@ function AdvancedPage() {
       <h3 className="text-lg font-bold mb-1">Developer mode</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-4 max-w-[440px]">
         Adds a <strong>Developer tools</strong> button to the sidebar, plus raw message and community details for
-        troubleshooting.
+        troubleshooting. Enables nostr-idb console logs and database query timings, including rumor stores.
+        Show Verbose messages in your browser console to see debug logs.
       </p>
       <ToggleCard
         checked={devMode}
