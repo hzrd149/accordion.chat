@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
-import { Bug, DoorOpen, Hash, ImagePlus, Landmark, Lock, RefreshCw, Shield, Trash2, Users } from "lucide-react";
+import { Bug, DoorOpen, Hash, ImagePlus, Landmark, Lock, Network, RefreshCw, Shield, Trash2, Users } from "lucide-react";
 import { useNavigate } from "react-router";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
@@ -19,14 +19,16 @@ import { ConfirmModal } from "../components/modals";
 import { toastError, toastSuccess } from "../services/toasts";
 import { channelRoleId, channelRoster } from "../chat/channel-roles";
 import { CommunityDebugPage } from "../components/dev/CommunityDebug";
+import { CommunityNetworkPage } from "../components/CommunityNetwork";
 
-type PageId = "overview" | "roles" | "members" | "channels" | "advanced" | "debug";
+type PageId = "overview" | "roles" | "members" | "channels" | "network" | "advanced" | "debug";
 
 const PAGES: { id: PageId; label: string; icon: ReactNode; devOnly?: boolean }[] = [
   { id: "overview", label: "Overview", icon: <Landmark size={18} /> },
   { id: "roles", label: "Roles", icon: <Shield size={18} /> },
   { id: "members", label: "Members", icon: <Users size={18} /> },
   { id: "channels", label: "Channels", icon: <Hash size={18} /> },
+  { id: "network", label: "Network", icon: <Network size={18} /> },
   { id: "advanced", label: "Advanced", icon: <RefreshCw size={18} />, devOnly: true },
   { id: "debug", label: "Debug", icon: <Bug size={18} />, devOnly: true },
 ];
@@ -107,6 +109,7 @@ export function CommunitySettingsView({
           {page === "roles" && <RolesPage cid={cid} />}
           {page === "members" && <MembersPage cid={cid} />}
           {page === "channels" && <ChannelsPage cid={cid} />}
+          {page === "network" && <CommunityNetworkPage cid={cid} />}
           {page === "advanced" && <AdvancedPage cid={cid} />}
           {page === "debug" && <CommunityDebugPage cid={cid} />}
         </div>
@@ -159,7 +162,6 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
   const devMode = useDevMode();
   const [name, setName] = useState(() => metadata?.name ?? community?.material.name ?? "");
   const [description, setDescription] = useState(() => metadata?.description ?? "");
-  const [blossom, setBlossom] = useState(() => (metadata?.blossom_servers ?? []).join("\n"));
   const [busy, setBusy] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
 
@@ -175,12 +177,8 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
 
   async function save() {
     setBusy(true);
-    const blossom_servers = blossom
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
     try {
-      await community?.admin.editMetadata({ name: name.trim(), description: description.trim(), blossom_servers });
+      await community?.admin.editMetadata({ name: name.trim(), description: description.trim() });
       toastSuccess("Community settings saved");
     } catch (e) {
       // editMetadata asserts the 64-byte name / 10000-byte description caps on
@@ -213,18 +211,6 @@ function OverviewPage({ cid, isOwner, onClose }: { cid: string; isOwner: boolean
         <label className="label text-xs font-semibold uppercase opacity-70">Description</label>
         <textarea className="textarea textarea-bordered w-full" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
       </div>
-      {canManageMetadata && (
-        <div className="mb-4">
-          <label className="label text-xs font-semibold uppercase opacity-70">Media servers</label>
-          <textarea
-            className="textarea textarea-bordered w-full"
-            value={blossom}
-            onChange={(e) => setBlossom(e.target.value)}
-            rows={2}
-            placeholder={"https://blossom.example/\n(one per line — leave empty to use your own)"}
-          />
-        </div>
-      )}
       <div className="flex items-center gap-3.5 mt-5">
         <button className="btn btn-primary" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save changes"}
