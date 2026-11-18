@@ -29,15 +29,29 @@ function Favicon({ src }: { src?: string | null }) {
   );
 }
 
-function ServerSummary({ icon, name, about }: { icon?: string | null; name: string; about: string }) {
+function ServerSummary({ icon, name, about, href }: { icon?: string | null; name: string; about?: string; href?: string }) {
   return (
     <div className="flex flex-1 items-center gap-3 min-w-0">
       <Favicon src={icon} />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-sm truncate">{name}</div>
-        <div className="text-xs opacity-60 truncate" title={about}>
-          {about}
-        </div>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="link link-hover block font-medium text-sm truncate"
+            title={`Open ${name} in a new tab`}
+          >
+            {name}
+          </a>
+        ) : (
+          <div className="font-medium text-sm truncate">{name}</div>
+        )}
+        {about && (
+          <div className="text-xs opacity-60 truncate" title={about}>
+            {about}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -54,21 +68,26 @@ export function RelayInfo({ url }: { url: string }) {
   return <ServerSummary icon={icon} name={name} about={about} />;
 }
 
-/** HTTP server (e.g. Blossom) shown by hostname with the origin's favicon. */
+/** HTTP server (e.g. Blossom) shown by domain with the origin's favicon; the domain opens the server in a new tab. */
 export function HttpServerInfo({ url }: { url: string }) {
   const parsed = useMemo(() => {
     try {
-      return new URL(url);
+      const u = new URL(url);
+      return u.protocol === "https:" || u.protocol === "http:" ? u : null;
     } catch {
       return null;
     }
   }, [url]);
 
+  const name = parsed?.hostname ?? stripScheme(url);
+  const full = stripScheme(url);
   return (
     <ServerSummary
       icon={parsed ? new URL("/favicon.ico", parsed.origin).toString() : null}
-      name={parsed?.hostname ?? stripScheme(url)}
-      about={stripScheme(url)}
+      name={name}
+      // Only show the full address when it says more than the domain (a path or port).
+      about={full !== name ? full : undefined}
+      href={parsed?.href}
     />
   );
 }
