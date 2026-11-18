@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronRight, Lock } from "lucide-react";
+import { ArrowLeft, Check, Copy, Lock, Plus, Trash2 } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
 import { useConcord } from "../hooks/use-concord";
 import { useCommunity } from "../hooks/use-community";
@@ -368,6 +368,9 @@ export function CreateChannelModal({ cid, onClose }: { cid: string; onClose: () 
  * private CORD-05 Invite List (kind 13303), which the client's invite manager
  * owns — so links minted on another device show up here too, and revoking one
  * both tombstones the bundle and unregisters it from the community.
+ *
+ * Opens on the list of live links; the header's "New invite" button swaps the
+ * whole modal over to the create form, which returns to the list once minted.
  */
 export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void }) {
   const client = useConcord();
@@ -375,53 +378,21 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
   const live = use$(client.invites.live$) ?? NO_INVITES;
   const invites = live.filter((i) => i.communityId === cid);
   const canCreate = use$(() => community?.can$(PERM.CREATE_INVITE), [community]) ?? false;
+  const registered = use$(community?.inviteLinks$);
   const allChannels = use$(community?.channelViews$) ?? NO_CHANNELS;
-  // Only channels we hold a key for can be granted — the package throws on an id
-  // that isn't in our material, and we couldn't hand over a key we don't have.
-  // `accessible` is the package's own key-presence flag, and it re-emits on a key
-  // grant alone, so a channel we were just given shows up here without waiting
-  // for an unrelated control-plane fold.
-  const grantable = allChannels.filter((c) => c.private && c.accessible);
   const channelNames = new Map(allChannels.map((c) => [c.channel_id, c.name]));
-  const [label, setLabel] = useState("");
-  const [expiry, setExpiry] = useState<ExpiryKey>("never");
-  const [granted, setGranted] = useState<string[]>([]);
-  const [advanced, setAdvanced] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<"list" | "create">("list");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
   // Captured once: the expiry countdowns are rendered against a fixed "now" so
-  // render stays pure (see ExpiryBadge). Unix seconds, to match `expiresAt`.
+  // render stays pure (see ExpiryText). Unix seconds, to match `expiresAt`.
   const [now] = useState(() => unixNow());
 
-  function toggleChannel(id: string) {
-    setGranted((g) => (g.includes(id) ? g.filter((x) => x !== id) : [...g, id]));
-  }
-
-  async function create() {
-    setBusy(true);
-    setError("");
-    try {
-      const ttl = EXPIRY_OPTIONS.find((o) => o.key === expiry)?.seconds;
-      // Publishes the bundle, registers the link into the community (marking it
-      // link-joinable), and saves it to the private Invite List.
-      await client.invites.create(cid, {
-        base: window.location.origin,
-        label: label.trim() || undefined,
-        expiresAt: ttl ? unixNow() + ttl : undefined,
-        // Omitted when empty: a link grants no private channels unless asked.
-        channels: granted.length ? granted : undefined,
-      });
-      setLabel("");
-      setExpiry("never");
-      setGranted([]);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Links registered in the community by other members: we only see their
+  // link_signer coordinates (no URL or token), and can't revoke them.
+  const mine = new Set(invites.map((i) => i.signerPubkey));
+  const others = registered ? [...registered].filter((pk) => !mine.has(pk)).length : 0;
 
   async function revoke(token: string) {
     setRevoking(token);
@@ -441,20 +412,42 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
     setTimeout(() => setCopied((c) => (c === token ? null : c)), 1500);
   }
 
+  if (view === "create")
+    return (
+      <Modal onClose={onClose}>
+        <CreateInviteForm
+          cid={cid}
+          channels={allChannels}
+          onBack={() => setView("list")}
+          onCreated={() => setView("list")}
+        />
+      </Modal>
+    );
+
   return (
     <Modal onClose={onClose}>
-      <h2 className="text-xl font-bold mb-1">Invite people</h2>
-      <p className="opacity-70 mb-6">Anyone with a link can join.</p>
-      {error && <div className="alert alert-error mb-4">{error}</div>}
+      <div className="flex items-center gap-3 mb-1">
+        <h2 className="text-lg font-bold flex-1">Invite links</h2>
+        {canCreate && (
+          <button className="btn btn-primary btn-sm gap-1.5" onClick={() => setView("create")}>
+            <Plus size={16} />
+            New invite
+          </button>
+        )}
+      </div>
+      <p className="text-sm opacity-60 mb-4">
+        {canCreate
+          ? "Anyone with a link can join. Revoke a link to stop it working right away."
+          : "You need the Create Invites permission to create links."}
+      </p>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
 
       {invites.length === 0 ? (
-        <div className="rounded-box border border-dashed border-base-300 p-6 text-center mb-6">
-          <p className="opacity-70">No active invite links yet.</p>
-        </div>
+        <p className="py-8 text-center text-sm opacity-60">You have no active invite links for this community.</p>
       ) : (
-        <div className="flex flex-col gap-3 mb-6">
+        <ul className="-mx-2 max-h-[60vh] overflow-y-auto">
           {invites.map((invite) => (
-            <InviteCard
+            <InviteRow
               key={invite.token}
               invite={invite}
               channelNames={channelNames}
@@ -465,112 +458,157 @@ export function InviteModal({ cid, onClose }: { cid: string; onClose: () => void
               onRevoke={() => revoke(invite.token)}
             />
           ))}
-        </div>
+        </ul>
       )}
 
-      {canCreate ? (
-        <div className="rounded-box bg-base-200 border border-base-300 p-4">
-          <div className="flex gap-3 items-end flex-wrap">
-            <div className="flex-1 min-w-50">
-              <label className="label pb-1" htmlFor="invite-label">
-                Label <span className="opacity-60">(optional)</span>
-              </label>
-              <input
-                id="invite-label"
-                className="input input-bordered w-full"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="Reddit, Twitter…"
-                maxLength={64}
-              />
-            </div>
-            <button className="btn btn-primary" onClick={create} disabled={busy}>
-              {busy ? "Minting…" : "New link"}
-            </button>
-          </div>
-
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm gap-1.5 mt-3 -ml-2"
-            aria-expanded={advanced}
-            onClick={() => setAdvanced((a) => !a)}
-          >
-            <ChevronRight size={16} className={advanced ? "rotate-90 transition-transform" : "transition-transform"} />
-            Advanced options
-          </button>
-
-          {advanced && (
-            <div className="mt-2 pt-3 border-t border-base-300">
-              <label className="label pb-1 block" htmlFor="invite-expiry">
-                Expires after
-              </label>
-              <select
-                id="invite-expiry"
-                className="select select-bordered w-full max-w-xs"
-                value={expiry}
-                onChange={(e) => setExpiry(e.target.value as ExpiryKey)}
-              >
-                {EXPIRY_OPTIONS.map((o) => (
-                  <option key={o.key} value={o.key}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <p className="opacity-70 mt-2">
-                Expired links can't be used to join. Revoke a link to stop it working right away.
-              </p>
-
-              {grantable.length > 0 && (
-                <>
-                  <div className="flex items-center gap-2 mt-5 mb-1 flex-wrap">
-                    <span className="label p-0">Private channels to include</span>
-                    <div className="ml-auto flex gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs"
-                        onClick={() => setGranted(grantable.map((c) => c.channel_id))}
-                      >
-                        All
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-xs" onClick={() => setGranted([])}>
-                        None
-                      </button>
-                    </div>
-                  </div>
-                  <p className="opacity-70 mb-2">
-                    Anyone who uses the link can read the channels you tick, including messages sent before they
-                    joined. None are included by default.
-                  </p>
-                  {grantable.map((c) => (
-                    <label
-                      key={c.channel_id}
-                      className="flex items-center gap-2.5 py-1.5 cursor-pointer"
-                      htmlFor={`grant-${c.channel_id}`}
-                    >
-                      <input
-                        id={`grant-${c.channel_id}`}
-                        type="checkbox"
-                        className="checkbox checkbox-sm"
-                        checked={granted.includes(c.channel_id)}
-                        onChange={() => toggleChannel(c.channel_id)}
-                      />
-                      <Lock size={14} className="opacity-60" />
-                      <span>{c.name}</span>
-                    </label>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <p className="opacity-70">You need the Create Invites permission to create a link.</p>
+      {others > 0 && (
+        <p className="text-xs opacity-50 mt-3">
+          {plural(others, "more link")} created by other members {others === 1 ? "is" : "are"} active.
+        </p>
       )}
     </Modal>
   );
 }
 
-function InviteCard({
+function CreateInviteForm({
+  cid,
+  channels,
+  onBack,
+  onCreated,
+}: {
+  cid: string;
+  channels: ChannelView[];
+  onBack: () => void;
+  onCreated: () => void;
+}) {
+  const client = useConcord();
+  // Only channels we hold a key for can be granted — the package throws on an id
+  // that isn't in our material, and we couldn't hand over a key we don't have.
+  // `accessible` is the package's own key-presence flag, and it re-emits on a key
+  // grant alone, so a channel we were just given shows up here without waiting
+  // for an unrelated control-plane fold.
+  const grantable = channels.filter((c) => c.private && c.accessible);
+  const [label, setLabel] = useState("");
+  const [expiry, setExpiry] = useState<ExpiryKey>("never");
+  const [granted, setGranted] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function toggleChannel(id: string) {
+    setGranted((g) => (g.includes(id) ? g.filter((x) => x !== id) : [...g, id]));
+  }
+
+  async function create() {
+    setBusy(true);
+    setError("");
+    try {
+      const ttl = EXPIRY_OPTIONS.find((o) => o.key === expiry)?.seconds;
+      // Publishes the bundle, registers the link into the community (marking it
+      // link-joinable), and saves it to the private Invite List.
+      await client.invites.create(cid, {
+        base: window.location.origin,
+        label: label.trim() || undefined,
+        expiresAt: ttl ? unixNow() + ttl : undefined,
+        // Omitted when empty: a link grants no private channels unless asked.
+        channels: granted.length ? granted : undefined,
+      });
+      onCreated();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-5">
+        <button className="btn btn-ghost btn-sm btn-square -ml-2" aria-label="Back to invites" disabled={busy} onClick={onBack}>
+          <ArrowLeft size={18} />
+        </button>
+        <h2 className="text-lg font-bold">New invite</h2>
+      </div>
+      {error && <div className="alert alert-error text-sm mb-3">{error}</div>}
+
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="invite-label">
+          Label (optional)
+        </label>
+        <input
+          id="invite-label"
+          className="input input-bordered w-full"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Reddit, Twitter…"
+          maxLength={64}
+          autoFocus
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="label text-xs font-semibold uppercase opacity-70" htmlFor="invite-expiry">
+          Expires after
+        </label>
+        <select
+          id="invite-expiry"
+          className="select select-bordered w-full"
+          value={expiry}
+          onChange={(e) => setExpiry(e.target.value as ExpiryKey)}
+        >
+          {EXPIRY_OPTIONS.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {grantable.length > 0 && (
+        <div className="mb-2">
+          <div className="flex items-center">
+            <span className="label text-xs font-semibold uppercase opacity-70 flex-1">Private channels to include</span>
+            <button type="button" className="btn btn-ghost btn-xs" onClick={() => setGranted(grantable.map((c) => c.channel_id))}>
+              All
+            </button>
+            <button type="button" className="btn btn-ghost btn-xs" onClick={() => setGranted([])}>
+              None
+            </button>
+          </div>
+          <p className="text-xs opacity-60 mb-1">
+            Anyone who uses the link can read these channels, including messages sent before they joined.
+          </p>
+          {grantable.map((c) => (
+            <label
+              key={c.channel_id}
+              className="flex items-center gap-2.5 py-1.5 px-2 -mx-2 rounded-lg cursor-pointer hover:bg-base-200"
+              htmlFor={`grant-${c.channel_id}`}
+            >
+              <input
+                id={`grant-${c.channel_id}`}
+                type="checkbox"
+                className="checkbox checkbox-sm"
+                checked={granted.includes(c.channel_id)}
+                onChange={() => toggleChannel(c.channel_id)}
+              />
+              <Lock size={14} className="opacity-60" />
+              <span className="text-sm">{c.name}</span>
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div className="modal-action">
+        <button className="btn btn-ghost" disabled={busy} onClick={onBack}>
+          Cancel
+        </button>
+        <button className="btn btn-primary" onClick={create} disabled={busy}>
+          {busy ? "Creating…" : "Create invite"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function InviteRow({
   invite,
   channelNames,
   now,
@@ -588,46 +626,50 @@ function InviteCard({
   onRevoke: () => void;
 }) {
   return (
-    <div className="rounded-box bg-base-200 border border-base-300 p-4">
-      <div className="flex items-center gap-2.5 mb-2 flex-wrap">
-        <span className="font-semibold">{invite.label || "Untitled link"}</span>
-        <ExpiryBadge expiresAt={invite.expiresAt} now={now} />
-        {invite.channels?.length ? (
-          <span className="badge badge-warning gap-1">
-            <Lock size={12} />
-            Includes {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
-          </span>
-        ) : null}
-      </div>
-      <div className="font-mono truncate opacity-60 leading-relaxed mb-3" title={invite.url}>{invite.url}</div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="opacity-60">Created {new Date(invite.createdAt * 1000).toLocaleDateString()}</span>
-        <div className="ml-auto flex gap-2">
-          <button className="btn btn-sm" onClick={onCopy}>
-            {copied ? "Copied ✓" : "Copy"}
-          </button>
-          <button className="btn btn-sm btn-ghost text-error" disabled={revoking} onClick={onRevoke}>
-            {revoking ? "Revoking…" : "Revoke"}
-          </button>
+    <li className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-base-200">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium truncate">{invite.label || "Untitled link"}</div>
+        <div className="text-xs opacity-60 truncate">
+          <ExpiryText expiresAt={invite.expiresAt} now={now} />
+          {" · "}Created {new Date(invite.createdAt * 1000).toLocaleDateString()}
         </div>
+        {invite.channels?.length ? (
+          <div className="text-xs text-warning flex items-center gap-1 truncate">
+            <Lock size={11} className="shrink-0" />
+            Includes {invite.channels.map((id) => channelNames.get(id) ?? "a private channel").join(", ")}
+          </div>
+        ) : null}
+        <div className="font-mono text-xs truncate opacity-40" title={invite.url}>{invite.url}</div>
       </div>
-    </div>
+      <button className="btn btn-ghost btn-sm btn-square" title="Copy link" aria-label="Copy link" onClick={onCopy}>
+        {copied ? <Check size={16} className="text-success" /> : <Copy size={16} />}
+      </button>
+      <button
+        className="btn btn-ghost btn-sm btn-square text-error"
+        title="Revoke link"
+        aria-label="Revoke link"
+        disabled={revoking}
+        onClick={onRevoke}
+      >
+        {revoking ? <span className="loading loading-spinner loading-xs" /> : <Trash2 size={16} />}
+      </button>
+    </li>
   );
 }
 
 /** `now` is captured once by the modal rather than read here: reading the clock
  *  during render is impure, and the countdown has no reason to move mid-modal.
  *  Both `expiresAt` and `now` are unix seconds (CORD-05). */
-function ExpiryBadge({ expiresAt, now }: { expiresAt?: number; now: number }) {
-  if (!expiresAt) return <span className="badge badge-ghost">Never expires</span>;
+function ExpiryText({ expiresAt, now }: { expiresAt?: number; now: number }) {
+  if (!expiresAt) return <>Never expires</>;
   const left = expiresAt - now;
-  if (left <= 0) return <span className="badge badge-error">Expired</span>;
+  if (left <= 0) return <span className="text-error">Expired</span>;
   // Round, never ceil: a link minted seconds ago with a 7-day lifetime has a hair
   // over 7 days left, which ceil would advertise as 8.
   const hours = Math.round(left / 3_600);
   const label =
     hours < 24 ? plural(Math.max(1, hours), "hour") : plural(Math.round(hours / 24), "day");
-  return <span className="badge badge-ghost">Expires in {label}</span>;
+  return <>Expires in {label}</>;
 }
 
 function plural(n: number, unit: string): string {
