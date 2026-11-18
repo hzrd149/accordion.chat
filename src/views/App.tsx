@@ -67,6 +67,7 @@ import { ClientStatusRailIndicator, CommunityStatusDot } from "../components/Cli
 import { CommunitySettingsView } from "./community-settings";
 import { useDecryptedImage } from "../hooks/useDecryptedImage";
 import { MessageContent } from "../components/MessageContent";
+import { ForumPosts } from "../components/ForumPosts";
 import { ChannelPins } from "../components/ChannelPins";
 import { pinMessage } from "../helpers/pins";
 import { DirectInviteModal } from "../components/DirectInviteModal";
@@ -81,7 +82,7 @@ import type { ChatMessage } from "../chat/fold";
 import type { ChannelMetadata, Role, ConcordCommunity, ConcordChannelDraft, Media } from "@applesauce/concord";
 import { useChannelDraft } from "../hooks/use-channel-draft";
 import { MissingChannelKeyError, PERM } from "@applesauce/concord";
-import { hasChannelKey } from "@applesauce/concord/helpers";
+import { channelViewMode, displaySubject, getSubject, hasChannelKey } from "@applesauce/concord/helpers";
 import { kinds } from "nostr-tools";
 import { distinctUntilChanged, map } from "rxjs";
 
@@ -418,6 +419,7 @@ function Shell() {
             />
           ) : selectedChannel ? (
             <ChatView
+              key={`${activeCommunity.material.community_id}:${selectedChannel}`}
               cid={activeCommunity.material.community_id}
               channelId={selectedChannel}
               mobileNav={<MobileNavButton onClick={() => setNavOpen(true)} />}
@@ -1014,6 +1016,10 @@ function ChatView({
   const channel = channels.find((c) => c.channel_id === channelId);
   const [searchParams] = useSearchParams();
   const jumpTargetId = searchParams.get("msg");
+  const isForum = channelViewMode(channel) === "forum";
+  const [viewChoice, setViewChoice] = useState<{ jumpTargetId: string | null; timeline: boolean }>();
+  const showTimeline = !isForum || (viewChoice?.jumpTargetId === jumpTargetId ? viewChoice.timeline : Boolean(jumpTargetId));
+  const pendingJump = useRef<string | null>(null);
   const [replyTo, setReplyTo] = useState<ReplyTarget | null>(null);
   const [directInviteOpen, setDirectInviteOpen] = useState(false);
   const [privateDebugOpen, setPrivateDebugOpen] = useState(false);
@@ -1026,7 +1032,7 @@ function ChatView({
   const newestMs = messages.length ? messages[messages.length - 1].ms : 0;
   const dividerId = useNewMessagesDivider(pubkey, cid, channelId, messages);
   const [atBottom, setAtBottom] = useState(true);
-  useMarkRead(pubkey, cid, channelId, newestMs, atBottom);
+  useMarkRead(pubkey, cid, channelId, newestMs, !showTimeline || atBottom);
 
   // Public channels are readable by every member; a private one only if we hold
   // its key. `hasChannelKey` is the package's own check against material — the
@@ -1055,44 +1061,30 @@ function ChatView({
     const onScroll = () => setAtBottom(-el.scrollTop < BOTTOM_THRESHOLD_PX);
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [showTimeline]);
 
   // The list is column-reverse, so entering a channel already lands on the
   // newest message and stays there as messages arrive — no effect needed. Only
   // the unread divider (or a deep-linked `?msg=` target) has to be scrolled to.
-  const positionedFor = useRef("");
+  const positionedFor = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || positionedFor.current === channelId) return;
-    // Wait for history: a channel's rumors hydrate from IndexedDB and stream
-    // in from relays, so the first render is routinely empty.
-    if (messages.length === 0) return;
-    positionedFor.current = channelId;
-    // A deep-linked message (from the Mentions view) takes priority over the
-    // unread divider: scroll it into view, centered.
-    if (jumpTargetId) {
-      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(jumpTargetId)}"]`);
-      if (target) {
-        target.scrollIntoView({ block: "center" });
-        target.focus({ preventScroll: true });
-        return;
-      }
+    if (!el || messages.length === 0) return;
+    const targetId = pendingJump.current ?? jumpTargetId;
+    const positionKey = targetId ?? "";
+    if (!pendingJump.current && positionedFor.current === positionKey) return;
+    if (targetId) {
+      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(targetId)}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: "center" });
+      target.focus({ preventScroll: true });
+      pendingJump.current = null;
+    } else if (dividerId) {
+      const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`);
+      if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
     }
-    if (!dividerId) return;
-    const target = el.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(dividerId)}"]`);
-    // Land on the divider with a little history above it for context, rather
-    // than flush against the top edge.
-    if (target) el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top - 64;
-  }, [channelId, messages, dividerId, jumpTargetId]);
-
-  // Switching channels clears the shared reply target (the composer resets its
-  // own draft via its `key`). Done during render — the documented alternative to
-  // a setState-in-effect — so it applies before the children paint.
-  const [prevChannel, setPrevChannel] = useState(channelId);
-  if (channelId !== prevChannel) {
-    setPrevChannel(channelId);
-    setReplyTo(null);
-  }
+    positionedFor.current = jumpTargetId ?? "";
+  }, [messages, dividerId, jumpTargetId, showTimeline]);
 
   // Writing needs the channel's key as well as a live community: every channel
   // write path now throws MissingChannelKeyError for a private channel we can't
@@ -1102,9 +1094,14 @@ function ChatView({
   const jumpToMessage = useCallback((id: string) => {
     const scrollEl = scrollRef.current;
     const target = scrollEl?.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(id)}"]`);
-    target?.scrollIntoView({ block: "center", behavior: "smooth" });
-    target?.focus({ preventScroll: true });
-  }, []);
+    if (target) {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.focus({ preventScroll: true });
+    } else if (!scrollEl) {
+      setViewChoice({ jumpTargetId, timeline: true });
+      pendingJump.current = id;
+    }
+  }, [jumpTargetId]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-base-100 relative">
@@ -1160,29 +1157,42 @@ function ChatView({
       )}
       {channel && <VoiceCallPanel cid={cid} channelId={channelId} name={channel.name} />}
       {community && <ChannelPins key={channelId} community={community} channelId={channelId} onJump={jumpToMessage} />}
-      <MessageList
-        ref={scrollRef}
-        messages={messages}
-        channelName={channel?.name}
-        ownerPubkey={community?.material.owner ?? ""}
-        myPubkey={pubkey}
-        canWrite={canWrite}
-        community={community}
-        channelId={channelId}
-        dividerId={dividerId}
-        favorites={favorites}
-        quickReactions={quickReactions}
-        onReply={setReplyTo}
-        onJumpToMessage={jumpToMessage}
-        onThread={(m) => onOpenThread(m.id)}
-      />
+      {isForum && channelAccessible && (
+        <div role="group" aria-label="Channel view" className="flex gap-1 border-b border-base-300 px-4 py-2">
+          <button type="button" className={`btn btn-sm ${!showTimeline ? "btn-active" : "btn-ghost"}`}
+            aria-pressed={!showTimeline} onClick={() => setViewChoice({ jumpTargetId, timeline: false })}>Posts</button>
+          <button type="button" className={`btn btn-sm ${showTimeline ? "btn-active" : "btn-ghost"}`}
+            aria-pressed={showTimeline} onClick={() => setViewChoice({ jumpTargetId, timeline: true })}>Timeline</button>
+        </div>
+      )}
+      {isForum && channelAccessible && !showTimeline ? (
+        <ForumPosts messages={messages} onOpenThread={onOpenThread} />
+      ) : (
+        <MessageList
+          ref={scrollRef}
+          messages={messages}
+          channelName={channel?.name}
+          ownerPubkey={community?.material.owner ?? ""}
+          myPubkey={pubkey}
+          canWrite={canWrite}
+          community={community}
+          channelId={channelId}
+          dividerId={dividerId}
+          favorites={favorites}
+          quickReactions={quickReactions}
+          onReply={setReplyTo}
+          onJumpToMessage={jumpToMessage}
+          onThread={(m) => onOpenThread(m.id)}
+        />
+      )}
       {canWrite && community?.getChannel(channelId) && (
         <Composer
           key={`${pubkey}:${cid}:${channelId}`}
           draft={community.getChannel(channelId)!.draft()}
           channelName={channel?.name}
           channelPrivate={Boolean(channel?.private)}
-          forum={channel?.view === "forum"}
+          forum={isForum}
+          requireTitle={isForum && !showTimeline}
           favorites={favorites}
           community={community}
           replyTo={replyTo}
@@ -1446,6 +1456,7 @@ const Message = memo(function Message({
   /** Developer mode: exposes the per-message "View raw" debug dialog. */
   devMode: boolean;
 }) {
+  const subject = getSubject(m.raw);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1571,9 +1582,7 @@ const Message = memo(function Message({
           <div className="text-base-content/60 italic">(message deleted)</div>
         ) : (
           <>
-            {m.raw.tags.find((tag) => tag[0] === "subject")?.[1] && (
-              <h3 className="font-semibold">{m.raw.tags.find((tag) => tag[0] === "subject")?.[1]}</h3>
-            )}
+            {subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
             <MessageContent text={m.edited ?? m.content} attachments={m.attachments} emojiTags={m.emojiTags} />
             {m.edited && <span className="text-[11px] text-base-content/60"> (edited)</span>}
           </>
@@ -1959,6 +1968,7 @@ function ThreadView({
 }) {
   const community = useCommunity(cid);
   const comments = useThread(community, channelId, root.id);
+  const subject = getSubject(root.raw);
   const [replyParent, setReplyParent] = useState<{ id: string; author: string; kind: number } | null>(null);
   const byId = useMemo(() => new Map(comments.map((c) => [c.id, c])), [comments]);
   // No explicit target means replying to the thread root itself.
@@ -1995,7 +2005,10 @@ function ThreadView({
               {root.deleted ? (
                 <div className="text-base-content/60 italic">(message deleted)</div>
               ) : (
-                <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
+                <>
+                  {subject !== undefined && <h3 className="break-words font-semibold">{displaySubject(subject)}</h3>}
+                  <MessageContent text={root.edited ?? root.content} attachments={root.attachments} emojiTags={root.emojiTags} />
+                </>
               )}
             </div>
           </div>
@@ -2192,6 +2205,7 @@ const Composer = memo(function Composer({
   channelName,
   channelPrivate,
   forum,
+  requireTitle,
   favorites,
   community,
   replyTo,
@@ -2201,6 +2215,7 @@ const Composer = memo(function Composer({
   channelName: string | undefined;
   channelPrivate: boolean;
   forum: boolean;
+  requireTitle: boolean;
   favorites: Emoji[];
   community: ConcordCommunity;
   replyTo: ReplyTarget | null;
@@ -2210,6 +2225,7 @@ const Composer = memo(function Composer({
   const text = saved.value.text;
   const files = saved.value.files ?? [];
   const activeReply = replyTo ?? saved.value.replyTo;
+  const missingTitle = requireTitle && !saved.value.subject?.trim();
   const { ready: draftReady, update: updateDraft } = saved;
   useEffect(() => {
     if (draftReady && replyTo) updateDraft({ replyTo });
@@ -2293,7 +2309,7 @@ const Composer = memo(function Composer({
 
   async function send() {
     const value = text.trim();
-    if (sending || !saved.ready) return;
+    if (sending || !saved.ready || missingTitle) return;
     if (!value && files.length === 0) return;
     setMention(null);
     setSending(true);
@@ -2325,7 +2341,8 @@ const Composer = memo(function Composer({
       {forum && <input
         className="input input-bordered w-full mb-2"
         aria-label="Post title"
-        placeholder="Post title"
+        placeholder={requireTitle ? "Post title (required)" : "Post title (optional)"}
+        required={requireTitle}
         disabled={!saved.ready}
         value={saved.value.subject ?? ""}
         onChange={(event) => saved.update({ subject: event.target.value })}
@@ -2484,7 +2501,7 @@ const Composer = memo(function Composer({
         <button
           className="btn btn-primary btn-sm max-[380px]:btn-square"
           onClick={send}
-          disabled={sending || (!text.trim() && files.length === 0)}
+          disabled={sending || missingTitle || (!text.trim() && files.length === 0)}
         >
           {sending ? (
             // The line above the input carries the phase; keep the label steady so
