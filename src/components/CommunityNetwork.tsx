@@ -8,7 +8,7 @@ import { PERM } from "@applesauce/concord";
 import { STOCK_RELAYS } from "@applesauce/concord/helpers";
 import { useCommunity } from "../hooks/use-community";
 import { pool } from "../nostr";
-import { dedupeServers, DEFAULT_BLOSSOM_SERVERS } from "../helpers/blossom";
+import { dedupeServers } from "../helpers/blossom";
 import { toastError, toastSuccess } from "../services/toasts";
 
 /** CORD-02 §6: readers use only the first 5 distinct relays of a community's list. */
@@ -115,20 +115,18 @@ export function CommunityNetworkPage({ cid }: { cid: string }) {
     <>
       <h2 className="text-2xl font-bold mb-1">Network</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
-        Where this community's encrypted messages and media are stored. Every member reads and writes through these servers.
-        {!canEdit && !dissolved && " You need the Manage Community permission to change them."}
+        Where this community's messages and media are stored.
       </p>
 
       <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-6 mb-1">Relays</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-3">
-        Members publish and sync every message, role and channel through these relays. Use stable relays that serve
-        gift wraps by author; up to {MAX_RELAYS} are used, in order.
+        Up to {MAX_RELAYS} relays, in order of preference.
       </p>
       <UrlList
         urls={relays}
         editable={canEdit}
         limit={MAX_RELAYS}
-        empty="No relays listed — members fall back to the default relays."
+        empty="No relays. Default relays are used."
         renderRow={(url) => <RelayRow url={url} active={activeSet.has(relayKey(url))} />}
         onChange={setRelayDraft}
       />
@@ -142,27 +140,23 @@ export function CommunityNetworkPage({ cid }: { cid: string }) {
       )}
       {relays.length > MAX_RELAYS && (
         <div className="alert alert-warning text-sm mt-3" role="status">
-          Only the first {MAX_RELAYS} relays are used. Remove or reorder the rest.
+          Only the first {MAX_RELAYS} relays are used.
         </div>
       )}
       {inUseDiffers && relayDraft === null && (
         <div className="alert text-sm mt-3" role="status">
-          <div>
-            <p className="font-semibold">This device is still connected through the relays it joined with</p>
-            <p className="font-mono text-xs opacity-70 break-all">{activeRelays.join(", ")}</p>
-          </div>
+          <span>This device is still using its original relays.</span>
         </div>
       )}
 
       <h3 className="text-sm uppercase tracking-wide opacity-70 font-semibold mt-8 mb-1">Media servers</h3>
       <p className="text-sm opacity-70 leading-relaxed mb-3">
-        Blossom servers that store the community's encrypted images and attachments. Files are encrypted before
-        upload, so servers never see their contents. With none listed, members upload to their own media servers.
+        Blossom servers for encrypted images and attachments.
       </p>
       <UrlList
         urls={servers}
         editable={canEdit}
-        empty={`None listed — members use their own servers, or ${DEFAULT_BLOSSOM_SERVERS.map((s) => new URL(s).host).join(" and ")}.`}
+        empty="No servers. Members use their own."
         renderRow={(url) => <ServerRow url={url} />}
         onChange={setServerDraft}
       />
@@ -301,7 +295,7 @@ function RelayRow({ url, active }: { url: string; active: boolean }) {
       {active ? (
         <span className={`badge badge-sm shrink-0 ${connected ? "badge-success" : "badge-ghost"}`}>{connected ? "Connected" : "Offline"}</span>
       ) : (
-        <span className="badge badge-sm badge-ghost shrink-0" title="Listed in the community, but this device doesn't use it yet">Not in use</span>
+        <span className="badge badge-sm badge-ghost shrink-0" title="Not used by this device yet">Not in use</span>
       )}
     </div>
   );
