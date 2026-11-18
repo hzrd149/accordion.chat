@@ -94,7 +94,9 @@ export const ChannelTimeline = memo(function ChannelTimeline({
     getItemKey,
     estimateSize: (index) => cache.get(rows[index], width) ??
       (rows[index].message.attachments.length ? 300 : rows[index].showHeader ? 72 : 36),
-    overscan: 8,
+    // Mount a render-ahead buffer in both directions so attachment downloads
+    // and decryption start before a message reaches the viewport.
+    overscan: 16,
     anchorTo: "end",
     followOnAppend: true,
     scrollEndThreshold: 80,

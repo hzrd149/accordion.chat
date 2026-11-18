@@ -37,7 +37,7 @@ beforeEach(() => {
   });
   HTMLElement.prototype.scrollTo = function (options) {
     if (typeof options === "object") this.scrollTop = options.top ?? 0;
-    this.dispatchEvent(new Event("scroll"));
+    queueMicrotask(() => this.dispatchEvent(new Event("scroll")));
   };
 });
 
@@ -115,6 +115,16 @@ it("mounts a bounded window of a long history and jumps to an unmounted message"
     expect(onAtBottomChange).toHaveBeenCalledTimes(bottomNotifications);
     await act(async () => { expect(ref.current!.scrollToMessage("m5000")).toBe(true); });
     expect(host.querySelector('[data-msg-id="m5000"]')).not.toBeNull();
+    // Rows mount early enough for useAttachmentSources to start loading media,
+    // in both scroll directions, rather than waiting until they enter view.
+    const element = scroll as HTMLElement;
+    const mounted = [...host.querySelectorAll<HTMLElement>("[data-index]")];
+    const visible = mounted.filter((row) => {
+      const top = Number.parseFloat(row.style.top);
+      return top + row.offsetHeight > element.scrollTop && top < element.scrollTop + element.clientHeight;
+    });
+    expect(Number(visible[0].dataset.index) - Number(mounted[0].dataset.index)).toBeGreaterThanOrEqual(16);
+    expect(Number(mounted.at(-1)!.dataset.index) - Number(visible.at(-1)!.dataset.index)).toBeGreaterThanOrEqual(16);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(false);
     expect(ref.current!.scrollToMessage("missing")).toBe(false);
     expect(host.querySelectorAll("[data-msg-id]").length).toBeLessThan(60);
