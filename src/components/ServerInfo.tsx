@@ -29,9 +29,15 @@ function Favicon({ src }: { src?: string | null }) {
   );
 }
 
-function ServerSummary({ icon, name, about, href }: { icon?: string | null; name: string; about?: string; href?: string }) {
+function ServerSummary({ icon, name, about, href, address }: {
+  icon?: string | null;
+  name: string;
+  about?: string;
+  href?: string;
+  address?: string;
+}) {
   return (
-    <div className="flex flex-1 items-center gap-3 min-w-0">
+    <div className="flex flex-1 items-center gap-3 min-w-0" title={address}>
       <Favicon src={icon} />
       <div className="min-w-0 flex-1">
         {href ? (
@@ -45,7 +51,7 @@ function ServerSummary({ icon, name, about, href }: { icon?: string | null; name
             {name}
           </a>
         ) : (
-          <div className="font-medium text-sm truncate">{name}</div>
+          <div className={`font-medium truncate ${address ? "text-base" : "text-sm"}`}>{name}</div>
         )}
         {about && (
           <div className="text-xs opacity-60 truncate" title={about}>
@@ -57,15 +63,21 @@ function ServerSummary({ icon, name, about, href }: { icon?: string | null; name
   );
 }
 
-/** Relay name, one-line NIP-11 description and icon. Fetches only the HTTP information document. */
-export function RelayInfo({ url }: { url: string }) {
-  const relay = useMemo(() => pool.relay(url), [url]);
-  const name = use$(() => relay.name$, [relay]) ?? stripScheme(url);
-  const icon = use$(() => relay.icon$, [relay]);
-  const info = use$(() => relay.information$, [relay]);
-  const about = info?.description?.replace(/\s+/g, " ").trim() || stripScheme(url);
+/** Relay identity from the cached NIP-11 information document. */
+export function RelayInfo({ url, identityOnly = false }: { url: string; identityOnly?: boolean }) {
+  const relay = useMemo(() => {
+    try {
+      return pool.relay(url);
+    } catch {
+      return undefined;
+    }
+  }, [url]);
+  const info = use$(relay?.information$);
+  const icon = use$(relay?.icon$);
+  const name = info?.name?.trim() || (identityOnly && relay ? new URL(relay.url).hostname : stripScheme(url));
+  const about = identityOnly ? undefined : info?.description?.replace(/\s+/g, " ").trim() || stripScheme(url);
 
-  return <ServerSummary icon={icon} name={name} about={about} />;
+  return <ServerSummary icon={icon} name={name} about={about} address={identityOnly ? url : undefined} />;
 }
 
 /** HTTP server (e.g. Blossom) shown by domain with the origin's favicon; the domain opens the server in a new tab. */

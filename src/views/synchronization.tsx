@@ -4,6 +4,7 @@ import { use$ } from "applesauce-react/hooks";
 import { Activity, Inbox, Loader2, Lock, Radio } from "lucide-react";
 import type { ReactNode } from "react";
 import { distinctUntilChanged, map } from "rxjs";
+import { RelayInfo } from "../components/ServerInfo";
 import { useCommunity } from "../hooks/use-community";
 import { useConcord } from "../hooks/use-concord";
 import { pool } from "../nostr";
@@ -61,8 +62,8 @@ function Relays({ urls }: { urls: string[] }) {
         } catch {
           // Keep invalid relay targets visible as disconnected.
         }
-        return <li key={url} className="flex items-start justify-between gap-3">
-          <span className="font-mono text-base wrap-anywhere">{url}</span>
+        return <li key={url} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <RelayInfo url={url} identityOnly />
           <span className={`badge badge-soft h-auto shrink-0 py-1 text-base ${connected ? "badge-success" : "badge-ghost"}`}>
             {connected ? "Connected" : "Disconnected"}
           </span>
