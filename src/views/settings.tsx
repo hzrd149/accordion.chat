@@ -31,6 +31,7 @@ import {
 } from "../services/open-ranking";
 import { useOpenRankingProvider } from "../hooks/use-open-ranking-provider";
 import { toast, toastError, toastSuccess } from "../services/toasts";
+import { DmClientStatus } from "./dm/DmClientStatus";
 
 const LOOKUP_RELAY_LIST_KIND = 10086;
 
@@ -42,7 +43,7 @@ const PAGES: { id: PageId; label: string; icon: ReactNode; group?: string }[] = 
   { id: "profile", label: "Profile", icon: <UserIcon size={18} /> },
   { id: "appearance", label: "Appearance", icon: <SunMoon size={18} /> },
   { id: "relays", label: "Relays", icon: <Mailbox size={18} />, group: "Network" },
-  { id: "dm", label: "DM Relays", icon: <Inbox size={18} /> },
+  { id: "dm", label: "Direct Messages", icon: <Inbox size={18} /> },
   { id: "blossom", label: "Media Servers", icon: <Flower2 size={18} /> },
   { id: "lookup", label: "Lookup Relays", icon: <Radar size={18} /> },
   { id: "discovery", label: "User Search", icon: <Search size={18} /> },
@@ -767,7 +768,7 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">DM Relays</h2>
+      <h2 className="text-2xl font-bold mb-1">Direct Messages</h2>
       <p className="text-sm opacity-70 leading-relaxed mb-5">
         Where people send your encrypted direct messages. List a couple of reliable relays so messages always reach
         you.
@@ -778,6 +779,7 @@ function DmRelaysPage({ signer, pubkey }: PageProps) {
         onAdd={(url) => runner.run(AddDirectMessageRelay, url)}
         onRemove={(url) => runner.run(RemoveDirectMessageRelay, url)}
       />
+      <DmClientStatus />
     </>
   );
 }

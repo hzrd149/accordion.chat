@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { use$ } from "applesauce-react/hooks";
 import type { WrappedMessagesClient } from "applesauce-extra/messages";
 import { useNavigate } from "react-router";
-import { Lock, MessageSquare } from "lucide-react";
+import { Loader2, MessageSquare, Settings } from "lucide-react";
 import { syncErrors } from "../../messages/status";
 import { DmConversationList } from "./DmConversationList";
 
@@ -24,19 +24,12 @@ export function DmSidebar({
   const status = use$(client.status$);
   const sync = use$(client.syncStatus$);
   const decryption = use$(client.decryptionState$);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const syncing = status === "loading";
-  const unlocking = busy || !!decryption?.pending;
-  const lockedCount = decryption?.locked ?? 0;
-  const failed = decryption?.failed ?? [];
-  const syncError = error || syncErrors(sync);
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true);
-    setError("");
-    try { await action(); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(false); }
-  }
+  // Diagnostics live on the settings page; only flag that something needs attention.
+  const attention = !!syncErrors(sync) || !!decryption?.failed.length || !!decryption?.locked;
+  const openSettings = () => {
+    navigate("/settings/dm");
+    onClose();
+  };
 
   return (
     <aside
@@ -48,40 +41,18 @@ export function DmSidebar({
         {mobileNav}
         <MessageSquare size={20} className="text-base-content/60" />
         <span className="font-semibold">DMs</span>
+        {status === "loading" && <Loader2 size={14} className="animate-spin opacity-50" aria-label="Syncing" />}
+        <div className="flex-1" />
+        <button className="btn btn-ghost btn-sm btn-circle relative" title="DM settings" onClick={openSettings}>
+          <Settings size={18} />
+          {attention && <span className="status status-warning absolute top-1 right-1" />}
+        </button>
       </div>
-      <div className="p-3 border-b border-base-300 text-xs opacity-70 flex flex-col gap-2 shrink-0">
-        <div>{relays?.length ? `${relays.length} DM relay${relays.length === 1 ? "" : "s"}` : "No DM relays configured"}</div>
-        <div>{syncing ? "Syncing…" : `${sync?.loaded ?? 0} received`} • {lockedCount} locked</div>
-        {syncError && <div role="alert" className="text-error">{syncError}</div>}
-        {!!relays?.length && (
-          <button className="btn btn-ghost btn-xs" onClick={() => void run(() => client.loadHistory())} disabled={syncing || busy}>
-            {syncError ? "Retry sync" : "Refresh inbox"}
-          </button>
-        )}
-        {lockedCount > 0 && (
-          <button className="btn btn-primary btn-xs gap-1" onClick={() => void run(() => client.unlock())} disabled={unlocking}>
-            <Lock size={13} /> {unlocking ? "Unlocking..." : `Unlock all (${lockedCount})`}
-          </button>
-        )}
-        {failed.length > 0 && <details>
-          <summary>{failed.length} messages could not be decrypted</summary>
-          <div className="max-h-32 overflow-y-auto">
-            {failed.map((id) => <div key={id} className="flex items-center justify-between gap-2">
-              <span className="font-mono truncate">{id.slice(0, 12)}…</span>
-              <button className="btn btn-ghost btn-xs" disabled={unlocking} onClick={() => void run(async () => {
-                const envelope = client.eventStore.getEvent(id);
-                if (!envelope) throw new Error("Message envelope is no longer cached. Refresh the inbox first.");
-                await client.retryDecryption(envelope);
-              })}>Retry</button>
-            </div>)}
-          </div>
-        </details>}
-        {!relays?.length && (
-          <button className="btn btn-ghost btn-xs" onClick={() => navigate("/settings/dm")}>
-            Configure DM relays
-          </button>
-        )}
-      </div>
+      {relays && relays.length === 0 && (
+        <button className="m-2 mb-0 alert alert-warning alert-soft text-xs py-2 text-left" onClick={openSettings}>
+          Set up DM relays so people can message you.
+        </button>
+      )}
       <DmConversationList
         client={client}
         onClose={onClose}

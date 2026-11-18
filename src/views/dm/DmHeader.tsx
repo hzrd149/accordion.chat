@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Settings } from "lucide-react";
+import { Info } from "lucide-react";
 import { UserAvatar, UserName } from "../../components/User";
 
 export function DmHeader({
@@ -17,8 +17,8 @@ export function DmHeader({
       <UserAvatar pubkey={peer} className="w-8 h-8" />
       <div className="font-semibold truncate"><UserName pubkey={peer} /></div>
       <div className="flex-1" />
-      <button className="btn btn-ghost btn-sm btn-circle" title="DM settings" onClick={onToggleSettings}>
-        <Settings size={18} />
+      <button className="btn btn-ghost btn-sm btn-circle" title="Conversation details" onClick={onToggleSettings}>
+        <Info size={18} />
       </button>
     </div>
   );

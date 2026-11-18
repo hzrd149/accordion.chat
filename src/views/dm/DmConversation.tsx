@@ -61,8 +61,8 @@ export function DmConversation({ client, peer, mobileListButton }: { client: Wra
     <div className="flex-1 flex min-w-0 min-h-0 relative">
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <DmHeader peer={peer} mobileListButton={mobileListButton} onToggleSettings={() => setSettingsOpen((open) => !open)} />
-        <button className="btn btn-ghost btn-xs shrink-0" disabled={loadingHistory || since === 0} onClick={() => void loadOlder()}>{loadingHistory ? "Loading…" : "Load older messages"}</button>
-        <DmMessageList conversation={conversation} since={since} peer={peer} />
+        <DmMessageList conversation={conversation} since={since} peer={peer}
+          loadingOlder={loadingHistory} canLoadOlder={since > 0} onLoadOlder={() => void loadOlder()} />
         {discoveryError && <div role="alert" className="px-3 text-warning text-xs">{discoveryError} <button className="btn btn-ghost btn-xs" onClick={() => setDiscoveryAttempt((value) => value + 1)}>Check again</button></div>}
         <DmComposer conversation={conversation} peer={peer} sending={sending}
           retry={!!prepared} unavailable={!prepared && (!(availability && !(availability instanceof Error) && availability.canSend))}
