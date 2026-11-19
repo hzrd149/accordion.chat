@@ -50,8 +50,6 @@ import {
 import { CopyButton, DebugSection as Card, DebugTabs, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 import { ControlPlaneInspector } from "./ControlPlaneDebugger";
 import { MembershipDebug } from "./MembershipDebug";
-import { foldActivity, GUESTBOOK_KINDS, traceMembers } from "../../helpers/member-trace";
-import { useMemberActivityInputs } from "../../hooks/use-member-activity";
 
 const NO_SET: ReadonlySet<string> = new Set();
 const NO_GRANTS: ReadonlyMap<string, string[]> = new Map();
@@ -608,7 +606,6 @@ function RawCard({ material }: { material: JoinMaterial }) {
 function useReportInputs(cid: string) {
   const client = useConcord();
   const community = useCommunity(cid);
-  const activity = useMemberActivityInputs(cid);
   return {
     status: use$(() => community?.status$, [community]),
     memberships: use$(() => client.memberships$, [client]),
@@ -620,7 +617,6 @@ function useReportInputs(cid: string) {
     state: use$(() => community?.state$, [community]) as CommunityState | undefined,
     coverage: use$(() => community?.syncCoverage$, [community]),
     planeRelays: use$(() => community?.relays$, [community]),
-    activity,
     rumors: (use$(() => community?.controlStore.timeline([{ kinds: [CONTROL_KIND] }]), [community]) as Rumor[] | undefined) ?? [],
   };
 }
@@ -659,9 +655,7 @@ function buildReport(
         }
       : null,
     relay_audit: audit ? auditSnapshot(audit.audits, audit.relays, audit.checkedAt) : "not run (open Relay audit and press Check relays to include it)",
-    membership: r.state && r.activity
-      ? traceMembers(r.state, r.activity[0]?.rumors.filter((x) => GUESTBOOK_KINDS.has(x.kind)) ?? [], foldActivity(r.activity))
-      : membershipSnapshot(r.members, r.banlist, r.grants, r.roles),
+    membership: membershipSnapshot(r.members, r.banlist, r.grants, r.roles, r.state),
     private_channels: channelsSnapshot(r.views, material),
     diagnostics: { note: "captured only while the Debug page is open", entries: diagnosticsSnapshot(cid, log) },
     raw_material: material,

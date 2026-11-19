@@ -17,6 +17,7 @@ import type {
   RotationDiagnostic,
   Rumor,
 } from "@applesauce/concord";
+import { isCurrentStaff } from "@applesauce/concord/helpers";
 import { fingerprint, generationRows, stringify, type EpochAudit, type GenerationKeys } from "./concord-history";
 import { tagVal, vskLabel } from "./control-debug";
 
@@ -85,11 +86,22 @@ export function generationsSnapshot(material: JoinMaterial, keys: GenerationKeys
   }));
 }
 
-export function membershipSnapshot(members: ReadonlySet<string>, banlist: ReadonlySet<string>, grants: ReadonlyMap<string, string[]>, roles: Roles | undefined) {
+export function membershipSnapshot(
+  members: ReadonlySet<string>,
+  banlist: ReadonlySet<string>,
+  grants: ReadonlyMap<string, string[]>,
+  roles: Roles | undefined,
+  state?: CommunityState,
+) {
   const roleName = (id: string) => roles?.find((r) => r.role_id === id)?.name;
   return {
-    members: [...members].map((pubkey) => ({ pubkey, roles: (grants.get(pubkey) ?? []).map((id) => ({ id, name: roleName(id) })) })),
-    banlist: [...banlist],
+    members: [...members].map((pubkey) => ({
+      pubkey,
+      roles: (grants.get(pubkey) ?? []).map((id) => ({ id, name: roleName(id) })),
+      ...(state ? { current_staff: isCurrentStaff(state, pubkey) } : {}),
+    })),
+    banlist: [...banlist].map((pubkey) => ({ pubkey, banned_at: isoSec(state?.bannedAt?.get(pubkey)) })),
+    lifted_bans: state ? [...(state.bannedAt?.keys() ?? [])].filter((p) => !banlist.has(p)) : undefined,
     grants_without_membership: [...grants.keys()].filter((p) => !members.has(p)),
   };
 }
