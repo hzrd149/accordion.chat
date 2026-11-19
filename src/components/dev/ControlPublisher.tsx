@@ -332,7 +332,7 @@ function EditionForm({
         <button
           className="btn"
           title="ev = head + 1, ep = head hash"
-          onClick={() => onChange({ ev: String(head ? head.version + 1 : 1), ep: head?.hash ?? "" })}
+          onClick={() => onChange({ ev: String(BigInt(head?.version ?? 0) + 1n), ep: head?.hash ?? "" })}
         >
           Next after head
         </button>

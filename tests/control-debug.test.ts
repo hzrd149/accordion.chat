@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CommunityState, Rumor } from "@applesauce/concord";
 import { computeEditionHash } from "@applesauce/concord/helpers";
-import { CONTROL_TEMPLATES, editionRumor, entityHead } from "../src/helpers/control-debug";
+import { compareRumorEditions, CONTROL_TEMPLATES, editionRumor, entityHead } from "../src/helpers/control-debug";
 
 const OWNER = "a".repeat(64);
 const MEMBER = "b".repeat(64);
@@ -23,7 +23,7 @@ function state(): CommunityState {
   } as unknown as CommunityState;
 }
 
-function metadataEdition(version: number, content: string, prevHash?: string): Rumor {
+function metadataEdition(version: number | string, content: string, prevHash?: string): Rumor {
   const tags = [["vsk", "0"], ["eid", CID], ["ev", String(version)], ...(prevHash ? [["ep", prevHash]] : [])];
   return { id: String(version), kind: 3308, pubkey: OWNER, created_at: 0, content, tags } as Rumor;
 }
@@ -54,5 +54,38 @@ describe("control debug templates", () => {
     const fields = { vsk: 0, eid: CID, ev: "1", ep: "", vacMode: "auto" as const, vac: "", content: "{}" };
     expect(editionRumor(fields, state(), OWNER).tags.some((t) => t[0] === "vac")).toBe(false);
     expect(() => editionRumor(fields, state(), MEMBER)).toThrow(/Grant/);
+  });
+
+  it("selects and hashes large edition counters without rounding adjacent versions", () => {
+    const lower = metadataEdition("9007199254740992", '{"name":"Older"}');
+    const higher = metadataEdition("9007199254740993", '{"name":"Newer"}');
+    expect(compareRumorEditions(lower, higher)).toBe(-1);
+    const head = entityHead(state(), [lower, higher], CID);
+    expect(head?.version).toBe("9007199254740993");
+    expect(head?.hash).toBe(computeEditionHash({ vsk: 0, eid: CID, version: "9007199254740993", content: higher.content }));
+    const context = { state: state(), rumors: [lower, higher], self: OWNER, target: "" };
+    for (const [id, expected] of [
+      ["metadata", "9007199254740994"],
+      ["inv-version-skip", "9007199254741043"],
+      ["inv-downgrade", "9007199254740992"],
+    ]) {
+      const draft = CONTROL_TEMPLATES.find((template) => template.id === id)!.build(context);
+      expect(draft.mode).toBe("edition");
+      if (draft.mode === "edition") expect(draft.edition.ev).toBe(expected);
+    }
+  });
+
+  it("preserves exact counters from the SDK's verified head", () => {
+    const current = state();
+    current.controlVerification = {
+      heads: new Map([[CID, {
+        version: "18446744073709551614", hash: "hash", edition: { rumor: { content: "{}" } },
+      }]]),
+    } as unknown as CommunityState["controlVerification"];
+    const draft = CONTROL_TEMPLATES.find((template) => template.id === "metadata")!.build({
+      state: current, rumors: [], self: OWNER, target: "",
+    });
+    expect(entityHead(current, [], CID)?.version).toBe("18446744073709551614");
+    if (draft.mode === "edition") expect(draft.edition.ev).toBe("18446744073709551615");
   });
 });

@@ -19,7 +19,7 @@ import type { CommunityState, ConcordCommunity, ConcordPlaneSyncCoverage, Decode
 import { CONTROL_KIND } from "@applesauce/concord/helpers";
 import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
-import { decodePerms, tagVal, vskLabel } from "../../helpers/control-debug";
+import { compareRumorEditions, decodePerms, tagVal, vskLabel } from "../../helpers/control-debug";
 import { compareRoles, roleRank } from "../../helpers/roles";
 import { ControlPublisher } from "./ControlPublisher";
 import { UserLabel } from "../User";
@@ -506,7 +506,7 @@ function groupChains(rumors: Rumor[]): EntityChain[] {
     map.get(key)!.editions.push(r);
   }
   for (const chain of map.values()) {
-    chain.editions.sort((a, b) => Number(tagVal(a, "ev") ?? 0) - Number(tagVal(b, "ev") ?? 0));
+    chain.editions.sort(compareRumorEditions);
   }
   return [...map.values()].sort((a, b) => Number(a.vsk) - Number(b.vsk) || a.eid.localeCompare(b.eid));
 }

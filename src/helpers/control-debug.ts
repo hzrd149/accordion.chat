@@ -5,7 +5,7 @@
  */
 import { hexToBytes } from "@noble/hashes/utils.js";
 import { PERM, VSK } from "@applesauce/concord";
-import type { CommunityState, PermName, Rumor } from "@applesauce/concord";
+import type { CommunityState, EditionVersion, PermName, Rumor } from "@applesauce/concord";
 import {
   banlistLocator,
   computeEditionHash,
@@ -69,7 +69,7 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 // ---- heads -----------------------------------------------------------------
 
 export interface EntityHead {
-  version: number;
+  version: EditionVersion;
   hash: string;
   prevHash?: string;
   content: string;
@@ -77,12 +77,23 @@ export interface EntityHead {
   source: "verified" | "latest";
 }
 
+/** Debugger fallback for malformed/missing counters; never round a valid large counter. */
+export function rumorEditionVersion(rumor: Rumor): bigint {
+  const value = tagVal(rumor, "ev") ?? "0";
+  return /^[0-9]+$/.test(value) ? BigInt(value) : 0n;
+}
+
+export function compareRumorEditions(a: Rumor, b: Rumor): number {
+  const left = rumorEditionVersion(a), right = rumorEditionVersion(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /** The current head of an entity: the verified head when there is one, else the highest-version edition held. */
 export function entityHead(state: CommunityState, rumors: readonly Rumor[], eid: string): EntityHead | undefined {
   const verified = state.controlVerification?.heads.get(eid);
   if (verified) {
     return {
-      version: Number(verified.version),
+      version: verified.version,
       hash: verified.hash,
       prevHash: verified.prevHash,
       content: verified.edition.rumor.content,
@@ -92,10 +103,11 @@ export function entityHead(state: CommunityState, rumors: readonly Rumor[], eid:
   let best: Rumor | undefined;
   for (const r of rumors) {
     if (tagVal(r, "eid") !== eid) continue;
-    if (!best || Number(tagVal(r, "ev") ?? 0) > Number(tagVal(best, "ev") ?? 0)) best = r;
+    if (!best || compareRumorEditions(r, best) > 0) best = r;
   }
   if (!best) return undefined;
-  const version = Number(tagVal(best, "ev") ?? 0);
+  const counter = rumorEditionVersion(best);
+  const version = counter <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(counter) : counter.toString();
   const prevHash = tagVal(best, "ep");
   let hash = "";
   try {
@@ -228,7 +240,7 @@ function nextEdition(ctx: TemplateContext, vsk: number, eid: string, content: st
     edition: {
       vsk,
       eid,
-      ev: String(head ? head.version + 1 : 1),
+      ev: String(BigInt(head?.version ?? 0) + 1n),
       ep: head?.hash ?? "",
       vacMode: "auto",
       vac: "",
@@ -472,7 +484,7 @@ export const CONTROL_TEMPLATES: ControlTemplate[] = [
     hint: "Metadata at ev = head + 50.",
     build: (ctx) => {
       const draft = nextEdition(ctx, VSK.METADATA, ctx.state.material.community_id, pretty({ ...metadataContent(ctx), name: "Skipped" }));
-      if (draft.mode === "edition") draft.edition.ev = String(Number(draft.edition.ev) + 49);
+      if (draft.mode === "edition") draft.edition.ev = String(BigInt(draft.edition.ev) + 49n);
       return draft;
     },
   },
@@ -506,7 +518,7 @@ export const CONTROL_TEMPLATES: ControlTemplate[] = [
     build: (ctx) => {
       const head = entityHead(ctx.state, ctx.rumors, ctx.state.material.community_id);
       return nextEdition(ctx, VSK.METADATA, ctx.state.material.community_id, pretty({ ...metadataContent(ctx), name: "Downgrade" }), {
-        ev: String(Math.max(1, (head?.version ?? 2) - 1)),
+        ev: String(BigInt(head?.version ?? 2) > 1n ? BigInt(head?.version ?? 2) - 1n : 1n),
         ep: "",
       });
     },
