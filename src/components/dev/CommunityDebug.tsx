@@ -657,12 +657,8 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
 
   return (
     <>
-      <h2 className="text-2xl font-bold mb-1">Debug</h2>
-      <p className="opacity-70 leading-relaxed mb-4">
-        Technical state of this community: key generations, the control plane, rotations and their presence on relays. Everything is
-        read-only except the control plane's Publish tab.
-      </p>
-      <div className="mb-5">
+      {/* Flush with the settings pane: cancel its padding so the tab strip meets the top and side edges. */}
+      <div className="-mx-10 -mt-10 mb-6 px-6 border-b border-base-300 max-md:-mx-4 max-md:-mt-6 max-md:px-2">
         <DebugTabs tabs={tabs} value={tab} onChange={selectTab} />
       </div>
       {TABS.filter((t) => visited.has(t.id)).map((t) => (
