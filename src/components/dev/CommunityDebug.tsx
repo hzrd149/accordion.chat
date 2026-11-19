@@ -140,10 +140,6 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Gen
         </>
       }
     >
-      <p className="opacity-70">
-        Root epochs this device holds keys for, from local material (<code>held_roots</code> + current). Root keys are shown as sha256
-        fingerprints so devices can be compared without exposing them.
-      </p>
       <div className="overflow-x-auto">
         <table className="table text-base">
           <thead>
@@ -241,7 +237,7 @@ function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: Rotati
         <span className={`font-semibold ${rotation.complete && rotation.consistent ? "" : "text-error"}`}>Epoch {rotation.prevEpoch} → {rotation.newEpoch}</span>
         {rotation.complete ? <span className="badge badge-success">complete</span> : <span className="badge badge-error">incomplete</span>}
         {rotation.consistent ? <span className="badge badge-success badge-outline">consistent</span> : <span className="badge badge-error">inconsistent: {rotation.inconsistencies.join(", ")}</span>}
-        {isTip && <span className="badge badge-warning">not adopted by this device</span>}
+        {isTip && <span className="badge badge-warning">not adopted</span>}
         <Hex value={rotation.candidateId} />
       </div>
       <KV label="rotator">
@@ -281,7 +277,7 @@ function RotationCard({ rotation, relays, retiredAt, isTip }: { rotation: Rotati
       </KV>
       {rotation.notRekeyed.length > 0 && (
         <details>
-          <summary className="cursor-pointer text-warning">{rotation.notRekeyed.length} members not rekeyed (removed, or missed)</summary>
+          <summary className="cursor-pointer text-warning">{rotation.notRekeyed.length} not rekeyed</summary>
           <div className="pt-2"><UserList pubkeys={rotation.notRekeyed} /></div>
         </details>
       )}
@@ -374,48 +370,39 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
 
   return (
     <>
-      <div className="flex items-start gap-4 max-sm:flex-col">
-        <p className="flex-1 opacity-70 leading-relaxed">
-          Fetches each held epoch's control, guestbook and next-epoch rekey addresses from every community relay separately, then
-          checks each rotation for completeness and which members it delivered a key to. Members per epoch are folded from the
-          Guestbook and control authors only.
-        </p>
-        <div className="flex flex-col items-end gap-1 shrink-0 max-sm:items-start">
-          <button className="btn btn-primary btn-sm gap-1.5 w-36" disabled={busy} onClick={() => void run()}>
-            {busy ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={14} />}
-            Check relays
-          </button>
-          <span className="text-sm opacity-60 whitespace-nowrap">{status}</span>
-        </div>
+      <div className="flex items-center gap-3">
+        <button className="btn btn-primary btn-sm gap-1.5 w-36" disabled={busy} onClick={() => void run()}>
+          {busy ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={14} />}
+          Check relays
+        </button>
+        <span className="text-sm opacity-60 whitespace-nowrap">{status}</span>
       </div>
       {error && <div className="alert alert-error py-2">{error}</div>}
 
       {audits.length === 0 ? (
         <div className="border border-dashed border-base-300 rounded-box py-12 text-center opacity-60">
-          {busy ? "Waiting for the first epoch…" : `Check relays to audit ${relays.length} relays.`}
+          {busy ? "Waiting for the first epoch…" : `${relays.length} relays`}
         </div>
       ) : (
         <div className={`flex flex-col gap-6 transition-opacity ${busy && checkedAt ? "opacity-60" : ""}`}>
           <Card title="Presence" summary={`${audits.length} epochs × ${relays.length} relays`}>
             <PresenceMatrix audits={audits} relays={relays} />
-            {undecodable > 0 && <p className="text-warning">{undecodable} wraps at these addresses did not decode under the held keys.</p>}
+            {undecodable > 0 && <p className="text-warning">{undecodable} undecodable wraps.</p>}
           </Card>
 
           <Card title="Rotations" summary={`${rotationCount} found`}>
             {missingTransitions.map((a) => (
               <p key={a.epoch} className="text-error font-semibold">
-                No rekey events for epoch {a.epoch} → {a.epoch + 1} found on any relay. The rotation's evidence is gone (or was never
-                published here).
+                Epoch {a.epoch} → {a.epoch + 1}: no rekey events on any relay.
               </p>
             ))}
             {tip && tip.rotations.length > 0 && (
               <p className="text-warning font-semibold">
-                Rekey events exist at the current epoch's next address: a rotation to epoch {tip.epoch + 1} this device has not adopted.
-                Check the Diagnostics tab for a parked or rejected candidate.
+                Unadopted rotation to epoch {tip.epoch + 1} (see Diagnostics).
               </p>
             )}
             {audits.some((a) => a.rotations.length > 1) && (
-              <p className="text-warning">Several candidates for one transition: concurrent rotators raced (lowest key wins).</p>
+              <p className="text-warning">Competing candidates for one transition (lowest key wins).</p>
             )}
             {malformed.map((m) => (
               <p key={m.wrapId} className="text-error">
@@ -423,7 +410,7 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
               </p>
             ))}
             {rotationCount === 0 && missingTransitions.length === 0 && (
-              <p className="opacity-60">No rotations: this community has a single generation.</p>
+              <p className="opacity-60">Single generation, no rotations.</p>
             )}
             <div className="flex flex-col divide-y divide-base-300">
               {audits.flatMap((a) =>
@@ -561,7 +548,6 @@ function useDiagnosticsLog(cid: string): LogEntry[] {
 function DiagnosticsCard({ cid, log }: { cid: string; log: LogEntry[] }) {
   return (
     <Card title="Diagnostics" summary={`${log.length} since opened`}>
-      <p className="opacity-70">Rotation decisions (parked / rejected candidates) and background failures, captured while this page is open.</p>
       {log.length === 0 ? (
         <p className="opacity-60">Nothing yet.</p>
       ) : (

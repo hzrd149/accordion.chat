@@ -274,22 +274,19 @@ function PlanesPanel({ community, state, rumors }: { community: ConcordCommunity
   const rows = useMemo(() => generationRows(material), [material]);
   const keys = useMemo(() => deriveGenerationKeys(material), [material]);
   const cv = state.controlVerification;
-  const controlAddresses = new Set(keys.flatMap((k) => (k.keys ? [k.keys.control.pk] : [])));
-  // Coverage for any other plane is outside this view; count those reads so a missing row is noticed.
-  const otherReads = [...(coverage?.values() ?? [])].filter((c) => !controlAddresses.has(c.author)).length;
 
   return (
     <div className="flex flex-col gap-6">
       <Section title="Overview" summary={`epoch ${material.root_epoch}`}>
         <KV label="mode">
-          {material.control_pk ? "split control (CORD-02 control_pk)" : "legacy (control address derived from the root)"}
+          {material.control_pk ? "split" : "legacy"}
         </KV>
         <KV label="current address"><Hex value={keys[keys.length - 1]?.keys?.control.pk} full /></KV>
         <KV label="write capability">
           {keys[keys.length - 1]?.keys?.control.signing ? (
-            <span className="badge badge-success">wrap signing key held</span>
+            <span className="badge badge-success">signing key held</span>
           ) : (
-            <span className="badge badge-ghost">read only: staff hold the control root</span>
+            <span className="badge badge-ghost">read only</span>
           )}
         </KV>
         <KV label="editions held">
@@ -302,11 +299,7 @@ function PlanesPanel({ community, state, rumors }: { community: ConcordCommunity
         </KV>
       </Section>
 
-      <Section title="Control plane per epoch" summary={`${rows.length} held · ${otherReads} other plane reads not shown`}>
-        <p className="opacity-70">
-          One control stream address per held root epoch. Coverage reflects the finite reads this session made; a live current
-          epoch can still be historically incomplete.
-        </p>
+      <Section title="Control plane per epoch" summary={`${rows.length} held`}>
         <div className="overflow-x-auto">
           <table className="table text-base">
             <thead>
@@ -398,7 +391,7 @@ const sortHeads = (heads: Iterable<HeadLike>) => [...heads].sort((a, b) => a.vsk
 function VerificationPanel({ state }: { state: CommunityState }) {
   const cv = state.controlVerification;
   const roleName = (id: string) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id);
-  if (!cv) return <p className="opacity-60">No verification projection yet: the control fold has not produced verified heads.</p>;
+  if (!cv) return <p className="opacity-60">No verification projection yet.</p>;
 
   const displayOnly = [...(state.heads ?? [])].filter(([eid]) => !cv.heads.has(eid));
   return (
@@ -444,7 +437,6 @@ function VerificationPanel({ state }: { state: CommunityState }) {
       </Section>
 
       <Section title="Suspended entities" summary={`${cv.suspended.size}`}>
-        <p className="opacity-70">Entities whose current support is unresolved; a retained display head confers no enforcement authority.</p>
         {cv.suspended.size === 0 ? (
           <p className="opacity-60">None.</p>
         ) : (
@@ -465,7 +457,6 @@ function VerificationPanel({ state }: { state: CommunityState }) {
 
       {displayOnly.length > 0 && (
         <Section title="Display-only heads" summary={`${displayOnly.length}`}>
-          <p className="opacity-70">Shown in the UI (retained floors during gaps) but not among the verified heads.</p>
           <div className="flex flex-col gap-1">
             {displayOnly.map(([eid, d]) => (
               <div key={eid} className="flex flex-wrap items-center gap-2">
@@ -484,11 +475,10 @@ function VerificationPanel({ state }: { state: CommunityState }) {
       </Section>
 
       <Section title="Removal floors" summary={`${cv.removals.size}`}>
-        <p className="opacity-70">Accepted removals; losing the remover's authority later cannot undo them.</p>
         <HeadsTable heads={sortHeads(cv.removals.values())} empty="No removals." />
       </Section>
 
-      <Section title="Grant history" summary={`${cv.grantHistory.size} grant coordinates`}>
+      <Section title="Grant history" summary={`${cv.grantHistory.size}`}>
         {cv.grantHistory.size === 0 ? (
           <p className="opacity-60">No grants.</p>
         ) : (
@@ -557,7 +547,7 @@ function EditionRow({ rumor, status }: { rumor: Rumor; status: EditionStatus }) 
         {status.displayed && !status.verified && <span className="badge badge-xs badge-warning shrink-0" title="Displayed, but not a verified head">displayed</span>}
         {status.removal && <span className="badge badge-xs badge-error shrink-0">removal floor</span>}
         {!applied && !status.removal && (
-          <span className="badge badge-xs badge-ghost shrink-0" title="Not the winning edition for this entity — superseded or rejected by the fold">not applied</span>
+          <span className="badge badge-xs badge-ghost shrink-0" title="Superseded or rejected">not applied</span>
         )}
         <UserLabel pubkey={rumor.pubkey} className="shrink-0" />
         <span className="opacity-40 truncate flex-1">{rumor.content || "(empty)"}</span>
@@ -601,15 +591,11 @@ function EditionsPanel({ rumors, state }: { rumors: Rumor[]; state: CommunitySta
   });
   const vsks = [...new Set(chains.map((c) => c.vsk))];
 
-  if (chains.length === 0) return <p className="opacity-60">No control-plane editions loaded yet.</p>;
+  if (chains.length === 0) return <p className="opacity-60">No editions loaded.</p>;
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="opacity-60">
-        {rumors.length} editions across {chains.length} entities. <span className="badge badge-xs badge-success">verified</span> = the
-        verified head for its entity; <span className="badge badge-xs badge-warning">displayed</span> = shown without verified support;{" "}
-        <span className="badge badge-xs badge-ghost">not applied</span> = superseded or rejected by the fold.
-      </p>
+      <p className="opacity-60">{rumors.length} editions · {chains.length} entities</p>
       <div className="flex flex-wrap items-center gap-2">
         <select className="select select-bordered select-sm w-auto" value={vskFilter} onChange={(e) => setVskFilter(e.target.value)}>
           <option value="all">All entities</option>
@@ -792,7 +778,7 @@ function BuilderPanel({ community, state, self, rumors }: { community: ConcordCo
     <div className="flex flex-col gap-4">
       <div className="alert alert-warning py-2 ">
         <AlertTriangle size={18} />
-        <span>Publishes to <strong>{state.metadata?.name ?? state.material.name}</strong>'s real relays with no permission check. It can't be unsent.</span>
+        <span>Publishes to live relays without permission checks. Irreversible.</span>
       </div>
 
       <DebugTabs
@@ -925,7 +911,7 @@ function BuilderPanel({ community, state, self, rumors }: { community: ConcordCo
       {confirmOpen && (
         <ConfirmModal
           title="Publish control event?"
-          body={`This wraps and ships the rumor to ${state.metadata?.name ?? state.material.name}'s relays as you, with no permission check. It cannot be unsent.`}
+          body={`Publish to ${state.metadata?.name ?? state.material.name}'s relays as you? This cannot be undone.`}
           confirmLabel="Publish"
           danger
           onConfirm={publish}
@@ -986,8 +972,7 @@ export function ControlPlaneDebugger() {
   return (
     <>
       <p className="opacity-70 leading-relaxed mb-5">
-        Inspect a community's control plane and publish hand-crafted control events to it — bypassing your role, so you can
-        test how groups react to invalid editions.
+        Inspect a community's control plane and publish arbitrary control events, bypassing permission checks.
       </p>
 
       <div className="mb-5">
@@ -1018,10 +1003,10 @@ export function ControlPlaneDebugger() {
       ) : communities.length === 0 ? (
         <div className="flex flex-col items-center gap-2 opacity-60 py-16 text-center">
           <Landmark size={40} />
-          <p>Join or create a community to inspect its control plane.</p>
+          <p>No communities.</p>
         </div>
       ) : (
-        <p className="opacity-60">Pick a community above to begin.</p>
+        <p className="opacity-60">Pick a community.</p>
       )}
     </>
   );
