@@ -1,17 +1,18 @@
 /**
- * Community Debug — a developer-mode tab in community settings showing one
- * community's technical state: sync status, the root generations this device
- * holds (with rotation dates and refounders), an on-demand per-relay audit of
- * every held epoch's planes and the CORD-06 rotations between them, current and
- * per-epoch membership, private channel key epochs, live rotation diagnostics and
- * the (redacted) raw material. Read-only: nothing here publishes.
+ * Community Debug — a developer-mode page in community settings showing one
+ * community's technical state in horizontal tabs: sync status, the full control
+ * plane (per-epoch addresses and coverage, verification, folded state, edition
+ * chains), the root generations this device holds, an on-demand per-relay audit
+ * of every held epoch's planes and the CORD-06 rotations between them, current
+ * and per-epoch membership, private channel key epochs, live diagnostics and the
+ * (redacted) raw material. Only the control plane's Publish tab writes.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useSearchParams } from "react-router";
 import { use$ } from "applesauce-react/hooks";
 import type { ConcordDiagnostic, JoinMaterial, RotationDiagnostic } from "@applesauce/concord";
 import { verifyOwner } from "@applesauce/concord/helpers";
-import { Check, ChevronRight, Copy, RefreshCw } from "lucide-react";
+import { ChevronRight, RefreshCw } from "lucide-react";
 import { pool } from "../../nostr";
 import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
@@ -20,98 +21,26 @@ import {
   AUDIT_PLANES,
   auditEpoch,
   buildChain,
+  dateTime,
   diffMembers,
   deriveGenerationKeys,
   fingerprint,
   generationRows,
   relaysFor,
-  shortHex,
   stringify,
   type AuditPlane,
   type EpochAudit,
   type GenerationKeys,
   type RotationAudit,
 } from "../../helpers/concord-history";
+import { DebugSection as Card, DebugTabs, Hex, JsonBlock, KV, UserList } from "./debug-ui";
+import { ControlPlaneInspector } from "./ControlPlaneDebugger";
 
 const NO_SET: ReadonlySet<string> = new Set();
 const NO_GRANTS: ReadonlyMap<string, string[]> = new Map();
 
 /** A rotation's relay date and the local `retired_at` may differ by publish latency; flag beyond this. */
 const DATE_SKEW_WARN_MS = 5 * 60_000;
-
-function dateTime(ms: number | undefined): string {
-  if (ms === undefined) return "—";
-  return new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
-}
-
-function Card({ title, summary, open, children }: { title: string; summary?: ReactNode; open?: boolean; children: ReactNode }) {
-  return (
-    <details className="group" open={open}>
-      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 py-2 flex items-center gap-3 select-none bg-base-200 hover:bg-base-300">
-        <ChevronRight size={16} className="shrink-0 opacity-60 transition-transform group-open:rotate-90" />
-        <span className="font-bold uppercase tracking-wide opacity-70">{title}</span>
-        {summary && <span className="opacity-70 truncate">{summary}</span>}
-      </summary>
-      <div className="px-4 py-3 flex flex-col gap-3">{children}</div>
-    </details>
-  );
-}
-
-function KV({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-3 min-w-0">
-      <span className="w-40 shrink-0 opacity-60">{label}</span>
-      <span className="min-w-0 break-all">{children}</span>
-    </div>
-  );
-}
-
-function Mono({ children, title }: { children: ReactNode; title?: string }) {
-  return (
-    <code className="font-mono opacity-80" title={title}>
-      {children}
-    </code>
-  );
-}
-
-/** A hex value shown shortened (or in full), copied whole on click. */
-function Hex({ value, full = false }: { value: string | undefined; full?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  if (!value) return <Mono>—</Mono>;
-  return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-1 font-mono opacity-80 hover:opacity-100 hover:text-primary cursor-copy align-baseline break-all text-left"
-      title={`${value}\nClick to copy`}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        void navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        });
-      }}
-    >
-      <span>{full ? value : shortHex(value)}</span>
-      {copied ? <Check size={16} className="shrink-0 text-success" /> : <Copy size={16} className="shrink-0 opacity-50" />}
-    </button>
-  );
-}
-
-function UserList({ pubkeys, empty = "None." }: { pubkeys: Iterable<string>; empty?: string }) {
-  const list = [...pubkeys];
-  if (list.length === 0) return <p className="opacity-60">{empty}</p>;
-  return (
-    <div className="flex flex-col gap-1">
-      {list.map((p) => (
-        <div key={p} className="flex items-center gap-2">
-          <UserLabel pubkey={p} />
-          <Hex value={p} />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ---- status ----------------------------------------------------------------
 
@@ -130,7 +59,6 @@ function StatusCard({ cid }: { cid: string }) {
   return (
     <Card
       title="Status"
-      open
       summary={
         <>
           <span className={`badge ${phaseBadge}`}>{status?.phase ?? "…"}</span> epoch {status?.epoch ?? material.root_epoch}
@@ -205,7 +133,6 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Gen
   return (
     <Card
       title="Generations"
-      open
       summary={
         <>
           {rows.length} held (epoch {first} → {material.root_epoch})
@@ -217,7 +144,7 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Gen
         Root epochs this device holds keys for, from local material (<code>held_roots</code> + current). Root keys are shown as sha256
         fingerprints so devices can be compared without exposing them.
       </p>
-      <div className="-mx-4 overflow-x-auto">
+      <div className="overflow-x-auto">
         <table className="table text-base">
           <thead>
             <tr>
@@ -265,7 +192,7 @@ const PLANE_LABEL: Record<AuditPlane, string> = { control: "control", guestbook:
 
 function PresenceMatrix({ audits, relays }: { audits: EpochAudit[]; relays: string[] }) {
   return (
-    <div className="-mx-4 overflow-x-auto">
+    <div className="overflow-x-auto">
       <table className="table text-base">
         <thead>
           <tr>
@@ -439,7 +366,6 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
   return (
     <Card
       title="Relay audit"
-      open
       summary={checkedAt ? `checked ${dateTime(checkedAt)}` : "not run"}
     >
       <p className="opacity-70">
@@ -552,7 +478,7 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
       {privateViews.length === 0 && material.channels.length === 0 ? (
         <p className="opacity-60">No private channels.</p>
       ) : (
-        <div className="-mx-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="table text-base">
             <thead>
               <tr>
@@ -603,7 +529,8 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
 
 type LogEntry = { at: number; kind: "rotation"; d: RotationDiagnostic } | { at: number; kind: "background"; d: ConcordDiagnostic };
 
-function DiagnosticsCard({ cid }: { cid: string }) {
+/** Capture rotation decisions and background failures for as long as the Debug page is open, whichever tab is shown. */
+function useDiagnosticsLog(cid: string): LogEntry[] {
   const community = useCommunity(cid);
   const [log, setLog] = useState<LogEntry[]>([]);
   useEffect(() => {
@@ -616,6 +543,10 @@ function DiagnosticsCard({ cid }: { cid: string }) {
       b.unsubscribe();
     };
   }, [community]);
+  return log;
+}
+
+function DiagnosticsCard({ cid, log }: { cid: string; log: LogEntry[] }) {
   return (
     <Card title="Diagnostics" summary={`${log.length} since opened`}>
       <p className="opacity-70">Rotation decisions (parked / rejected candidates) and background failures, captured while this page is open.</p>
@@ -650,29 +581,26 @@ function DiagnosticsCard({ cid }: { cid: string }) {
 // ---- raw -------------------------------------------------------------------
 
 function RawCard({ material }: { material: JoinMaterial }) {
-  const json = stringify(material, true);
-  const [copied, setCopied] = useState(false);
   return (
     <Card title="Raw material" summary="secrets replaced by fingerprints">
-      <div>
-        <button
-          className="btn btn-ghost gap-1"
-          onClick={() => {
-            void navigator.clipboard.writeText(json).then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            });
-          }}
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />} Copy
-        </button>
-      </div>
-      <pre className="-mx-4 max-h-[50vh] overflow-auto bg-base-200 px-4 py-2 font-mono whitespace-pre select-text">{json}</pre>
+      <JsonBlock json={stringify(material, true)} />
     </Card>
   );
 }
 
 // ---- page ------------------------------------------------------------------
+
+const TABS = [
+  { id: "status", label: "Status" },
+  { id: "control", label: "Control plane" },
+  { id: "generations", label: "Generations" },
+  { id: "relays", label: "Relay audit" },
+  { id: "members", label: "Membership" },
+  { id: "channels", label: "Private channels" },
+  { id: "diagnostics", label: "Diagnostics" },
+  { id: "raw", label: "Raw" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
 
 export function CommunityDebugPage({ cid }: { cid: string }) {
   const community = useCommunity(cid);
@@ -681,25 +609,67 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
   use$(() => community?.channelViews$, [community]);
   const metadata = use$(() => community?.metadata$, [community]);
   const material = community?.material;
+  const log = useDiagnosticsLog(cid);
+
+  // The selected tab lives in `?tab=` so a reload or shared link reopens it.
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get("tab");
+  const tab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : "status";
+  // Tabs mount on first visit and then stay mounted (hidden), so a relay audit or diagnostics log survives switching.
+  const [visited, setVisited] = useState<ReadonlySet<TabId>>(() => new Set([tab]));
+  if (!visited.has(tab)) setVisited(new Set([...visited, tab]));
+  const selectTab = (id: TabId) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", id);
+        return next;
+      },
+      { replace: true },
+    );
 
   const keys = useMemo(() => material ? deriveGenerationKeys(material) : [], [material]);
 
   if (!community || !material) return null;
   const relays = [...new Set([...relaysFor(material), ...(metadata?.relays ?? [])])];
+  const tabs = TABS.map((t) => (t.id === "diagnostics" && log.length > 0 ? { ...t, label: <>{t.label} <span className="badge badge-warning badge-xs">{log.length}</span></> } : t));
+
+  const panel = (id: TabId) => {
+    switch (id) {
+      case "status":
+        return <StatusCard cid={cid} />;
+      case "control":
+        return <ControlPlaneInspector cid={cid} />;
+      case "generations":
+        return <GenerationsCard material={material} keys={keys} />;
+      case "relays":
+        return <RelayAuditCard key={`${cid}:${material.root_epoch}`} material={material} relays={relays} />;
+      case "members":
+        return <MembershipCard cid={cid} />;
+      case "channels":
+        return <ChannelsCard cid={cid} material={material} />;
+      case "diagnostics":
+        return <DiagnosticsCard cid={cid} log={log} />;
+      case "raw":
+        return <RawCard material={material} />;
+    }
+  };
 
   return (
     <>
       <h2 className="text-2xl font-bold mb-1">Debug</h2>
-      <p className="opacity-70 leading-relaxed mb-5">
-        Technical state of this community: key generations, rotations and their presence on relays. Read-only.
+      <p className="opacity-70 leading-relaxed mb-4">
+        Technical state of this community: key generations, the control plane, rotations and their presence on relays. Everything is
+        read-only except the control plane's Publish tab.
       </p>
-      <StatusCard cid={cid} />
-      <GenerationsCard material={material} keys={keys} />
-      <RelayAuditCard key={`${cid}:${material.root_epoch}`} material={material} relays={relays} />
-      <MembershipCard cid={cid} />
-      <ChannelsCard cid={cid} material={material} />
-      <DiagnosticsCard cid={cid} />
-      <RawCard material={material} />
+      <div className="mb-5">
+        <DebugTabs tabs={tabs} value={tab} onChange={selectTab} />
+      </div>
+      {TABS.filter((t) => visited.has(t.id)).map((t) => (
+        <div key={t.id} hidden={t.id !== tab} className="flex flex-col gap-6">
+          {panel(t.id)}
+        </div>
+      ))}
     </>
   );
 }

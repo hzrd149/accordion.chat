@@ -36,6 +36,12 @@ export function shortHex(hex: string | undefined): string {
   return hex.length > 18 ? `${hex.slice(0, 10)}…${hex.slice(-6)}` : hex;
 }
 
+/** A full local date and time for debug views, or an em dash when unknown. */
+export function dateTime(ms: number | undefined): string {
+  if (ms === undefined) return "—";
+  return new Date(ms).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
+}
+
 /** A stable, non-secret identifier for a secret hex key: the first 8 bytes of its sha256. */
 export function fingerprint(hex: string | undefined): string {
   if (!hex) return "—";
