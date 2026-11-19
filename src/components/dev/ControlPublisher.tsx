@@ -11,6 +11,7 @@ import type { CommunityState, ConcordCommunity, Rumor } from "@applesauce/concor
 import { ConfirmModal } from "../modals";
 import { UserLabel } from "../User";
 import { stringify } from "../../helpers/concord-history";
+import { compareRoles, roleRank } from "../../helpers/roles";
 import {
   CONTROL_TEMPLATES,
   draftRumor,
@@ -255,8 +256,8 @@ function TargetPicker({ param, state, value, onChange }: { param: NonNullable<Co
       <Field label="Role" className="min-w-48">
         <select className="select select-bordered" value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="" disabled>Pick a role…</option>
-          {[...state.roles].sort((a, b) => a.position - b.position).map((r) => (
-            <option key={r.role_id} value={r.role_id}>{r.name} (pos {r.position}){r.deleted ? " · deleted" : ""}</option>
+          {[...state.roles].sort(compareRoles).map((r) => (
+            <option key={r.role_id} value={r.role_id}>{r.name} ({r.rank === undefined ? "pos" : "rank"} {roleRank(r)}){r.deleted ? " · deleted" : ""}</option>
           ))}
         </select>
       </Field>
@@ -396,4 +397,3 @@ function RawForm({ fields, onChange }: { fields: RawFields; onChange: (patch: Pa
     </div>
   );
 }
-

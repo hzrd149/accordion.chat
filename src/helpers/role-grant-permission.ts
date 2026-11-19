@@ -1,6 +1,7 @@
 import type { ConcordCommunity } from "@applesauce/concord";
 import { PERM } from "@applesauce/concord";
 import { combineLatest, distinctUntilChanged, map, of, switchMap } from "rxjs";
+import { roleRank } from "./roles";
 
 /** A grant replaces the whole role set: every retained role must also be writable. */
 export function canChangeMemberRole$(community: ConcordCommunity, member: string, roleId: string) {
@@ -14,8 +15,8 @@ export function canChangeMemberRole$(community: ConcordCommunity, member: string
       if (!changed || retained.some((role) => !role)) return of(false);
       return combineLatest([
         community.canModerate$(member, PERM.MANAGE_ROLES),
-        community.can$(PERM.MANAGE_ROLES, changed.position),
-        ...retained.map((role) => community.can$(PERM.MANAGE_ROLES, role!.position)),
+         community.can$(PERM.MANAGE_ROLES, roleRank(changed)),
+         ...retained.map((role) => community.can$(PERM.MANAGE_ROLES, roleRank(role!))),
       ]).pipe(map((allowed) => allowed.every(Boolean)));
     }),
     distinctUntilChanged(),
@@ -28,7 +29,7 @@ export function channelMemberPermissions$(community: ConcordCommunity, channelId
     switchMap(([members, roles, channels, canManage, dissolved]) => {
       const empty = { add: new Set<string>(), remove: new Set<string>() };
       if (dissolved || !canManage || !channels.some((ch) => ch.channel_id === channelId && ch.accessible)) return of(empty);
-      const role = roles.find((r) => !r.deleted && r.scope.kind === "channel" && r.scope.channel_id === channelId);
+      const role = roles.find((r) => !r.deleted && r.scope?.kind === "channel" && r.scope.channel_id === channelId);
       const candidates = [...members];
       if (!candidates.length) return of(empty);
       return combineLatest(candidates.map((member) => combineLatest([

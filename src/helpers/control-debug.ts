@@ -264,7 +264,7 @@ function member(ctx: TemplateContext) {
 }
 
 function newRole(ctx: TemplateContext, eid: string, patch: Record<string, unknown> = {}) {
-  const position = Math.max(0, ...ctx.state.roles.map((r) => r.position)) + 1;
+  const position = Math.max(0, ...ctx.state.roles.flatMap((r) => r.position === undefined ? [] : [r.position])) + 1;
   return pretty({ role_id: eid, name: "Debug role", position, permissions: "0", scope: { kind: "server" }, color: 0, ...patch });
 }
 

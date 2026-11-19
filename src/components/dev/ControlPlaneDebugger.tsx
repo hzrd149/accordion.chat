@@ -20,6 +20,7 @@ import { CONTROL_KIND } from "@applesauce/concord/helpers";
 import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
 import { decodePerms, tagVal, vskLabel } from "../../helpers/control-debug";
+import { compareRoles, roleRank } from "../../helpers/roles";
 import { ControlPublisher } from "./ControlPublisher";
 import { UserLabel } from "../User";
 import { formatTime } from "../../helpers/util";
@@ -31,7 +32,7 @@ import { CopyButton, DebugSection as Section, DebugSideTabs, Expandable, Hex, Js
 
 function StatePanel({ state }: { state: CommunityState }) {
   const roleName = (id: string) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id);
-  const roles = [...state.roles].sort((a, b) => a.position - b.position);
+  const roles = [...state.roles].sort(compareRoles);
   const liveRoles = roles.filter((r) => !r.deleted).length;
   const privateChannels = state.channels.filter((c) => c.private).length;
   return (
@@ -89,8 +90,8 @@ function StatePanel({ state }: { state: CommunityState }) {
                   {r.name}
                 </span>
                 {r.deleted && <span className="badge badge-sm badge-error">deleted</span>}
-                <span className="opacity-50">pos {r.position}</span>
-                <span className="opacity-50">{r.scope.kind === "channel" ? `#${shortHex(r.scope.channel_id)}` : "server"}</span>
+                <span className="opacity-50">{r.rank === undefined ? "pos" : "rank"} {roleRank(r)}</span>
+                <span className="opacity-50">{r.scope?.kind === "channel" ? `#${shortHex(r.scope.channel_id!)}` : "server"}</span>
                 <span className="opacity-70">{decodePerms(r.permissions).join(", ") || "no perms"}</span>
                 <Hex value={r.role_id} />
               </div>

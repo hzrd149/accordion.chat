@@ -15,6 +15,7 @@ import { PERM } from "@applesauce/concord";
 import { MessageExpiration } from "../components/MessageExpiration";
 import type { BlobPointer, ChannelMetadata, PermName, Role } from "@applesauce/concord";
 import { canChangeMemberRole$, channelMemberPermissions$ } from "../helpers/role-grant-permission";
+import { compareRoles, isCommunityRole, roleOrderPatch, roleRank } from "../helpers/roles";
 import { hasPerm, isCurrentStaff, parsePermissions } from "@applesauce/concord/helpers";
 import { ConfirmModal } from "../components/modals";
 import { toastError, toastSuccess } from "../services/toasts";
@@ -45,6 +46,22 @@ const PERM_LABELS: Record<PermName, string> = {
   VIEW_AUDIT_LOG: "View Audit Log",
   MENTION_EVERYONE: "Mention Everyone",
   PIN_MESSAGES: "Pin Messages",
+  VIEW_CHANNEL: "View Channel",
+  SEND_MESSAGES: "Send Messages",
+  SEND_IN_THREADS: "Send in Threads",
+  ATTACH_FILES: "Attach Files",
+  ADD_REACTIONS: "Add Reactions",
+  READ_MESSAGE_HISTORY: "Read Message History",
+  CONNECT: "Connect to Voice",
+  SPEAK: "Speak",
+  VIDEO: "Share Video",
+  PRIORITY_SPEAKER: "Priority Speaker",
+  MUTE_MEMBERS: "Mute Members",
+  DEAFEN_MEMBERS: "Deafen Members",
+  MOVE_MEMBERS: "Move Members",
+  MODERATE_MEMBERS: "Time Out Members",
+  MANAGE_NICKNAMES: "Manage Nicknames",
+  CHANGE_NICKNAME: "Change Nickname",
 };
 
 // Each page below subscribes only the slices it renders, never the aggregate
@@ -361,13 +378,16 @@ function RolesPage({ cid }: { cid: string }) {
   const canManageRoles = use$(() => community?.can$(PERM.MANAGE_ROLES), [community]) ?? false;
   // A deleted role confers no permissions or rank but stays in `roles$` so history
   // can still resolve it — it has no place in an editor listing live roles.
-  const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+  const serverRoles = roles.filter(isCommunityRole).sort(compareRoles);
+  const ranked = use$(() => community?.state$.pipe(
+    map((state) => state.everyone !== undefined), distinctUntilChanged(),
+  ), [community]) ?? false;
   const [tab, setTab] = useState<string>(serverRoles[0]?.role_id ?? "new");
 
   const canCreate = canManageRoles && !dissolved;
   const selectedRole = serverRoles.find((r) => r.role_id === tab) ?? (!canCreate ? serverRoles[0] : undefined);
   const activeTab = selectedRole ? selectedRole.role_id : "new";
-  const newRolePosition = Math.max(0, ...roles.map((role) => role.position)) + 1;
+  const newRolePosition = Math.max(0, ...roles.flatMap((role) => role.position === undefined ? [] : [role.position])) + 1;
 
   return (
     <>
@@ -385,7 +405,7 @@ function RolesPage({ cid }: { cid: string }) {
       </div>
 
       {activeTab === "new" ? (
-        canCreate ? <NewRolePanel cid={cid} position={newRolePosition} canCreate={canCreate} /> :
+        canCreate ? <NewRolePanel key={String(ranked)} cid={cid} position={newRolePosition} ranked={ranked} canCreate={canCreate} /> :
           <p className="text-sm opacity-70">Select a role to view its permissions.</p>
       ) : selectedRole ? (
         <RolePanel cid={cid} role={selectedRole} dissolved={dissolved} onDeleted={() => setTab("new")} />
@@ -394,9 +414,10 @@ function RolesPage({ cid }: { cid: string }) {
   );
 }
 
-function NewRolePanel({ cid, position, canCreate }: { cid: string; position: number; canCreate: boolean }) {
+function NewRolePanel({ cid, position, ranked, canCreate }: { cid: string; position: number; ranked: boolean; canCreate: boolean }) {
   const community = useCommunity(cid);
   const [name, setName] = useState("");
+  const [rank, setRank] = useState("");
   const [perms, setPerms] = useState<Set<PermName>>(new Set());
   const [busy, setBusy] = useState(false);
 
@@ -413,7 +434,7 @@ function NewRolePanel({ cid, position, canCreate }: { cid: string; position: num
     try {
       let bits = 0n;
       for (const p of perms) bits |= PERM[p];
-      await community?.admin.createRole(name.trim(), position, bits);
+      await community?.admin.createRole(name.trim(), ranked ? rank : position, bits);
       setName("");
       setPerms(new Set());
       toastSuccess("Role created");
@@ -433,6 +454,14 @@ function NewRolePanel({ cid, position, canCreate }: { cid: string; position: num
         <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="Moderator" maxLength={64} disabled={!canCreate} />
       </div>
       <div className="mb-4">
+        {ranked && <>
+          <label className="label text-xs font-semibold uppercase opacity-70">Rank key</label>
+          <input className="input input-bordered w-full" value={rank} onChange={(e) => setRank(e.target.value)}
+            maxLength={32} placeholder="e.g. V" disabled={!canCreate} />
+          <p className="text-sm opacity-70">ASCII letters and digits, not ending in zero. Lower keys have higher authority; uppercase sorts before lowercase.</p>
+        </>}
+      </div>
+      <div className="mb-4">
         <label className="label text-xs font-semibold uppercase opacity-70">Permissions</label>
         {(Object.keys(PERM) as PermName[]).map((p) => (
           <div key={p} className="flex items-center gap-2.5 py-1">
@@ -444,7 +473,7 @@ function NewRolePanel({ cid, position, canCreate }: { cid: string; position: num
         ))}
       </div>
       <div className="flex items-center gap-3.5 mt-5">
-        <button className="btn btn-primary" onClick={create} disabled={!canCreate || !name.trim() || busy}>
+        <button className="btn btn-primary" onClick={create} disabled={!canCreate || !name.trim() || (ranked && !rank) || busy}>
           Create role
         </button>
       </div>
@@ -456,10 +485,11 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
   const community = useCommunity(cid);
   const members = use$(community?.members$) ?? NO_MEMBERS;
   const grants = use$(community?.grants$) ?? NO_GRANTS;
-  const canManageRole = use$(() => community?.can$(PERM.MANAGE_ROLES, role.position), [community, role.position]) ?? false;
+  const rank = roleRank(role);
+  const canManageRole = use$(() => community?.can$(PERM.MANAGE_ROLES, rank), [community, rank]) ?? false;
   const [seededRole, setSeededRole] = useState(role.role_id);
   const [name, setName] = useState(role.name);
-  const [position, setPosition] = useState(String(role.position));
+  const [position, setPosition] = useState(String(rank));
   const [color, setColor] = useState(role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#5865f2");
   const [perms, setPerms] = useState<Set<PermName>>(() => rolePermSet(role));
   const [memberQuery, setMemberQuery] = useState("");
@@ -469,7 +499,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
   if (role.role_id !== seededRole) {
     setSeededRole(role.role_id);
     setName(role.name);
-    setPosition(String(role.position));
+    setPosition(String(rank));
     setColor(role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#5865f2");
     setPerms(rolePermSet(role));
     setMemberQuery("");
@@ -507,7 +537,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
       const parsedColor = Number.parseInt(color.replace(/^#/, ""), 16);
       await community?.admin.editRole(role.role_id, {
         name: name.trim(),
-        position: Math.max(1, Number.parseInt(position, 10) || role.position),
+        ...roleOrderPatch(role, position),
         permissions: bits.toString(),
         color: Number.isFinite(parsedColor) ? parsedColor : 0,
       });
@@ -539,8 +569,9 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
           <input className="input input-bordered w-full" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} disabled={!canManage} />
         </div>
         <div>
-          <label className="label text-xs font-semibold uppercase opacity-70">Position</label>
-          <input className="input input-bordered w-full" type="number" min={1} value={position} onChange={(e) => setPosition(e.target.value)} disabled={!canManage} />
+          <label className="label text-xs font-semibold uppercase opacity-70">{role.rank === undefined ? "Position" : "Rank key"}</label>
+          <input className="input input-bordered w-full" type={role.rank === undefined ? "number" : "text"} min={1}
+            value={position} onChange={(e) => setPosition(e.target.value)} disabled={!canManage} />
         </div>
       </div>
       <div className="mb-4">
@@ -568,7 +599,7 @@ function RolePanel({ cid, role, dissolved, onDeleted }: { cid: string; role: Rol
         </button>
       </div>
       </> : <dl className="space-y-3">
-        <div><dt className="text-xs font-semibold uppercase opacity-70">Position</dt><dd>{role.position}</dd></div>
+        <div><dt className="text-xs font-semibold uppercase opacity-70">{role.rank === undefined ? "Position" : "Rank key"}</dt><dd>{rank}</dd></div>
         <div><dt className="text-xs font-semibold uppercase opacity-70">Permissions</dt><dd>{[...rolePermSet(role)].map((p) => PERM_LABELS[p]).join(", ") || "None"}</dd></div>
       </dl>}
 
@@ -751,7 +782,7 @@ function MembersPage({ cid }: { cid: string }) {
   // may use it on a *particular* member is that row's own canModerate$ question.
   const canBanAny = (use$(() => community?.can$(PERM.BAN), [community]) ?? false) && !dissolved;
   const canManageRoles = (use$(() => community?.can$(PERM.MANAGE_ROLES), [community]) ?? false) && !dissolved;
-  const serverRoles = roles.filter((r) => r.scope.kind === "server" && !r.deleted).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+  const serverRoles = roles.filter(isCommunityRole).sort(compareRoles);
   const [banTarget, setBanTarget] = useState<string | null>(null);
   const grants = use$(community?.grants$) ?? NO_GRANTS;
   const canBanTarget = use$(() => community && banTarget ? community.canModerate$(banTarget, PERM.BAN) : undefined, [community, banTarget]) ?? false;

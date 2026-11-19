@@ -15,6 +15,7 @@ import { Login } from "./Login";
 import { CreateChannelModal, CreateCommunityModal, InviteModal, JoinModal, Modal } from "../components/modals";
 import { colorFor, formatTime } from "../helpers/util";
 import { defaultRoute } from "../helpers/route-defaults";
+import { compareRoles, isCommunityRole } from "../helpers/roles";
 import { UserAvatar, UserName } from "../components/User";
 import { SettingsView } from "./settings";
 import { DevView } from "./dev";
@@ -934,14 +935,14 @@ function MemberList({ cid }: { cid: string }) {
   const owner = community?.material.owner ?? "";
   const rolesById = useMemo(() => new Map(roles.map((r) => [r.role_id, r])), [roles]);
 
-  // Each member's highest-authority Role (lowest `position`), Discord-style: a
+  // Each member's highest-authority Role, Discord-style: a
   // member is hoisted under one role only. The owner is special-cased above.
   const primaryRole = useCallback(
     (m: string): Role | undefined => {
       let best: Role | undefined;
       for (const id of grants.get(m) ?? []) {
         const r = rolesById.get(id);
-        if (r && (!best || r.position < best.position)) best = r;
+        if (r && isCommunityRole(r) && (r.rank === undefined || r.display) && (!best || compareRoles(r, best) < 0)) best = r;
       }
       return best;
     },
@@ -973,7 +974,7 @@ function MemberList({ cid }: { cid: string }) {
   const nonOwner = members.filter((m) => m !== owner);
   const roleless = nonOwner.filter((m) => !primaryRole(m)).sort();
   const sections = [...roles]
-    .sort((a, b) => a.position - b.position || (a.role_id < b.role_id ? -1 : 1))
+    .sort(compareRoles)
     .map((r) => ({ role: r, members: nonOwner.filter((m) => primaryRole(m)?.role_id === r.role_id).sort() }))
     .filter((s) => s.members.length > 0);
 
