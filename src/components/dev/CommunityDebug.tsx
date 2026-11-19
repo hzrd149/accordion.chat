@@ -338,7 +338,9 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
   async function run() {
     setBusy(true);
     setError(null);
-    setAudits([]);
+    // A first run fills in epoch by epoch; a re-check keeps the previous results on screen and swaps them in at the end,
+    // so the page doesn't collapse and regrow under the reader.
+    const progressive = audits.length === 0;
     const chain = buildChain(material);
     const out: EpochAudit[] = [];
     try {
@@ -346,9 +348,12 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
         if (!alive.current) return;
         setProgress(`Auditing epoch ${m.root_epoch} (${out.length + 1}/${chain.length})…`);
         out.push(await auditEpoch(pool, m, out[out.length - 1]?.keys, relays));
-        if (alive.current) setAudits([...out]);
+        if (alive.current && progressive) setAudits([...out]);
       }
-      if (alive.current) setCheckedAt(Date.now());
+      if (alive.current) {
+        setAudits(out);
+        setCheckedAt(Date.now());
+      }
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -362,74 +367,81 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
   const retired = new Map((material.held_roots ?? []).map((r) => [r.epoch, r.retired_at]));
   const missingTransitions = audits.filter((a) => a.epoch !== material.root_epoch && a.rotations.length === 0);
   const tip = audits.find((a) => a.epoch === material.root_epoch);
+  const undecodable = audits.reduce((n, a) => n + a.undecodable, 0);
+  const rotationCount = audits.reduce((n, a) => n + a.rotations.length, 0);
+  const malformed = audits.flatMap((a) => a.malformed.map((m) => ({ ...m, epoch: a.epoch })));
+  const status = progress || (checkedAt ? `Last checked ${dateTime(checkedAt)}` : "Not run yet");
 
   return (
-    <Card
-      title="Relay audit"
-      summary={checkedAt ? `checked ${dateTime(checkedAt)}` : "not run"}
-    >
-      <p className="opacity-70">
-        Fetches each held epoch's control, guestbook and next-epoch rekey addresses from every community relay separately, then checks
-        each rotation for completeness and which members it delivered a key to. Members per epoch are folded from the Guestbook and
-        control authors only (channel activity is not fetched).
-      </p>
-      <div className="flex items-center gap-3">
-        <button className="btn btn-primary gap-1.5" disabled={busy} onClick={() => void run()}>
-          {busy ? <span className="loading loading-spinner loading-sm" /> : <RefreshCw size={16} />}
-          {audits.length ? "Re-check relays" : "Check relays"}
-        </button>
-        {progress && <span className="opacity-70">{progress}</span>}
+    <>
+      <div className="flex items-start gap-4 max-sm:flex-col">
+        <p className="flex-1 opacity-70 leading-relaxed">
+          Fetches each held epoch's control, guestbook and next-epoch rekey addresses from every community relay separately, then
+          checks each rotation for completeness and which members it delivered a key to. Members per epoch are folded from the
+          Guestbook and control authors only.
+        </p>
+        <div className="flex flex-col items-end gap-1 shrink-0 max-sm:items-start">
+          <button className="btn btn-primary btn-sm gap-1.5 w-36" disabled={busy} onClick={() => void run()}>
+            {busy ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={14} />}
+            Check relays
+          </button>
+          <span className="text-sm opacity-60 whitespace-nowrap">{status}</span>
+        </div>
       </div>
-      {error && <p className="text-error">{error}</p>}
-      {audits.length > 0 && (
-        <>
-          <PresenceMatrix audits={audits} relays={relays} />
-          {audits.some((a) => a.undecodable > 0) && (
-            <p className="text-warning">
-              {audits.reduce((n, a) => n + a.undecodable, 0)} wraps at these addresses did not decode under the held keys.
-            </p>
-          )}
+      {error && <div className="alert alert-error py-2">{error}</div>}
 
-          <h4 className="font-semibold mt-2">Rotations</h4>
-          {missingTransitions.map((a) => (
-            <p key={a.epoch} className="text-error font-semibold">
-              No rekey events for epoch {a.epoch} → {a.epoch + 1} found on any relay. The rotation's evidence is gone (or was never published here).
-            </p>
-          ))}
-          {tip && tip.rotations.length > 0 && (
-            <p className="text-warning font-semibold">
-              Rekey events exist at the current epoch's next address — a rotation to epoch {tip.epoch + 1} this device has not adopted.
-              Check the diagnostics below for a parked or rejected candidate.
-            </p>
-          )}
-          {audits.flatMap((a) =>
-            a.rotations.map((r) => (
-              <RotationCard
-                key={r.candidateId}
-                rotation={r}
-                relays={relays}
-                retiredAt={retired.get(a.epoch)}
-                isTip={a.epoch === material.root_epoch}
-              />
-            )),
-          )}
-          {audits.some((a) => a.rotations.length > 1) && (
-            <p className="text-warning">Several candidates for one transition: concurrent rotators raced (lowest key wins).</p>
-          )}
-          {audits.flatMap((a) => a.malformed.map((m) => ({ ...m, epoch: a.epoch }))).map((m) => (
-            <p key={m.wrapId} className="text-error">
-              Epoch {m.epoch}: malformed rekey <Hex value={m.wrapId} /> ({m.reason})
-            </p>
-          ))}
-          {audits.length > 0 && audits.every((a) => a.rotations.length === 0) && audits.length === 1 && (
-            <p className="opacity-60">No rotations: this community has a single generation.</p>
-          )}
+      {audits.length === 0 ? (
+        <div className="border border-dashed border-base-300 rounded-box py-12 text-center opacity-60">
+          {busy ? "Waiting for the first epoch…" : `Check relays to audit ${relays.length} relays.`}
+        </div>
+      ) : (
+        <div className={`flex flex-col gap-6 transition-opacity ${busy && checkedAt ? "opacity-60" : ""}`}>
+          <Card title="Presence" summary={`${audits.length} epochs × ${relays.length} relays`}>
+            <PresenceMatrix audits={audits} relays={relays} />
+            {undecodable > 0 && <p className="text-warning">{undecodable} wraps at these addresses did not decode under the held keys.</p>}
+          </Card>
 
-          <h4 className="font-semibold mt-2">Members by epoch</h4>
-          <MembersByEpoch audits={audits} />
-        </>
+          <Card title="Rotations" summary={`${rotationCount} found`}>
+            {missingTransitions.map((a) => (
+              <p key={a.epoch} className="text-error font-semibold">
+                No rekey events for epoch {a.epoch} → {a.epoch + 1} found on any relay. The rotation's evidence is gone (or was never
+                published here).
+              </p>
+            ))}
+            {tip && tip.rotations.length > 0 && (
+              <p className="text-warning font-semibold">
+                Rekey events exist at the current epoch's next address: a rotation to epoch {tip.epoch + 1} this device has not adopted.
+                Check the Diagnostics tab for a parked or rejected candidate.
+              </p>
+            )}
+            {audits.some((a) => a.rotations.length > 1) && (
+              <p className="text-warning">Several candidates for one transition: concurrent rotators raced (lowest key wins).</p>
+            )}
+            {malformed.map((m) => (
+              <p key={m.wrapId} className="text-error">
+                Epoch {m.epoch}: malformed rekey <Hex value={m.wrapId} /> ({m.reason})
+              </p>
+            ))}
+            {rotationCount === 0 && missingTransitions.length === 0 && (
+              <p className="opacity-60">No rotations: this community has a single generation.</p>
+            )}
+            <div className="flex flex-col divide-y divide-base-300">
+              {audits.flatMap((a) =>
+                a.rotations.map((r) => (
+                  <div key={r.candidateId} className="py-3 first:pt-0">
+                    <RotationCard rotation={r} relays={relays} retiredAt={retired.get(a.epoch)} isTip={a.epoch === material.root_epoch} />
+                  </div>
+                )),
+              )}
+            </div>
+          </Card>
+
+          <Card title="Members by epoch">
+            <MembersByEpoch audits={audits} />
+          </Card>
+        </div>
       )}
-    </Card>
+    </>
   );
 }
 
