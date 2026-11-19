@@ -10,8 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { use$ } from "applesauce-react/hooks";
-import type { ConcordDiagnostic, JoinMaterial, RotationDiagnostic } from "@applesauce/concord";
-import { verifyOwner } from "@applesauce/concord/helpers";
+import type { CommunityState, JoinMaterial, Rumor } from "@applesauce/concord";
+import { CONTROL_KIND, verifyOwner } from "@applesauce/concord/helpers";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { pool } from "../../nostr";
 import { useConcord } from "../../hooks/use-concord";
@@ -33,7 +33,21 @@ import {
   type GenerationKeys,
   type RotationAudit,
 } from "../../helpers/concord-history";
-import { DebugSection as Card, DebugTabs, Hex, JsonBlock, KV, UserList } from "./debug-ui";
+import {
+  auditSnapshot,
+  channelsSnapshot,
+  debugReport,
+  diagnosticsSnapshot,
+  editionChainsSnapshot,
+  generationsSnapshot,
+  membershipSnapshot,
+  planesSnapshot,
+  statusSnapshot,
+  toClipboard,
+  verificationSnapshot,
+  type DiagnosticLogEntry as LogEntry,
+} from "../../helpers/community-debug-report";
+import { CopyButton, DebugSection as Card, DebugTabs, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 import { ControlPlaneInspector } from "./ControlPlaneDebugger";
 
 const NO_SET: ReadonlySet<string> = new Set();
@@ -54,11 +68,13 @@ function StatusCard({ cid }: { cid: string }) {
   const material = community.material;
   const entry = memberships?.entries.find((e) => e.community_id === cid);
   const relays = [...new Set([...material.relays, ...(metadata?.relays ?? [])])];
+  const copy = () => toClipboard(statusSnapshot(cid, material, status, memberships, relays));
   const phaseBadge = status?.phase === "live" ? "badge-success" : status?.phase === "error" || status?.phase === "removed" ? "badge-error" : "badge-warning";
 
   return (
     <Card
       title="Status"
+      copy={copy}
       summary={
         <>
           <span className={`badge ${phaseBadge}`}>{status?.phase ?? "…"}</span> epoch {status?.epoch ?? material.root_epoch}
@@ -133,6 +149,7 @@ function GenerationsCard({ material, keys }: { material: JoinMaterial; keys: Gen
   return (
     <Card
       title="Generations"
+      copy={() => toClipboard(generationsSnapshot(material, keys))}
       summary={
         <>
           {rows.length} held (epoch {first} → {material.root_epoch})
@@ -317,7 +334,9 @@ function MembersByEpoch({ audits }: { audits: EpochAudit[] }) {
   );
 }
 
-function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: string[] }) {
+export type AuditResult = { audits: EpochAudit[]; relays: string[]; checkedAt: number | null };
+
+function RelayAuditCard({ material, relays, onResult }: { material: JoinMaterial; relays: string[]; onResult: (r: AuditResult) => void }) {
   const [audits, setAudits] = useState<EpochAudit[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
@@ -347,8 +366,10 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
         if (alive.current && progressive) setAudits([...out]);
       }
       if (alive.current) {
+        const at = Date.now();
         setAudits(out);
-        setCheckedAt(Date.now());
+        setCheckedAt(at);
+        onResult({ audits: out, relays, checkedAt: at });
       }
     } catch (e) {
       if (alive.current) setError(e instanceof Error ? e.message : String(e));
@@ -367,6 +388,7 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
   const rotationCount = audits.reduce((n, a) => n + a.rotations.length, 0);
   const malformed = audits.flatMap((a) => a.malformed.map((m) => ({ ...m, epoch: a.epoch })));
   const status = progress || (checkedAt ? `Last checked ${dateTime(checkedAt)}` : "Not run yet");
+  const snapshot = () => auditSnapshot(audits, relays, checkedAt);
 
   return (
     <>
@@ -376,6 +398,11 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
           Check relays
         </button>
         <span className="text-sm opacity-60 whitespace-nowrap">{status}</span>
+        {checkedAt && !busy && (
+          <span className="ml-auto">
+            <CopyButton text={() => toClipboard(snapshot())} label="Copy audit" className="btn-sm" />
+          </span>
+        )}
       </div>
       {error && <div className="alert alert-error py-2">{error}</div>}
 
@@ -385,12 +412,26 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
         </div>
       ) : (
         <div className={`flex flex-col gap-6 transition-opacity ${busy && checkedAt ? "opacity-60" : ""}`}>
-          <Card title="Presence" summary={`${audits.length} epochs × ${relays.length} relays`}>
+          <Card
+            title="Presence"
+            summary={`${audits.length} epochs × ${relays.length} relays`}
+            copy={() => toClipboard({ relays, epochs: snapshot().epochs.map(({ epoch, addresses, per_relay, totals, undecodable }) => ({ epoch, addresses, per_relay, totals, undecodable })) })}
+          >
             <PresenceMatrix audits={audits} relays={relays} />
             {undecodable > 0 && <p className="text-warning">{undecodable} undecodable wraps.</p>}
           </Card>
 
-          <Card title="Rotations" summary={`${rotationCount} found`}>
+          <Card
+            title="Rotations"
+            summary={`${rotationCount} found`}
+            copy={() =>
+              toClipboard({
+                missing_transitions: missingTransitions.map((a) => `${a.epoch} -> ${a.epoch + 1}`),
+                unadopted_tip: tip && tip.rotations.length > 0 ? tip.epoch + 1 : null,
+                epochs: snapshot().epochs.map(({ epoch, rotations, malformed_rekeys }) => ({ epoch, rotations, malformed_rekeys })),
+              })
+            }
+          >
             {missingTransitions.map((a) => (
               <p key={a.epoch} className="text-error font-semibold">
                 Epoch {a.epoch} → {a.epoch + 1}: no rekey events on any relay.
@@ -423,7 +464,10 @@ function RelayAuditCard({ material, relays }: { material: JoinMaterial; relays: 
             </div>
           </Card>
 
-          <Card title="Members by epoch">
+          <Card
+            title="Members by epoch"
+            copy={() => toClipboard(snapshot().epochs.map(({ epoch, members, members_added, members_removed, banlist }) => ({ epoch, members, members_added, members_removed, banlist })))}
+          >
             <MembersByEpoch audits={audits} />
           </Card>
         </div>
@@ -442,7 +486,11 @@ function MembershipCard({ cid }: { cid: string }) {
   const roles = use$(() => community?.roles$, [community]);
   const roleName = (id: string) => roles?.find((r) => r.role_id === id)?.name;
   return (
-    <Card title="Current membership" summary={`${members.size} members · ${grants.size} grants · ${banlist.size} banned`}>
+    <Card
+      title="Current membership"
+      summary={`${members.size} members · ${grants.size} grants · ${banlist.size} banned`}
+      copy={() => toClipboard(membershipSnapshot(members, banlist, grants, roles))}
+    >
       <div className="flex flex-col gap-1">
         {[...members].map((m) => (
           <div key={m} className="flex flex-wrap items-center gap-2">
@@ -472,6 +520,7 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
   return (
     <Card
       title="Private channels"
+      copy={() => toClipboard(channelsSnapshot(views, material))}
       summary={`${material.channels.length} keyed · ${privateViews.filter((v) => !keyed.has(v.channel_id)).length} without key · ${material.unheld_channels?.length ?? 0} unheld list entries`}
     >
       {privateViews.length === 0 && material.channels.length === 0 ? (
@@ -526,8 +575,6 @@ function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }
 
 // ---- diagnostics -----------------------------------------------------------
 
-type LogEntry = { at: number; kind: "rotation"; d: RotationDiagnostic } | { at: number; kind: "background"; d: ConcordDiagnostic };
-
 /** Capture rotation decisions and background failures for as long as the Debug page is open, whichever tab is shown. */
 function useDiagnosticsLog(cid: string): LogEntry[] {
   const community = useCommunity(cid);
@@ -547,7 +594,7 @@ function useDiagnosticsLog(cid: string): LogEntry[] {
 
 function DiagnosticsCard({ cid, log }: { cid: string; log: LogEntry[] }) {
   return (
-    <Card title="Diagnostics" summary={`${log.length} since opened`}>
+    <Card title="Diagnostics" summary={`${log.length} since opened`} copy={() => toClipboard(diagnosticsSnapshot(cid, log))}>
       {log.length === 0 ? (
         <p className="opacity-60">Nothing yet.</p>
       ) : (
@@ -586,6 +633,68 @@ function RawCard({ material }: { material: JoinMaterial }) {
   );
 }
 
+// ---- full report -----------------------------------------------------------
+
+/** Every stream the full report reads, subscribed at page level so it's available from any tab. */
+function useReportInputs(cid: string) {
+  const client = useConcord();
+  const community = useCommunity(cid);
+  return {
+    status: use$(() => community?.status$, [community]),
+    memberships: use$(() => client.memberships$, [client]),
+    members: use$(() => community?.members$, [community]) ?? NO_SET,
+    banlist: use$(() => community?.banlist$, [community]) ?? NO_SET,
+    grants: use$(() => community?.grants$, [community]) ?? NO_GRANTS,
+    roles: use$(() => community?.roles$, [community]),
+    views: use$(() => community?.channelViews$, [community]),
+    state: use$(() => community?.state$, [community]) as CommunityState | undefined,
+    coverage: use$(() => community?.syncCoverage$, [community]),
+    planeRelays: use$(() => community?.relays$, [community]),
+    rumors: (use$(() => community?.controlStore.timeline([{ kinds: [CONTROL_KIND] }]), [community]) as Rumor[] | undefined) ?? [],
+  };
+}
+
+function buildReport(
+  cid: string,
+  material: JoinMaterial,
+  keys: GenerationKeys[],
+  relays: string[],
+  log: LogEntry[],
+  audit: AuditResult | null,
+  r: ReturnType<typeof useReportInputs>,
+): string {
+  return debugReport(cid, {
+    status: statusSnapshot(cid, material, r.status, r.memberships, relays),
+    generations: generationsSnapshot(material, keys),
+    control_plane: r.state
+      ? {
+          planes: planesSnapshot(material, keys, r.coverage, r.planeRelays ?? []),
+          counts: {
+            control_rumors: r.rumors.length,
+            display_heads: r.state.heads?.size ?? 0,
+            verified_heads: r.state.controlVerification?.heads.size ?? 0,
+          },
+          verification: verificationSnapshot(r.state),
+          edition_chains: editionChainsSnapshot(r.rumors, r.state),
+          folded: {
+            metadata: r.state.metadata,
+            dissolved: r.state.dissolved,
+            pause: r.state.pause,
+            roles: r.state.roles,
+            channels: r.state.channels,
+            invite_link_signers: r.state.inviteLinks,
+            banned_at: r.state.bannedAt,
+          },
+        }
+      : null,
+    relay_audit: audit ? auditSnapshot(audit.audits, audit.relays, audit.checkedAt) : "not run (open Relay audit and press Check relays to include it)",
+    membership: membershipSnapshot(r.members, r.banlist, r.grants, r.roles),
+    private_channels: channelsSnapshot(r.views, material),
+    diagnostics: { note: "captured only while the Debug page is open", entries: diagnosticsSnapshot(cid, log) },
+    raw_material: material,
+  });
+}
+
 // ---- page ------------------------------------------------------------------
 
 const TABS = [
@@ -608,6 +717,8 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
   const metadata = use$(() => community?.metadata$, [community]);
   const material = community?.material;
   const log = useDiagnosticsLog(cid);
+  const [audit, setAudit] = useState<AuditResult | null>(null);
+  const report = useReportInputs(cid);
 
   // The selected tab lives in `?tab=` so a reload or shared link reopens it.
   const [params, setParams] = useSearchParams();
@@ -641,7 +752,7 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
       case "generations":
         return <GenerationsCard material={material} keys={keys} />;
       case "relays":
-        return <RelayAuditCard key={`${cid}:${material.root_epoch}`} material={material} relays={relays} />;
+        return <RelayAuditCard key={`${cid}:${material.root_epoch}`} material={material} relays={relays} onResult={setAudit} />;
       case "members":
         return <MembershipCard cid={cid} />;
       case "channels":
@@ -656,8 +767,16 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
   return (
     <>
       {/* Flush with the settings pane: cancel its padding so the tab strip meets the top and side edges. */}
-      <div className="-mx-10 -mt-10 mb-6 px-6 border-b border-base-300 max-md:-mx-4 max-md:-mt-6 max-md:px-2">
-        <DebugTabs tabs={tabs} value={tab} onChange={selectTab} />
+      <div className="-mx-10 -mt-10 mb-6 px-6 border-b border-base-300 max-md:-mx-4 max-md:-mt-6 max-md:px-2 flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <DebugTabs tabs={tabs} value={tab} onChange={selectTab} />
+        </div>
+        <CopyButton
+          text={() => buildReport(cid, material, keys, relays, log, audit, report)}
+          label="Copy report"
+          title="Copy a redacted JSON report of every tab (secrets replaced by fingerprints)"
+          className="btn-ghost btn-sm shrink-0"
+        />
       </div>
       {TABS.filter((t) => visited.has(t.id)).map((t) => (
         <div key={t.id} hidden={t.id !== tab} className="flex flex-col gap-6">

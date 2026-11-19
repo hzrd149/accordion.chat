@@ -24,7 +24,8 @@ import { ControlPublisher } from "./ControlPublisher";
 import { UserLabel } from "../User";
 import { formatTime } from "../../helpers/util";
 import { dateTime, deriveGenerationKeys, generationRows, shortHex, stringify } from "../../helpers/concord-history";
-import { DebugSection as Section, DebugSideTabs, Expandable, Hex, JsonBlock, KV, UserList } from "./debug-ui";
+import { planesSnapshot, toClipboard, verificationSnapshot } from "../../helpers/community-debug-report";
+import { CopyButton, DebugSection as Section, DebugSideTabs, Expandable, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 
 // ---- current state panel ---------------------------------------------------
 
@@ -35,7 +36,21 @@ function StatePanel({ state }: { state: CommunityState }) {
   const privateChannels = state.channels.filter((c) => c.private).length;
   return (
     <div className="flex flex-col border border-base-300 rounded-box divide-y divide-base-300 overflow-hidden">
-      <Expandable title="Community" summary={state.metadata?.name ?? state.material.name} open>
+      <Expandable
+        title="Community"
+        summary={state.metadata?.name ?? state.material.name}
+        open
+        copy={() =>
+          toClipboard({
+            community_id: state.material.community_id,
+            owner: state.material.owner,
+            metadata: state.metadata,
+            counts: { members: state.members.size, roles: liveRoles, channels: state.channels.length, banned: state.banlist.size, invite_links: state.inviteLinks.size },
+            dissolved: state.dissolved,
+            pause: state.pause,
+          })
+        }
+      >
         <KV label="name"><strong>{state.metadata?.name ?? state.material.name}</strong></KV>
         {state.metadata?.description && <KV label="description">{state.metadata.description}</KV>}
         <KV label="community_id"><Hex value={state.material.community_id} full /></KV>
@@ -63,7 +78,7 @@ function StatePanel({ state }: { state: CommunityState }) {
         {state.pause && <KV label="pause signal by"><UserLabel pubkey={state.pause.by} /></KV>}
       </Expandable>
 
-      <Expandable title="Roles" summary={`${liveRoles} live${roles.length > liveRoles ? ` · ${roles.length - liveRoles} deleted` : ""}`}>
+      <Expandable title="Roles" copy={() => toClipboard(roles.map((r) => ({ ...r, decoded_permissions: decodePerms(r.permissions) })))} summary={`${liveRoles} live${roles.length > liveRoles ? ` · ${roles.length - liveRoles} deleted` : ""}`}>
         {roles.length === 0 ? (
           <p className="opacity-60">No roles.</p>
         ) : (
@@ -84,7 +99,7 @@ function StatePanel({ state }: { state: CommunityState }) {
         )}
       </Expandable>
 
-      <Expandable title="Channels" summary={`${state.channels.length} · ${privateChannels} private`}>
+      <Expandable title="Channels" copy={() => toClipboard(state.channels)} summary={`${state.channels.length} · ${privateChannels} private`}>
         {state.channels.length === 0 ? (
           <p className="opacity-60">No channels.</p>
         ) : (
@@ -101,7 +116,7 @@ function StatePanel({ state }: { state: CommunityState }) {
         )}
       </Expandable>
 
-      <Expandable title="Grants" summary={`${state.grants.size} members`}>
+      <Expandable title="Grants" copy={() => toClipboard([...state.grants].map(([member, ids]) => ({ member, roles: ids.map((id) => ({ id, name: roleName(id) })) })))} summary={`${state.grants.size} members`}>
         {state.grants.size === 0 ? (
           <p className="opacity-60">No grants.</p>
         ) : (
@@ -116,11 +131,11 @@ function StatePanel({ state }: { state: CommunityState }) {
         )}
       </Expandable>
 
-      <Expandable title="Members" summary={`${state.members.size}`}>
+      <Expandable title="Members" copy={() => toClipboard(state.members)} summary={`${state.members.size}`}>
         <UserList pubkeys={state.members} empty="No members folded." />
       </Expandable>
 
-      <Expandable title="Banlist" summary={`${state.banlist.size}`}>
+      <Expandable title="Banlist" copy={() => toClipboard([...state.banlist].map((p) => ({ pubkey: p, banned_at: state.bannedAt?.get(p) })))} summary={`${state.banlist.size}`}>
         {state.banlist.size === 0 ? (
           <p className="opacity-60">Nobody banned.</p>
         ) : (
@@ -136,7 +151,7 @@ function StatePanel({ state }: { state: CommunityState }) {
         )}
       </Expandable>
 
-      <Expandable title="Invite links" summary={`${state.inviteLinks.size} link signers`}>
+      <Expandable title="Invite links" copy={() => toClipboard(state.inviteLinks)} summary={`${state.inviteLinks.size} link signers`}>
         {state.inviteLinks.size === 0 ? (
           <p className="opacity-60">No live invite links.</p>
         ) : (
@@ -230,10 +245,15 @@ function PlanesPanel({ community, state, rumors }: { community: ConcordCommunity
   const rows = useMemo(() => generationRows(material), [material]);
   const keys = useMemo(() => deriveGenerationKeys(material), [material]);
   const cv = state.controlVerification;
+  const copy = () =>
+    toClipboard({
+      editions_held: { control_rumors: rumors.length, display_heads: state.heads?.size ?? 0, verified_heads: cv?.heads.size ?? 0 },
+      ...planesSnapshot(material, keys, coverage, relays),
+    });
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Overview" summary={`epoch ${material.root_epoch}`}>
+      <Section title="Overview" summary={`epoch ${material.root_epoch}`} copy={copy}>
         <KV label="mode">
           {material.control_pk ? "split" : "legacy"}
         </KV>
@@ -255,7 +275,7 @@ function PlanesPanel({ community, state, rumors }: { community: ConcordCommunity
         </KV>
       </Section>
 
-      <Section title="Control plane per epoch" summary={`${rows.length} held`}>
+      <Section title="Control plane per epoch" summary={`${rows.length} held`} copy={() => toClipboard(planesSnapshot(material, keys, coverage, relays).per_epoch)}>
         <div className="overflow-x-auto">
           <table className="table text-base">
             <thead>
@@ -350,18 +370,22 @@ function VerificationPanel({ state }: { state: CommunityState }) {
   if (!cv) return <p className="opacity-60">No verification projection yet.</p>;
 
   const displayOnly = [...(state.heads ?? [])].filter(([eid]) => !cv.heads.has(eid));
+  const snap = () => verificationSnapshot(state)!;
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="badge badge-success badge-outline">{cv.heads.size} verified heads</span>
         <span className={`badge ${cv.suspended.size ? "badge-warning" : "badge-ghost"}`}>{cv.suspended.size} suspended</span>
         <span className={`badge ${cv.pending.length ? "badge-warning" : "badge-ghost"}`}>{cv.pending.length} pending evidence</span>
         <span className="badge badge-ghost">{cv.removals.size} removal floors</span>
         <span className="badge badge-ghost">{cv.grantHistory.size} grant histories</span>
         <span className={`badge ${displayOnly.length ? "badge-warning" : "badge-ghost"}`}>{displayOnly.length} display-only heads</span>
+        <span className="ml-auto">
+          <CopyButton text={() => toClipboard(snap())} label="Copy all" className="btn-ghost btn-sm" />
+        </span>
       </div>
 
-      <Section title="Pending evidence" summary={`${cv.pending.length}`}>
+      <Section title="Pending evidence" summary={`${cv.pending.length}`} copy={() => toClipboard(snap().pending)}>
         {cv.pending.length === 0 ? (
           <p className="opacity-60">Nothing parked.</p>
         ) : (
@@ -392,7 +416,7 @@ function VerificationPanel({ state }: { state: CommunityState }) {
         )}
       </Section>
 
-      <Section title="Suspended entities" summary={`${cv.suspended.size}`}>
+      <Section title="Suspended entities" summary={`${cv.suspended.size}`} copy={() => toClipboard(snap().suspended)}>
         {cv.suspended.size === 0 ? (
           <p className="opacity-60">None.</p>
         ) : (
@@ -412,7 +436,7 @@ function VerificationPanel({ state }: { state: CommunityState }) {
       </Section>
 
       {displayOnly.length > 0 && (
-        <Section title="Display-only heads" summary={`${displayOnly.length}`}>
+        <Section title="Display-only heads" summary={`${displayOnly.length}`} copy={() => toClipboard(snap().display_only_heads)}>
           <div className="flex flex-col gap-1">
             {displayOnly.map(([eid, d]) => (
               <div key={eid} className="flex flex-wrap items-center gap-2">
@@ -426,15 +450,15 @@ function VerificationPanel({ state }: { state: CommunityState }) {
         </Section>
       )}
 
-      <Section title="Verified heads" summary={`${cv.heads.size}`}>
+      <Section title="Verified heads" summary={`${cv.heads.size}`} copy={() => toClipboard(snap().verified_heads)}>
         <HeadsTable heads={sortHeads(cv.heads.values())} empty="No verified heads." />
       </Section>
 
-      <Section title="Removal floors" summary={`${cv.removals.size}`}>
+      <Section title="Removal floors" summary={`${cv.removals.size}`} copy={() => toClipboard(snap().removal_floors)}>
         <HeadsTable heads={sortHeads(cv.removals.values())} empty="No removals." />
       </Section>
 
-      <Section title="Grant history" summary={`${cv.grantHistory.size}`}>
+      <Section title="Grant history" summary={`${cv.grantHistory.size}`} copy={() => toClipboard(snap().grant_history)}>
         {cv.grantHistory.size === 0 ? (
           <p className="opacity-60">No grants.</p>
         ) : (
@@ -551,7 +575,28 @@ function EditionsPanel({ rumors, state, initialQuery = "" }: { rumors: Rumor[]; 
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="opacity-60">{rumors.length} editions · {chains.length} entities</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="opacity-60">{rumors.length} editions · {chains.length} entities</p>
+        <span className="ml-auto">
+          <CopyButton
+            text={() =>
+              toClipboard(
+                visible.map((c) => ({
+                  entity: vskLabel(c.vsk),
+                  vsk: c.vsk,
+                  eid: c.eid,
+                  suspended: !!cv?.suspended.has(c.eid),
+                  pending_evidence: pendingEids.has(c.eid),
+                  editions: c.editions.map((r) => ({ verified: ids.verified.has(r.id), displayed: ids.displayed.has(r.id), removal_floor: ids.removal.has(r.id), rumor: r })),
+                })),
+              )
+            }
+            label={visible.length === chains.length ? "Copy all" : `Copy ${visible.length} shown`}
+            title="Copy the shown edition chains with full rumors"
+            className="btn-ghost btn-sm"
+          />
+        </span>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <select className="select select-bordered select-sm w-auto" value={vskFilter} onChange={(e) => setVskFilter(e.target.value)}>
           <option value="all">All entities</option>
@@ -575,6 +620,9 @@ function EditionsPanel({ rumors, state, initialQuery = "" }: { rumors: Rumor[]; 
             <span className="badge badge-sm badge-primary">{vskLabel(chain.vsk)}</span>
             <Hex value={chain.eid} />
             <span className="opacity-40">{chain.editions.length} editions</span>
+            <span className="ml-auto">
+              <CopyButton text={() => toClipboard(chain.editions)} title="Copy this entity's edition chain (full rumors)" />
+            </span>
             {cv?.suspended.has(chain.eid) && <span className="badge badge-sm badge-warning">suspended</span>}
             {pendingEids.has(chain.eid) && <span className="badge badge-sm badge-warning">pending evidence</span>}
           </div>

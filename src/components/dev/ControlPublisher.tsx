@@ -28,7 +28,7 @@ import {
   type PublishPlane,
   type RawFields,
 } from "../../helpers/control-debug";
-import { DebugSection as Section, DebugTabs, Hex } from "./debug-ui";
+import { DebugSection as Section, DebugTabs, Hex, JsonBlock } from "./debug-ui";
 
 function Field({ label, children, className = "" }: { label: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -216,7 +216,7 @@ export function ControlPublisher({
         {preview.error ? (
           <div className="alert alert-error py-2">{preview.error}</div>
         ) : (
-          <pre className="max-h-64 overflow-auto rounded-box bg-base-200 p-3 font-mono whitespace-pre select-text">{stringify(preview.rumor)}</pre>
+          <JsonBlock json={stringify(preview.rumor)} maxHeight="max-h-64" />
         )}
         <div className="flex flex-wrap items-center gap-3">
           <button className="btn btn-error gap-1.5" disabled={!preview.rumor || (draft.envelope.plane === "channel" && !draft.envelope.channelId)} onClick={() => setConfirmOpen(true)}>

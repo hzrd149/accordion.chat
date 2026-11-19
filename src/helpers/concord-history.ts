@@ -52,10 +52,13 @@ export function fingerprint(hex: string | undefined): string {
   }
 }
 
-/** Material fields holding secret key bytes; redacted to fingerprints for display. */
-const SECRET_FIELDS = new Set(["community_root", "control_root", "prev_root", "key"]);
+/** Material fields holding secret key bytes or bearer tokens; redacted to fingerprints for display. */
+const SECRET_FIELDS = new Set(["community_root", "control_root", "prev_root", "key", "sk", "signer_sk", "token"]);
 
-/** JSON.stringify that survives bigint/Map/Set and, with `redact`, replaces secret keys by fingerprints. */
+/**
+ * JSON.stringify that survives bigint/Map/Set/Error/bytes and, with `redact`, replaces
+ * secret keys by fingerprints (and drops raw byte arrays, which are key material here).
+ */
 export function stringify(value: unknown, redact = false): string {
   return JSON.stringify(
     value,
@@ -63,6 +66,8 @@ export function stringify(value: unknown, redact = false): string {
       if (typeof v === "bigint") return v.toString();
       if (v instanceof Map) return Object.fromEntries(v);
       if (v instanceof Set) return [...v];
+      if (v instanceof Error) return { name: v.name, message: v.message, ...(v.cause !== undefined ? { cause: v.cause } : {}) };
+      if (v instanceof Uint8Array) return redact ? `<${v.length} bytes>` : bytesToHex(v);
       if (redact && SECRET_FIELDS.has(k) && typeof v === "string") return `fp:${fingerprint(v)}`;
       return v;
     },

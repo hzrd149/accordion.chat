@@ -5,13 +5,54 @@ import { Check, ChevronRight, Copy } from "lucide-react";
 import { UserLabel } from "../User";
 import { shortHex } from "../../helpers/concord-history";
 
-/** A titled block of a debug tab, with an optional one-line summary beside the title. */
-export function DebugSection({ title, summary, children }: { title: string; summary?: ReactNode; children: ReactNode }) {
+/** Clipboard write with a short-lived copied/failed flag for button feedback. */
+function useCopy(ms = 1200) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const copy = (text: string) => {
+    const done = (s: "copied" | "failed") => {
+      setState(s);
+      setTimeout(() => setState("idle"), ms);
+    };
+    navigator.clipboard.writeText(text).then(() => done("copied"), () => done("failed"));
+  };
+  return { state, copy };
+}
+
+/**
+ * A small copy button. `text` is evaluated on click so large snapshots are only built
+ * when needed. Click handling is contained, so it also works inside a `<summary>`.
+ */
+export function CopyButton({ text, label = "Copy", title, className = "btn-ghost btn-xs" }: { text: () => string; label?: string; title?: string; className?: string }) {
+  const { state, copy } = useCopy();
+  return (
+    <button
+      type="button"
+      className={`btn gap-1 ${className}`}
+      title={title ?? "Copy to the clipboard"}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        copy(text());
+      }}
+    >
+      {state === "copied" ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+      {state === "failed" ? "Copy failed" : label}
+    </button>
+  );
+}
+
+/** A titled block of a debug tab, with an optional one-line summary and copy action beside the title. */
+export function DebugSection({ title, summary, copy, children }: { title: string; summary?: ReactNode; copy?: () => string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-base-300 pb-1.5">
         <h3 className="font-bold uppercase tracking-wide opacity-70">{title}</h3>
         {summary && <span className="opacity-70 min-w-0">{summary}</span>}
+        {copy && (
+          <span className="ml-auto">
+            <CopyButton text={copy} title={`Copy ${title.toLowerCase()} as JSON`} />
+          </span>
+        )}
       </div>
       {children}
     </section>
@@ -66,7 +107,7 @@ export function Mono({ children, title }: { children: ReactNode; title?: string 
 
 /** A hex value shown shortened (or in full), copied whole on click. */
 export function Hex({ value, full = false }: { value: string | undefined; full?: boolean }) {
-  const [copied, setCopied] = useState(false);
+  const { state, copy } = useCopy();
   if (!value) return <Mono>—</Mono>;
   return (
     <button
@@ -76,14 +117,11 @@ export function Hex({ value, full = false }: { value: string | undefined; full?:
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        void navigator.clipboard.writeText(value).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        });
+        copy(value);
       }}
     >
       <span>{full ? value : shortHex(value)}</span>
-      {copied ? <Check size={16} className="shrink-0 text-success" /> : <Copy size={16} className="shrink-0 opacity-50" />}
+      {state === "copied" ? <Check size={16} className="shrink-0 text-success" /> : <Copy size={16} className={`shrink-0 ${state === "failed" ? "text-error" : "opacity-50"}`} />}
     </button>
   );
 }
@@ -105,33 +143,29 @@ export function UserList({ pubkeys, empty = "None." }: { pubkeys: Iterable<strin
 
 /** A copyable, scrollable JSON block. */
 export function JsonBlock({ json, maxHeight = "max-h-[50vh]" }: { json: string; maxHeight?: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
-      <button
-        className="btn btn-ghost btn-sm gap-1 absolute right-2 top-2"
-        onClick={() => {
-          void navigator.clipboard.writeText(json).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          });
-        }}
-      >
-        {copied ? <Check size={14} /> : <Copy size={14} />} Copy
-      </button>
+      <span className="absolute right-2 top-2">
+        <CopyButton text={() => json} className="btn-ghost btn-sm" />
+      </span>
       <pre className={`${maxHeight} overflow-auto rounded-box bg-base-200 p-3 pr-24 font-mono whitespace-pre select-text`}>{json}</pre>
     </div>
   );
 }
 
 /** A collapsible block with a title and a one-line summary visible while closed. */
-export function Expandable({ title, summary, open, children }: { title: string; summary?: ReactNode; open?: boolean; children: ReactNode }) {
+export function Expandable({ title, summary, open, copy, children }: { title: string; summary?: ReactNode; open?: boolean; copy?: () => string; children: ReactNode }) {
   return (
     <details className="group" open={open}>
       <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden px-3 py-2 flex items-center gap-3 select-none hover:bg-base-200">
         <ChevronRight size={16} className="shrink-0 opacity-60 transition-transform group-open:rotate-90" />
         <span className="font-semibold">{title}</span>
         {summary && <span className="opacity-60 truncate min-w-0">{summary}</span>}
+        {copy && (
+          <span className="ml-auto shrink-0">
+            <CopyButton text={copy} title={`Copy ${title.toLowerCase()} as JSON`} />
+          </span>
+        )}
       </summary>
       <div className="px-3 pb-3 pt-1 pl-10 flex flex-col gap-2">{children}</div>
     </details>
