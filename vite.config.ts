@@ -6,10 +6,19 @@ import { VitePWA } from "vite-plugin-pwa";
 // https://vite.dev/config/
 export default defineConfig({
 	build: {
-		rollupOptions: {
+		// Keep the protocol SDK in its own cacheable chunk. The growing SDK plus
+		// app UI otherwise exceed Workbox's 2 MiB per-asset precache limit.
+		rolldownOptions: {
 			input: {
 				main: new URL("./index.html", import.meta.url).pathname,
 				404: new URL("./404.html", import.meta.url).pathname,
+			},
+			output: {
+				codeSplitting: {
+					groups: [
+						{ name: "concord", test: /[/\\]@applesauce[/\\]concord[/\\]/ },
+					],
+				},
 			},
 		},
 	},
