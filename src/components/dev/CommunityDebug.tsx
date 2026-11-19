@@ -49,6 +49,9 @@ import {
 } from "../../helpers/community-debug-report";
 import { CopyButton, DebugSection as Card, DebugTabs, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 import { ControlPlaneInspector } from "./ControlPlaneDebugger";
+import { MembershipDebug } from "./MembershipDebug";
+import { foldActivity, GUESTBOOK_KINDS, traceMembers } from "../../helpers/member-trace";
+import { useMemberActivityInputs } from "../../hooks/use-member-activity";
 
 const NO_SET: ReadonlySet<string> = new Set();
 const NO_GRANTS: ReadonlyMap<string, string[]> = new Map();
@@ -478,40 +481,6 @@ function RelayAuditCard({ material, relays, onResult }: { material: JoinMaterial
 
 // ---- membership / channels -------------------------------------------------
 
-function MembershipCard({ cid }: { cid: string }) {
-  const community = useCommunity(cid);
-  const members = use$(() => community?.members$, [community]) ?? NO_SET;
-  const banlist = use$(() => community?.banlist$, [community]) ?? NO_SET;
-  const grants = use$(() => community?.grants$, [community]) ?? NO_GRANTS;
-  const roles = use$(() => community?.roles$, [community]);
-  const roleName = (id: string) => roles?.find((r) => r.role_id === id)?.name;
-  return (
-    <Card
-      title="Current membership"
-      summary={`${members.size} members · ${grants.size} grants · ${banlist.size} banned`}
-      copy={() => toClipboard(membershipSnapshot(members, banlist, grants, roles))}
-    >
-      <div className="flex flex-col gap-1">
-        {[...members].map((m) => (
-          <div key={m} className="flex flex-wrap items-center gap-2">
-            <UserLabel pubkey={m} />
-            <Hex value={m} />
-            {(grants.get(m) ?? []).map((id) => (
-              <span key={id} className="badge badge-outline">{roleName(id) ?? <Hex value={id} />}</span>
-            ))}
-          </div>
-        ))}
-      </div>
-      {banlist.size > 0 && (
-        <div>
-          <p className="font-semibold opacity-70 mb-1">Banlist</p>
-          <UserList pubkeys={banlist} />
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function ChannelsCard({ cid, material }: { cid: string; material: JoinMaterial }) {
   const community = useCommunity(cid);
   const views = use$(() => community?.channelViews$, [community]);
@@ -639,6 +608,7 @@ function RawCard({ material }: { material: JoinMaterial }) {
 function useReportInputs(cid: string) {
   const client = useConcord();
   const community = useCommunity(cid);
+  const activity = useMemberActivityInputs(cid);
   return {
     status: use$(() => community?.status$, [community]),
     memberships: use$(() => client.memberships$, [client]),
@@ -650,6 +620,7 @@ function useReportInputs(cid: string) {
     state: use$(() => community?.state$, [community]) as CommunityState | undefined,
     coverage: use$(() => community?.syncCoverage$, [community]),
     planeRelays: use$(() => community?.relays$, [community]),
+    activity,
     rumors: (use$(() => community?.controlStore.timeline([{ kinds: [CONTROL_KIND] }]), [community]) as Rumor[] | undefined) ?? [],
   };
 }
@@ -688,7 +659,9 @@ function buildReport(
         }
       : null,
     relay_audit: audit ? auditSnapshot(audit.audits, audit.relays, audit.checkedAt) : "not run (open Relay audit and press Check relays to include it)",
-    membership: membershipSnapshot(r.members, r.banlist, r.grants, r.roles),
+    membership: r.state && r.activity
+      ? traceMembers(r.state, r.activity[0]?.rumors.filter((x) => GUESTBOOK_KINDS.has(x.kind)) ?? [], foldActivity(r.activity))
+      : membershipSnapshot(r.members, r.banlist, r.grants, r.roles),
     private_channels: channelsSnapshot(r.views, material),
     diagnostics: { note: "captured only while the Debug page is open", entries: diagnosticsSnapshot(cid, log) },
     raw_material: material,
@@ -754,7 +727,7 @@ export function CommunityDebugPage({ cid }: { cid: string }) {
       case "relays":
         return <RelayAuditCard key={`${cid}:${material.root_epoch}`} material={material} relays={relays} onResult={setAudit} />;
       case "members":
-        return <MembershipCard cid={cid} />;
+        return <MembershipDebug cid={cid} audits={audit?.audits} />;
       case "channels":
         return <ChannelsCard cid={cid} material={material} />;
       case "diagnostics":
