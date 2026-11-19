@@ -27,7 +27,7 @@ import { ConfirmModal } from "../modals";
 import { UserLabel } from "../User";
 import { formatTime } from "../../helpers/util";
 import { dateTime, deriveGenerationKeys, generationRows, shortHex, stringify } from "../../helpers/concord-history";
-import { DebugSection as Section, DebugTabs, Hex, JsonBlock, KV } from "./debug-ui";
+import { DebugSection as Section, DebugSideTabs, DebugTabs, Expandable, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 
 // ---- small helpers ---------------------------------------------------------
 
@@ -73,95 +73,126 @@ function randomHex(bytes: number): string {
 // ---- current state panel ---------------------------------------------------
 
 function StatePanel({ state }: { state: CommunityState }) {
+  const roleName = (id: string) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id);
+  const roles = [...state.roles].sort((a, b) => a.position - b.position);
+  const liveRoles = roles.filter((r) => !r.deleted).length;
+  const privateChannels = state.channels.filter((c) => c.private).length;
   return (
-    <div className="flex flex-col gap-6">
-      <Section title="Community">
-        <div className="flex flex-col gap-1">
-          <div>
-            <span className="opacity-60">name </span>
-            <strong>{state.metadata?.name ?? state.material.name}</strong>
-          </div>
-          {state.metadata?.description && <div className="opacity-80">{state.metadata.description}</div>}
-          <div className="flex flex-wrap gap-2 mt-1">
+    <div className="flex flex-col border border-base-300 rounded-box divide-y divide-base-300 overflow-hidden">
+      <Expandable title="Community" summary={state.metadata?.name ?? state.material.name} open>
+        <KV label="name"><strong>{state.metadata?.name ?? state.material.name}</strong></KV>
+        {state.metadata?.description && <KV label="description">{state.metadata.description}</KV>}
+        <KV label="community_id"><Hex value={state.material.community_id} full /></KV>
+        <KV label="owner"><UserLabel pubkey={state.material.owner} /></KV>
+        <KV label="counts">
+          <span className="inline-flex flex-wrap gap-2">
             <span className="badge badge-outline">{state.members.size} members</span>
-            <span className="badge badge-outline">{state.roles.length} roles</span>
+            <span className="badge badge-outline">{liveRoles} roles</span>
             <span className="badge badge-outline">{state.channels.length} channels</span>
             <span className="badge badge-outline">{state.banlist.size} banned</span>
-            {state.dissolved && <span className="badge badge-error">dissolved</span>}
-          </div>
-          <code className="opacity-50 break-all mt-1">{state.material.community_id}</code>
-        </div>
-      </Section>
+            <span className="badge badge-outline">{state.inviteLinks.size} invite links</span>
+          </span>
+        </KV>
+        <KV label="flags">
+          <span className="inline-flex flex-wrap gap-2">
+            {state.dissolved ? <span className="badge badge-error">dissolved</span> : <span className="badge badge-ghost">not dissolved</span>}
+            {state.inviteLinks.size > 0 ? <span className="badge badge-info">public</span> : <span className="badge badge-ghost">private</span>}
+            {state.pause?.paused && (
+              <span className="badge badge-warning">
+                paused since {dateTime(state.pause.since * 1000)}{state.pause.until !== undefined && ` until ${dateTime(state.pause.until * 1000)}`}
+              </span>
+            )}
+          </span>
+        </KV>
+        {state.pause && <KV label="pause signal by"><UserLabel pubkey={state.pause.by} /></KV>}
+      </Expandable>
 
-      <Section title="Roles">
-        {state.roles.length === 0 ? (
+      <Expandable title="Roles" summary={`${liveRoles} live${roles.length > liveRoles ? ` · ${roles.length - liveRoles} deleted` : ""}`}>
+        {roles.length === 0 ? (
           <p className="opacity-60">No roles.</p>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {[...state.roles]
-              .sort((a, b) => a.position - b.position)
-              .map((r) => (
-                <div key={r.role_id} className="flex items-baseline gap-2 flex-wrap ">
-                  <span className="badge badge-sm" style={r.color ? { backgroundColor: `#${r.color.toString(16).padStart(6, "0")}`, color: "#fff", borderColor: "transparent" } : undefined}>
-                    {r.name}
-                  </span>
-                  <span className="opacity-50">pos {r.position}</span>
-                  <span className="opacity-50">{r.scope.kind === "channel" ? `#${shortHex(r.scope.channel_id)}` : "server"}</span>
-                  <span className="opacity-70">{decodePerms(r.permissions).join(", ") || "no perms"}</span>
-                  <code className="opacity-40">{shortHex(r.role_id)}</code>
-                </div>
-              ))}
+            {roles.map((r) => (
+              <div key={r.role_id} className={`flex items-baseline gap-2 flex-wrap ${r.deleted ? "opacity-50" : ""}`}>
+                <span className="badge badge-sm" style={r.color ? { backgroundColor: `#${r.color.toString(16).padStart(6, "0")}`, color: "#fff", borderColor: "transparent" } : undefined}>
+                  {r.name}
+                </span>
+                {r.deleted && <span className="badge badge-sm badge-error">deleted</span>}
+                <span className="opacity-50">pos {r.position}</span>
+                <span className="opacity-50">{r.scope.kind === "channel" ? `#${shortHex(r.scope.channel_id)}` : "server"}</span>
+                <span className="opacity-70">{decodePerms(r.permissions).join(", ") || "no perms"}</span>
+                <Hex value={r.role_id} />
+              </div>
+            ))}
           </div>
         )}
-      </Section>
+      </Expandable>
 
-      <Section title="Channels">
+      <Expandable title="Channels" summary={`${state.channels.length} · ${privateChannels} private`}>
         {state.channels.length === 0 ? (
           <p className="opacity-60">No channels.</p>
         ) : (
           <div className="flex flex-col gap-1">
             {state.channels.map((c) => (
-              <div key={c.channel_id} className="flex items-baseline gap-2 ">
+              <div key={c.channel_id} className="flex flex-wrap items-baseline gap-2">
                 <span>#{c.name}</span>
                 <span className={`badge badge-xs ${c.private ? "badge-secondary" : "badge-ghost"}`}>{c.private ? "private" : "public"}</span>
                 {c.deleted && <span className="badge badge-xs badge-error">deleted</span>}
-                <code className="opacity-40">{shortHex(c.channel_id)}</code>
+                <Hex value={c.channel_id} />
               </div>
             ))}
           </div>
         )}
-      </Section>
+      </Expandable>
 
-      <Section title="Grants">
+      <Expandable title="Grants" summary={`${state.grants.size} members`}>
         {state.grants.size === 0 ? (
           <p className="opacity-60">No grants.</p>
         ) : (
           <div className="flex flex-col gap-1">
             {[...state.grants].map(([member, roleIds]) => (
-              <div key={member} className="flex items-baseline gap-2 ">
+              <div key={member} className="flex flex-wrap items-baseline gap-2">
                 <UserLabel pubkey={member} />
-                <span className="opacity-80">
-                  → {roleIds.map((id) => state.roles.find((r) => r.role_id === id)?.name ?? shortHex(id)).join(", ")}
-                </span>
+                <span className="opacity-80">→ {roleIds.length ? roleIds.map(roleName).join(", ") : <span className="opacity-60">no roles</span>}</span>
               </div>
             ))}
           </div>
         )}
-      </Section>
+      </Expandable>
 
-      {state.banlist.size > 0 && (
-        <Section title="Banlist">
+      <Expandable title="Members" summary={`${state.members.size}`}>
+        <UserList pubkeys={state.members} empty="No members folded." />
+      </Expandable>
+
+      <Expandable title="Banlist" summary={`${state.banlist.size}`}>
+        {state.banlist.size === 0 ? (
+          <p className="opacity-60">Nobody banned.</p>
+        ) : (
           <div className="flex flex-col gap-1">
             {[...state.banlist].map((p) => (
-              <UserLabel key={p} pubkey={p} />
+              <div key={p} className="flex flex-wrap items-center gap-2">
+                <UserLabel pubkey={p} />
+                <Hex value={p} />
+                {state.bannedAt?.get(p) !== undefined && <span className="opacity-60">since {dateTime(state.bannedAt.get(p)! * 1000)}</span>}
+              </div>
             ))}
           </div>
-        </Section>
-      )}
+        )}
+      </Expandable>
 
-      <Section title="Raw folded state">
-        <JsonBlock json={stringify(state)} />
-      </Section>
+      <Expandable title="Invite links" summary={`${state.inviteLinks.size} link signers`}>
+        {state.inviteLinks.size === 0 ? (
+          <p className="opacity-60">No live invite links.</p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {[...state.inviteLinks].map((k) => <Hex key={k} value={k} />)}
+          </div>
+        )}
+      </Expandable>
+
+      <Expandable title="Raw folded state" summary="secrets replaced by fingerprints">
+        <JsonBlock json={stringify(state, true)} />
+      </Expandable>
     </div>
   );
 }
@@ -934,13 +965,15 @@ export function ControlPlaneInspector({ cid }: { cid: string }) {
   ];
 
   return (
-    <div className="flex flex-col gap-4">
-      <DebugTabs tabs={tabs} value={tab} onChange={setTab} size="sm" />
-      {tab === "planes" && <PlanesPanel community={community} state={state} rumors={rumors} />}
-      {tab === "verification" && <VerificationPanel state={state} />}
-      {tab === "editions" && <EditionsPanel rumors={rumors} state={state} />}
-      {tab === "state" && <StatePanel state={state} />}
-      {tab === "publish" && <BuilderPanel community={community} state={state} self={account.pubkey} rumors={rumors} />}
+    <div className="flex gap-6 max-md:flex-col max-md:gap-4">
+      <DebugSideTabs tabs={tabs} value={tab} onChange={setTab} />
+      <div className="flex-1 min-w-0 flex flex-col gap-4">
+        {tab === "planes" && <PlanesPanel community={community} state={state} rumors={rumors} />}
+        {tab === "verification" && <VerificationPanel state={state} />}
+        {tab === "editions" && <EditionsPanel rumors={rumors} state={state} />}
+        {tab === "state" && <StatePanel state={state} />}
+        {tab === "publish" && <BuilderPanel community={community} state={state} self={account.pubkey} rumors={rumors} />}
+      </div>
     </div>
   );
 }
