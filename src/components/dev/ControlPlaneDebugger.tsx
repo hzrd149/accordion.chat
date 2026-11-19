@@ -4,71 +4,27 @@
  * coverage, the verification projection (verified heads, suspended entities,
  * pending evidence, removal floors, Grant history), the folded state and every
  * edition chain — and to hand-craft + publish arbitrary control events to it,
- * bypassing the user's role/permission checks. Concord enforces authority
- * fold-side, not relay-side: `ConcordCommunity.publishToPlane` wraps and ships any
- * rumor with no permission gate, so this tool can inject deliberately invalid
- * editions (wrong version, no authority, broken chain, …) and observe how the
- * fold and peers react. Editions are echoed into the local `controlStore`/`state$`
- * immediately, so the State + Log panels below update live after a publish.
+ * bypassing the user's role/permission checks (see `ControlPublisher`). Editions
+ * are echoed into the local `controlStore`/`state$` immediately, so the other
+ * panels update live after a publish.
  *
  * FOR TESTING ONLY — every publish hits the community's real relays and cannot be
  * unsent.
  */
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, ChevronDown, Landmark, RefreshCw } from "lucide-react";
+import { ChevronDown, Landmark, RefreshCw } from "lucide-react";
 import { use$, useActiveAccount } from "applesauce-react/hooks";
-import { VSK, PERM } from "@applesauce/concord";
-import type { CommunityState, ConcordCommunity, ConcordPlaneSyncCoverage, DecodedEvent, PermName, Rumor } from "@applesauce/concord";
-import { CONTROL_KIND, parsePermissions, hasPerm } from "@applesauce/concord/helpers";
+import type { CommunityState, ConcordCommunity, ConcordPlaneSyncCoverage, DecodedEvent, Rumor } from "@applesauce/concord";
+import { CONTROL_KIND } from "@applesauce/concord/helpers";
 import { useConcord } from "../../hooks/use-concord";
 import { useCommunity } from "../../hooks/use-community";
-import { ConfirmModal } from "../modals";
+import { decodePerms, tagVal, vskLabel } from "../../helpers/control-debug";
+import { ControlPublisher } from "./ControlPublisher";
 import { UserLabel } from "../User";
 import { formatTime } from "../../helpers/util";
 import { dateTime, deriveGenerationKeys, generationRows, shortHex, stringify } from "../../helpers/concord-history";
-import { DebugSection as Section, DebugSideTabs, DebugTabs, Expandable, Hex, JsonBlock, KV, UserList } from "./debug-ui";
-
-// ---- small helpers ---------------------------------------------------------
-
-const PERM_ENTRIES = Object.entries(PERM) as [PermName, bigint][];
-
-/** The permission-bit names set in a decimal permissions string. */
-function decodePerms(permissions: string): PermName[] {
-  let bits: bigint;
-  try {
-    bits = parsePermissions(permissions);
-  } catch {
-    return [];
-  }
-  return PERM_ENTRIES.filter(([, bit]) => hasPerm(bits, bit)).map(([name]) => name);
-}
-
-/** Map a `vsk` value to its entity label. */
-const VSK_LABELS: Record<number, string> = {
-  [VSK.METADATA]: "Metadata",
-  [VSK.ROLE]: "Role",
-  [VSK.CHANNEL]: "Channel",
-  [VSK.GRANT]: "Grant",
-  [VSK.BANLIST]: "Banlist",
-  [VSK.INVITE_REGISTRY]: "Invite registry",
-  [VSK.DISSOLVED]: "Dissolved",
-};
-
-function vskLabel(vsk: string | number | undefined): string {
-  const n = Number(vsk);
-  return VSK_LABELS[n] ?? `vsk ${vsk ?? "?"}`;
-}
-
-function tagVal(rumor: Rumor, name: string): string | undefined {
-  return rumor.tags.find((t) => t[0] === name)?.[1];
-}
-
-function randomHex(bytes: number): string {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
-}
+import { DebugSection as Section, DebugSideTabs, Expandable, Hex, JsonBlock, KV, UserList } from "./debug-ui";
 
 // ---- current state panel ---------------------------------------------------
 
@@ -565,9 +521,9 @@ function EditionRow({ rumor, status }: { rumor: Rumor; status: EditionStatus }) 
   );
 }
 
-function EditionsPanel({ rumors, state }: { rumors: Rumor[]; state: CommunityState }) {
+function EditionsPanel({ rumors, state, initialQuery = "" }: { rumors: Rumor[]; state: CommunityState; initialQuery?: string }) {
   const [vskFilter, setVskFilter] = useState("all");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [problemsOnly, setProblemsOnly] = useState(false);
   const chains = useMemo(() => groupChains(rumors), [rumors]);
   const cv = state.controlVerification;
@@ -635,293 +591,6 @@ function EditionsPanel({ rumors, state }: { rumors: Rumor[]; state: CommunitySta
   );
 }
 
-// ---- event builder / publisher --------------------------------------------
-
-type Plane = "control" | "guestbook" | "dissolved" | "channel";
-type Mode = "guided" | "raw";
-
-const VSK_TEMPLATES: { vsk: number; content: (ctx: { eid: string; self: string }) => string }[] = [
-  { vsk: VSK.METADATA, content: () => stringify({ name: "Debug name", description: "Set from the debugger" }) },
-  {
-    vsk: VSK.ROLE,
-    content: ({ eid }) => stringify({ role_id: eid, name: "Debug role", position: 1, permissions: "0", scope: { kind: "server" }, color: 0 }),
-  },
-  { vsk: VSK.CHANNEL, content: () => stringify({ name: "debug-channel", private: false }) },
-  { vsk: VSK.GRANT, content: ({ self }) => stringify({ member: self, role_ids: [] }) },
-  { vsk: VSK.BANLIST, content: () => stringify([]) },
-  { vsk: VSK.INVITE_REGISTRY, content: () => stringify([]) },
-  { vsk: VSK.DISSOLVED, content: () => '""' },
-];
-
-/** Deliberately-invalid presets (CORD-04 §3) to observe fold-side rejection. */
-const PRESETS: { label: string; vsk: number; content: string; ev?: string; ep?: string }[] = [
-  { label: "Role claiming position 0 (owner-only)", vsk: VSK.ROLE, content: stringify({ name: "Usurper", position: 0, permissions: "16", scope: { kind: "server" }, color: 0 }) },
-  { label: "Role with BAN perm, no authority", vsk: VSK.ROLE, content: stringify({ name: "Ban squad", position: 1, permissions: "16", scope: { kind: "server" }, color: 0 }) },
-  { label: "Version skip (ev = 99)", vsk: VSK.CHANNEL, content: stringify({ name: "skipped", private: false }), ev: "99" },
-  { label: "Broken ep chain (bogus prev hash)", vsk: VSK.CHANNEL, content: stringify({ name: "orphan", private: false }), ev: "2", ep: randomHex(32) },
-  { label: "permissions as a bare number (not string)", vsk: VSK.ROLE, content: '{\n  "name": "Bad perms",\n  "position": 1,\n  "permissions": 16,\n  "scope": { "kind": "server" }\n}' },
-  { label: "Oversized name (> 64 bytes)", vsk: VSK.METADATA, content: stringify({ name: "x".repeat(200) }) },
-];
-
-function BuilderPanel({ community, state, self, rumors }: { community: ConcordCommunity; state: CommunityState; self: string; rumors: Rumor[] }) {
-  const [mode, setMode] = useState<Mode>("guided");
-
-  // guided fields
-  const [vsk, setVsk] = useState<number>(VSK.ROLE);
-  const [eid, setEid] = useState(() => randomHex(32));
-  const [ev, setEv] = useState("1");
-  const [ep, setEp] = useState("");
-  const [vac, setVac] = useState("");
-  const guidedTemplate = (v: number, id: string) => (VSK_TEMPLATES.find((t) => t.vsk === v)?.content ?? (() => ""))({ eid: id, self });
-  const [content, setContent] = useState(() => guidedTemplate(VSK.ROLE, eid));
-
-  // raw fields
-  const [rawKind, setRawKind] = useState(String(CONTROL_KIND));
-  const [rawTags, setRawTags] = useState('[\n  ["vsk", "2"],\n  ["eid", ""],\n  ["ev", "1"]\n]');
-  const [rawContent, setRawContent] = useState("");
-
-  // shared target
-  const [plane, setPlane] = useState<Plane>("control");
-  const [channelId, setChannelId] = useState("");
-  const [plaintext, setPlaintext] = useState(true);
-  const [ephemeral, setEphemeral] = useState(false);
-
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [buildError, setBuildError] = useState<string | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-
-  function applyVsk(v: number) {
-    setVsk(v);
-    setContent(guidedTemplate(v, eid));
-    setPlane(v === VSK.DISSOLVED ? "dissolved" : "control");
-    setPlaintext(v !== VSK.DISSOLVED);
-    setResult(null);
-  }
-
-  function applyPreset(p: (typeof PRESETS)[number]) {
-    setMode("guided");
-    setVsk(p.vsk);
-    setContent(p.content);
-    setEv(p.ev ?? "1");
-    setEp(p.ep ?? "");
-    setPlane("control");
-    setPlaintext(true);
-    setResult(null);
-    setBuildError(null);
-  }
-
-  /** Fill `ev` with latest-version-for-this-eid + 1 from the loaded log. */
-  function autoVersion() {
-    const versions = rumors
-      .filter((r) => tagVal(r, "eid") === eid)
-      .map((r) => Number(tagVal(r, "ev") ?? 0));
-    setEv(String((versions.length ? Math.max(...versions) : 0) + 1));
-  }
-
-  /** Assemble the rumor to publish, or throw a build error. */
-  function buildRumor(): { kind: number; content: string; tags: string[][] } {
-    if (mode === "raw") {
-      const kind = Number(rawKind);
-      if (!Number.isFinite(kind)) throw new Error("kind must be a number");
-      let tags: unknown;
-      try {
-        tags = JSON.parse(rawTags);
-      } catch (e) {
-        throw new Error(`tags is not valid JSON: ${e instanceof Error ? e.message : e}`, { cause: e });
-      }
-      if (!Array.isArray(tags) || !tags.every((t) => Array.isArray(t) && t.every((x) => typeof x === "string")))
-        throw new Error("tags must be an array of string arrays");
-      return { kind, content: rawContent, tags: tags as string[][] };
-    }
-    if (!eid.trim()) throw new Error("eid is required");
-    const tags: string[][] = [
-      ["vsk", String(vsk)],
-      ["eid", eid.trim()],
-      ["ev", ev.trim() || "1"],
-    ];
-    if (ep.trim()) tags.push(["ep", ep.trim()]);
-    if (vac.trim()) {
-      const parts = vac.trim().split(/\s+/);
-      if (parts.length !== 3) throw new Error("vac must be 3 space-separated parts: <grant_eid> <version> <edition_hash>");
-      tags.push(["vac", ...parts]);
-    }
-    return { kind: CONTROL_KIND, content, tags };
-  }
-
-  function openConfirm() {
-    setResult(null);
-    setBuildError(null);
-    try {
-      buildRumor();
-      setConfirmOpen(true);
-    } catch (e) {
-      setBuildError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function publish() {
-    const rumor = buildRumor();
-    const target = plane === "channel" ? ({ plane, channelId: channelId.trim() } as const) : ({ plane } as const);
-    const id = await community.publishToPlane(target, rumor, { plaintext, ephemeral });
-    setResult(id);
-  }
-
-  const previewRumor = (() => {
-    try {
-      return stringify(buildRumor());
-    } catch (e) {
-      return `⚠ ${e instanceof Error ? e.message : e}`;
-    }
-  })();
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="alert alert-warning py-2 ">
-        <AlertTriangle size={18} />
-        <span>Publishes to live relays without permission checks. Irreversible.</span>
-      </div>
-
-      <DebugTabs
-        tabs={[{ id: "guided", label: "Guided" }, { id: "raw", label: "Raw" }] as const}
-        value={mode}
-        onChange={setMode}
-        size="sm"
-      />
-
-      {mode === "guided" ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="flex flex-col gap-1">
-              <span className="font-semibold uppercase opacity-70">Entity (vsk)</span>
-              <select className="select select-bordered " value={vsk} onChange={(e) => applyVsk(Number(e.target.value))}>
-                {Object.entries(VSK_LABELS).map(([v, label]) => (
-                  <option key={v} value={v}>{label} ({v})</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 flex-1 min-w-64">
-              <span className="font-semibold uppercase opacity-70">eid (entity id)</span>
-              <div className="flex gap-1">
-                <input className="input input-bordered flex-1 font-mono " value={eid} onChange={(e) => setEid(e.target.value)} list="dbg-eids" />
-                <button className="btn " title="Random 32 bytes" onClick={() => setEid(randomHex(32))}>rand</button>
-              </div>
-              <datalist id="dbg-eids">
-                <option value={state.material.community_id}>community_id (metadata eid)</option>
-                {state.roles.map((r) => <option key={r.role_id} value={r.role_id}>role {r.name}</option>)}
-                {state.channels.map((c) => <option key={c.channel_id} value={c.channel_id}>channel #{c.name}</option>)}
-              </datalist>
-            </label>
-          </div>
-
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="flex flex-col gap-1 w-28">
-              <span className="font-semibold uppercase opacity-70">ev</span>
-              <div className="flex gap-1">
-                <input className="input input-bordered w-16" value={ev} onChange={(e) => setEv(e.target.value)} />
-                <button className="btn " title="latest + 1" onClick={autoVersion}>auto</button>
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 flex-1 min-w-48">
-              <span className="font-semibold uppercase opacity-70">ep (prev hash, optional)</span>
-              <input className="input input-bordered font-mono " value={ep} onChange={(e) => setEp(e.target.value)} placeholder="omit for v1" />
-            </label>
-          </div>
-
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold uppercase opacity-70">vac (optional: grant_eid version hash)</span>
-            <input className="input input-bordered font-mono " value={vac} onChange={(e) => setVac(e.target.value)} placeholder="omit when acting as owner" />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold uppercase opacity-70">content (JSON string)</span>
-            <textarea className="textarea textarea-bordered font-mono h-40" value={content} onChange={(e) => setContent(e.target.value)} />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold uppercase opacity-70">Load an invalid preset</span>
-            <select
-              className="select select-bordered "
-              value=""
-              onChange={(e) => {
-                const p = PRESETS[Number(e.target.value)];
-                if (p) applyPreset(p);
-              }}
-            >
-              <option value="" disabled>Choose a deliberately-invalid example…</option>
-              {PRESETS.map((p, i) => <option key={p.label} value={i}>{p.label}</option>)}
-            </select>
-          </label>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 w-40">
-            <span className="font-semibold uppercase opacity-70">kind</span>
-            <input className="input input-bordered " value={rawKind} onChange={(e) => setRawKind(e.target.value)} />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold uppercase opacity-70">tags (JSON array of string arrays)</span>
-            <textarea className="textarea textarea-bordered font-mono h-32" value={rawTags} onChange={(e) => setRawTags(e.target.value)} />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold uppercase opacity-70">content (raw string)</span>
-            <textarea className="textarea textarea-bordered font-mono h-32" value={rawContent} onChange={(e) => setRawContent(e.target.value)} />
-          </label>
-        </div>
-      )}
-
-      {/* shared target row */}
-      <div className="flex flex-wrap gap-3 items-end border-t border-base-300 pt-3">
-        <label className="flex flex-col gap-1">
-          <span className="font-semibold uppercase opacity-70">Plane</span>
-          <select className="select select-bordered " value={plane} onChange={(e) => setPlane(e.target.value as Plane)}>
-            <option value="control">control</option>
-            <option value="guestbook">guestbook</option>
-            <option value="dissolved">dissolved</option>
-            <option value="channel">channel</option>
-          </select>
-        </label>
-        {plane === "channel" && (
-          <label className="flex flex-col gap-1 flex-1 min-w-48">
-            <span className="font-semibold uppercase opacity-70">channelId</span>
-            <input className="input input-bordered font-mono " value={channelId} onChange={(e) => setChannelId(e.target.value)} />
-          </label>
-        )}
-        <label className="flex items-center gap-2 cursor-pointer h-8">
-          <input type="checkbox" className="checkbox " checked={plaintext} onChange={(e) => setPlaintext(e.target.checked)} />
-          plaintext seal
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer h-8">
-          <input type="checkbox" className="checkbox " checked={ephemeral} onChange={(e) => setEphemeral(e.target.checked)} />
-          ephemeral
-        </label>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <span className="font-semibold uppercase opacity-70">Rumor preview</span>
-        <pre className="max-h-56 overflow-auto rounded-box bg-base-300 p-3 font-mono whitespace-pre select-text">{previewRumor}</pre>
-      </div>
-
-      {buildError && <div className="alert alert-error py-2 ">{buildError}</div>}
-      {result && <div className="alert alert-success py-2 ">Published. rumor id <code className="">{shortHex(result)}</code></div>}
-
-      <div>
-        <button className="btn btn-error" onClick={openConfirm}>Publish to {plane} plane…</button>
-      </div>
-
-      {confirmOpen && (
-        <ConfirmModal
-          title="Publish control event?"
-          body={`Publish to ${state.metadata?.name ?? state.material.name}'s relays as you? This cannot be undone.`}
-          confirmLabel="Publish"
-          danger
-          onConfirm={publish}
-          onClose={() => setConfirmOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
 // ---- shell -----------------------------------------------------------------
 
 type Tab = "planes" | "verification" | "editions" | "state" | "publish";
@@ -935,6 +604,7 @@ export function ControlPlaneInspector({ cid }: { cid: string }) {
   const state = use$(() => community?.state$, [community]) as CommunityState | undefined;
   const rumors = (use$(() => community?.controlStore.timeline([{ kinds: [CONTROL_KIND] }]), [community]) as Rumor[] | undefined) ?? [];
   const [tab, setTab] = useState<Tab>("planes");
+  const [editionsQuery, setEditionsQuery] = useState("");
 
   if (!community || !state || !account) return <p className="opacity-70">Loading community…</p>;
   const cv = state.controlVerification;
@@ -956,9 +626,20 @@ export function ControlPlaneInspector({ cid }: { cid: string }) {
       <div className="flex-1 min-w-0 flex flex-col gap-4">
         {tab === "planes" && <PlanesPanel community={community} state={state} rumors={rumors} />}
         {tab === "verification" && <VerificationPanel state={state} />}
-        {tab === "editions" && <EditionsPanel rumors={rumors} state={state} />}
+        {tab === "editions" && <EditionsPanel key={editionsQuery} rumors={rumors} state={state} initialQuery={editionsQuery} />}
         {tab === "state" && <StatePanel state={state} />}
-        {tab === "publish" && <BuilderPanel community={community} state={state} self={account.pubkey} rumors={rumors} />}
+        {tab === "publish" && (
+          <ControlPublisher
+            community={community}
+            state={state}
+            self={account.pubkey}
+            rumors={rumors}
+            onShowEditions={(eid) => {
+              setEditionsQuery(eid);
+              setTab("editions");
+            }}
+          />
+        )}
       </div>
     </div>
   );
